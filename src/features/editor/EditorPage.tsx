@@ -447,11 +447,14 @@ export function EditorPage() {
                     >
                       <button
                         onClick={() => setSelectedSlotId(s.slotId)}
-                        className="flex-1 text-left truncate"
+                        className="flex-1 text-left truncate flex items-center gap-1"
                       >
-                        [{s.kind}
-                        {s.kind === "shape" && s.shapeKind ? `:${s.shapeKind}` : ""}]{" "}
-                        {s.staticText?.slice(0, 14) ?? s.slotId.slice(0, 6)}
+                        {s.bindingPath && <Link2 className="size-3 text-purple-400 shrink-0" />}
+                        <span className="truncate">
+                          [{s.kind}
+                          {s.kind === "shape" && s.shapeKind ? `:${s.shapeKind}` : ""}]{" "}
+                          {s.staticText?.slice(0, 14) ?? s.bindingPath?.slice(0, 14) ?? s.slotId.slice(0, 6)}
+                        </span>
                       </button>
                       <button
                         onClick={(e) => {
