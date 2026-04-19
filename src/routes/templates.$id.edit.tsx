@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useParams } from "@tanstack/react-router";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { db } from "@/storage/db";
+import { db, saveBlob, getBlobURL } from "@/storage/db";
 import { nanoid } from "nanoid";
 import type { PageTemplate, Slot, Section } from "@/models";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ import {
   ZoomOut,
   Save,
   ArrowLeft,
+  Upload,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -85,6 +86,58 @@ function EditorPage() {
     });
     setSelectedSlotId(newSlot.slotId);
   };
+
+  // Tạo image slot từ file (upload từ máy hoặc kéo thả)
+  const addImageFromFile = async (file: File, dropX?: number, dropY?: number) => {
+    if (!file.type.startsWith("image/")) {
+      toast.error("File không phải ảnh: " + file.name);
+      return;
+    }
+    const blobKey = await saveBlob(file);
+    const url = await getBlobURL(blobKey);
+    if (!url) return;
+    const dim = await new Promise<{ w: number; h: number }>((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+      img.onerror = () => resolve({ w: 600, h: 600 });
+      img.src = url;
+    });
+    const maxW = 600;
+    const ratio = dim.h / dim.w;
+    const w = Math.min(maxW, dim.w);
+    const h = Math.round(w * ratio);
+    const newSlot: Slot = {
+      slotId: nanoid(),
+      kind: "image",
+      x: dropX ?? 100,
+      y: dropY ?? 100,
+      width: w,
+      height: h,
+      zIndex: (draft.slots.length || 0) + 1,
+      staticImage: url,
+      style: { fit: "cover", borderRadius: 8 },
+    };
+    updateDraft((d) => d.slots.push(newSlot));
+    setSelectedSlotId(newSlot.slotId);
+    toast.success(`Đã thêm ảnh: ${file.name}`);
+  };
+
+  const handleUploadClick = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.multiple = true;
+    input.onchange = async (e) => {
+      const files = Array.from((e.target as HTMLInputElement).files ?? []);
+      let offset = 0;
+      for (const f of files) {
+        await addImageFromFile(f, 80 + offset, 80 + offset);
+        offset += 30;
+      }
+    };
+    input.click();
+  };
+
 
   const deleteSlot = (slotId: string) => {
     updateDraft((d) => {
@@ -162,7 +215,10 @@ function EditorPage() {
             <Type className="size-4 mr-2" /> Text
           </Button>
           <Button variant="outline" size="sm" className="w-full justify-start" onClick={() => addSlot("image")}>
-            <ImageIcon className="size-4 mr-2" /> Image
+            <ImageIcon className="size-4 mr-2" /> Image (placeholder)
+          </Button>
+          <Button variant="default" size="sm" className="w-full justify-start" onClick={handleUploadClick}>
+            <Upload className="size-4 mr-2" /> Tải ảnh từ máy
           </Button>
           <Button variant="outline" size="sm" className="w-full justify-start" onClick={() => addSlot("shape")}>
             <Square className="size-4 mr-2" /> Shape
@@ -248,7 +304,25 @@ function EditorPage() {
             <Save className="size-4 mr-2" /> Lưu
           </Button>
         </div>
-        <div className="flex-1 overflow-auto p-8 grid place-items-center">
+        <div
+          className="flex-1 overflow-auto p-8 grid place-items-center relative"
+          onDragOver={(e) => {
+            if (Array.from(e.dataTransfer.types).includes("Files")) {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "copy";
+            }
+          }}
+          onDrop={async (e) => {
+            const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/"));
+            if (files.length === 0) return;
+            e.preventDefault();
+            let offset = 0;
+            for (const f of files) {
+              await addImageFromFile(f, 80 + offset, 80 + offset);
+              offset += 30;
+            }
+          }}
+        >
           <Canvas
             template={draft}
             zoom={zoom}
@@ -256,6 +330,15 @@ function EditorPage() {
             onSelect={setSelectedSlotId}
             onUpdateSlot={updateSlot}
           />
+          {draft.slots.length === 0 && (
+            <div className="absolute inset-8 pointer-events-none border-2 border-dashed border-muted-foreground/30 rounded-xl grid place-items-center">
+              <div className="text-center text-muted-foreground">
+                <Upload className="size-10 mx-auto mb-2 opacity-50" />
+                <p className="font-medium">Kéo & thả ảnh vào đây</p>
+                <p className="text-xs">hoặc bấm "Tải ảnh từ máy" ở thanh trái</p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

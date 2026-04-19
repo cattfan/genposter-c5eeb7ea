@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/storage/db";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ export const Route = createFileRoute("/templates")({
 });
 
 function TemplatesPage() {
+  const navigate = useNavigate();
   const tpls = useLiveQuery(() => db.pageTemplates.orderBy("updatedAt").reverse().toArray(), []);
 
   const createNew = async () => {
@@ -28,8 +29,12 @@ function TemplatesPage() {
       updatedAt: Date.now(),
     };
     await db.pageTemplates.put(tpl);
-    toast.success("Đã tạo template mới");
-    window.location.assign(`/templates/${id}/edit`);
+    toast.success("Đã tạo template mới — mở editor...");
+    navigate({ to: "/templates/$id/edit", params: { id } });
+  };
+
+  const openEdit = (id: string) => {
+    navigate({ to: "/templates/$id/edit", params: { id } });
   };
 
   return (
@@ -55,8 +60,9 @@ function TemplatesPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {tpls?.map((t) => (
           <Card key={t.pageTemplateId} className="overflow-hidden">
-            <div
-              className="aspect-[4/5] bg-gradient-to-br from-muted to-muted-foreground/10 flex items-center justify-center text-muted-foreground text-xs relative"
+            <button
+              onClick={() => openEdit(t.pageTemplateId)}
+              className="w-full text-left aspect-[4/5] bg-gradient-to-br from-muted to-muted-foreground/10 flex items-center justify-center text-muted-foreground text-xs relative hover:opacity-90 transition"
               style={{ background: t.canvas.background }}
             >
               <div className="absolute top-2 left-2 text-[10px] px-2 py-0.5 bg-black/60 text-white rounded">
@@ -66,14 +72,12 @@ function TemplatesPage() {
                 <div className="text-xs uppercase tracking-wider opacity-60 mb-1">{t.type}</div>
                 <div className="text-sm font-semibold opacity-80">{t.slots.length} slot · {t.sections.length} section</div>
               </div>
-            </div>
+            </button>
             <CardContent className="p-4">
               <div className="font-semibold mb-2 truncate">{t.name}</div>
               <div className="flex gap-1">
-                <Button asChild size="sm" variant="default">
-                  <Link to="/templates/$id/edit" params={{ id: t.pageTemplateId }}>
-                    <Pencil className="size-3 mr-1" /> Sửa
-                  </Link>
+                <Button size="sm" variant="default" onClick={() => openEdit(t.pageTemplateId)}>
+                  <Pencil className="size-3 mr-1" /> Sửa
                 </Button>
                 <Button
                   size="sm"
