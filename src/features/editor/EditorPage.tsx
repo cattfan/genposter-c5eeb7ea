@@ -57,16 +57,6 @@ export function EditorPage() {
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const canvasScrollRef = useRef<HTMLDivElement>(null);
-
-export function EditorPage() {
-  const { id } = useParams({ from: "/templates/$id/edit" });
-  const tpl = useLiveQuery(() => db.pageTemplates.get(id), [id]);
-  const [draft, setDraft] = useState<PageTemplate | null>(null);
-  const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
-  const [zoom, setZoom] = useState(0.4);
-  const [leftOpen, setLeftOpen] = useState(true);
-  const [rightOpen, setRightOpen] = useState(true);
-  const canvasScrollRef = useRef<HTMLDivElement>(null);
   // Undo/Redo stacks (lưu snapshot draft trước khi thay đổi)
   const pastRef = useRef<PageTemplate[]>([]);
   const futureRef = useRef<PageTemplate[]>([]);
