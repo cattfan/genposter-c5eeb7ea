@@ -140,15 +140,22 @@ export function EditorPage() {
       img.onerror = () => resolve({ w: 600, h: 600 });
       img.src = url;
     });
-    const maxW = 600;
-    const ratio = dim.h / dim.w;
-    const w = Math.min(maxW, dim.w);
-    const h = Math.round(w * ratio);
+    // Scale theo canvas: cho phép ảnh chiếm tối đa ~90% canvas, giữ tỉ lệ gốc.
+    // Nếu ảnh nhỏ hơn canvas thì giữ nguyên kích thước thật (1:1 px canvas).
+    const cw = draft.canvas.width;
+    const ch = draft.canvas.height;
+    const maxW = Math.round(cw * 0.9);
+    const maxH = Math.round(ch * 0.9);
+    const scale = Math.min(1, maxW / dim.w, maxH / dim.h);
+    const w = Math.max(20, Math.round(dim.w * scale));
+    const h = Math.max(20, Math.round(dim.h * scale));
+    const x = dropX ?? Math.max(0, Math.round((cw - w) / 2));
+    const y = dropY ?? Math.max(0, Math.round((ch - h) / 2));
     const newSlot: Slot = {
       slotId: nanoid(),
       kind: "image",
-      x: dropX ?? 100,
-      y: dropY ?? 100,
+      x,
+      y,
       width: w,
       height: h,
       zIndex: (draft.slots.length || 0) + 1,
