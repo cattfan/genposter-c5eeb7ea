@@ -87,6 +87,61 @@ function EditorPage() {
     setSelectedSlotId(newSlot.slotId);
   };
 
+  // Tạo image slot từ file (upload từ máy hoặc kéo thả)
+  const addImageFromFile = useCallback(
+    async (file: File, dropX?: number, dropY?: number) => {
+      if (!file.type.startsWith("image/")) {
+        toast.error("File không phải ảnh: " + file.name);
+        return;
+      }
+      const blobKey = await saveBlob(file);
+      const url = await getBlobURL(blobKey);
+      if (!url) return;
+      // đo kích thước ảnh để giữ tỉ lệ
+      const dim = await new Promise<{ w: number; h: number }>((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+        img.onerror = () => resolve({ w: 600, h: 600 });
+        img.src = url;
+      });
+      const maxW = 600;
+      const ratio = dim.h / dim.w;
+      const w = Math.min(maxW, dim.w);
+      const h = Math.round(w * ratio);
+      const newSlot: Slot = {
+        slotId: nanoid(),
+        kind: "image",
+        x: dropX ?? 100,
+        y: dropY ?? 100,
+        width: w,
+        height: h,
+        zIndex: (draft.slots.length || 0) + 1,
+        staticImage: url,
+        style: { fit: "cover", borderRadius: 8 },
+      };
+      updateDraft((d) => d.slots.push(newSlot));
+      setSelectedSlotId(newSlot.slotId);
+      toast.success(`Đã thêm ảnh: ${file.name}`);
+    },
+    [draft],
+  );
+
+  const handleUploadClick = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.multiple = true;
+    input.onchange = async (e) => {
+      const files = Array.from((e.target as HTMLInputElement).files ?? []);
+      let offset = 0;
+      for (const f of files) {
+        await addImageFromFile(f, 80 + offset, 80 + offset);
+        offset += 30;
+      }
+    };
+    input.click();
+  };
+
   const deleteSlot = (slotId: string) => {
     updateDraft((d) => {
       d.slots = d.slots.filter((s) => s.slotId !== slotId);
