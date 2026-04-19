@@ -117,7 +117,7 @@ export interface Slot {
   // dữ liệu tĩnh (nếu không bind)
   staticText?: string;
   staticImage?: string; // url hoặc blob key
-  shapeKind?: "rectangle" | "circle" | "line" | "divider" | "badge";
+  shapeKind?: "rectangle" | "circle" | "triangle" | "line" | "divider" | "badge";
   // bind
   bindingPath?: string; // ví dụ "entity.name", "asset.url", "section.items[0].line1"
   allowedAssetRoles?: AssetRole[];

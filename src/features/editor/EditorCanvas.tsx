@@ -29,12 +29,14 @@ export function Canvas({
   selectedSlotId,
   onSelect,
   onUpdateSlot,
+  onDeleteSlot,
 }: {
   template: PageTemplate;
   zoom: number;
   selectedSlotId: string | null;
   onSelect: (id: string | null) => void;
   onUpdateSlot: (slotId: string, patch: Partial<Slot>) => void;
+  onDeleteSlot?: (slotId: string) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -62,6 +64,7 @@ export function Canvas({
             selected={slot.slotId === selectedSlotId}
             onSelect={() => onSelect(slot.slotId)}
             onUpdate={(patch) => onUpdateSlot(slot.slotId, patch)}
+            onDelete={() => onDeleteSlot?.(slot.slotId)}
             template={template}
           />
         ))}
@@ -69,12 +72,15 @@ export function Canvas({
   );
 }
 
+type Handle = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
+
 function SlotEditor({
   slot,
   zoom,
   selected,
   onSelect,
   onUpdate,
+  onDelete,
   template,
 }: {
   slot: Slot;
@@ -82,11 +88,35 @@ function SlotEditor({
   selected: boolean;
   onSelect: () => void;
   onUpdate: (patch: Partial<Slot>) => void;
+  onDelete: () => void;
   template: PageTemplate;
 }) {
-  const startDrag = useCallback(
-    (e: React.MouseEvent, mode: "move" | "resize") => {
+  const startMove = useCallback(
+    (e: React.MouseEvent) => {
       e.stopPropagation();
+      onSelect();
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const orig = { x: slot.x, y: slot.y };
+      const onMove = (ev: MouseEvent) => {
+        const dx = (ev.clientX - startX) / zoom;
+        const dy = (ev.clientY - startY) / zoom;
+        onUpdate({ x: Math.round(orig.x + dx), y: Math.round(orig.y + dy) });
+      };
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [slot, zoom, onSelect, onUpdate],
+  );
+
+  const startResize = useCallback(
+    (e: React.MouseEvent, handle: Handle) => {
+      e.stopPropagation();
+      e.preventDefault();
       onSelect();
       const startX = e.clientX;
       const startY = e.clientY;
@@ -94,14 +124,23 @@ function SlotEditor({
       const onMove = (ev: MouseEvent) => {
         const dx = (ev.clientX - startX) / zoom;
         const dy = (ev.clientY - startY) / zoom;
-        if (mode === "move") {
-          onUpdate({ x: Math.round(orig.x + dx), y: Math.round(orig.y + dy) });
-        } else {
-          onUpdate({
-            width: Math.max(20, Math.round(orig.w + dx)),
-            height: Math.max(20, Math.round(orig.h + dy)),
-          });
+        let { x, y, w, h } = orig;
+        if (handle.includes("e")) w = Math.max(20, orig.w + dx);
+        if (handle.includes("s")) h = Math.max(20, orig.h + dy);
+        if (handle.includes("w")) {
+          w = Math.max(20, orig.w - dx);
+          x = orig.x + (orig.w - w);
         }
+        if (handle.includes("n")) {
+          h = Math.max(20, orig.h - dy);
+          y = orig.y + (orig.h - h);
+        }
+        onUpdate({
+          x: Math.round(x),
+          y: Math.round(y),
+          width: Math.round(w),
+          height: Math.round(h),
+        });
       };
       const onUp = () => {
         window.removeEventListener("mousemove", onMove);
@@ -168,17 +207,37 @@ function SlotEditor({
       </div>
     );
   } else if (slot.kind === "shape") {
-    content = (
-      <div
-        style={{
-          width: "100%",
-          height: "100%",
-          background: slot.style?.fill ?? "#000",
-          borderRadius:
-            slot.shapeKind === "circle" ? "50%" : (slot.style?.borderRadius ?? 0) * zoom,
-        }}
-      />
-    );
+    const fill = slot.style?.fill ?? "#000";
+    if (slot.shapeKind === "triangle") {
+      content = (
+        <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
+          <polygon points="50,0 100,100 0,100" fill={fill} />
+        </svg>
+      );
+    } else if (slot.shapeKind === "line" || slot.shapeKind === "divider") {
+      content = (
+        <div
+          style={{
+            width: "100%",
+            height: Math.max(2, (slot.style?.strokeWidth ?? 2) * zoom),
+            background: fill,
+            marginTop: `calc(50% - ${Math.max(1, (slot.style?.strokeWidth ?? 2) * zoom) / 2}px)`,
+          }}
+        />
+      );
+    } else {
+      content = (
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            background: fill,
+            borderRadius:
+              slot.shapeKind === "circle" ? "50%" : (slot.style?.borderRadius ?? 0) * zoom,
+          }}
+        />
+      );
+    }
   } else if (slot.kind === "section") {
     const sec = template.sections.find((s) => s.sectionId === slot.sectionRefId);
     content = (
@@ -188,23 +247,75 @@ function SlotEditor({
     );
   }
 
+  // 8 resize handles
+  const handles: { h: Handle; style: React.CSSProperties; cursor: string }[] = [
+    { h: "nw", style: { left: -5, top: -5 }, cursor: "nwse-resize" },
+    { h: "n", style: { left: "50%", top: -5, marginLeft: -5 }, cursor: "ns-resize" },
+    { h: "ne", style: { right: -5, top: -5 }, cursor: "nesw-resize" },
+    { h: "e", style: { right: -5, top: "50%", marginTop: -5 }, cursor: "ew-resize" },
+    { h: "se", style: { right: -5, bottom: -5 }, cursor: "nwse-resize" },
+    { h: "s", style: { left: "50%", bottom: -5, marginLeft: -5 }, cursor: "ns-resize" },
+    { h: "sw", style: { left: -5, bottom: -5 }, cursor: "nesw-resize" },
+    { h: "w", style: { left: -5, top: "50%", marginTop: -5 }, cursor: "ew-resize" },
+  ];
+
   return (
-    <div style={baseStyle} onMouseDown={(e) => startDrag(e, "move")}>
+    <div
+      style={baseStyle}
+      onMouseDown={startMove}
+      onKeyDown={(e) => {
+        if ((e.key === "Delete" || e.key === "Backspace") && selected) {
+          e.preventDefault();
+          onDelete();
+        }
+      }}
+      tabIndex={selected ? 0 : -1}
+    >
       {content}
       {selected && (
-        <div
-          onMouseDown={(e) => startDrag(e, "resize")}
-          style={{
-            position: "absolute",
-            right: -6,
-            bottom: -6,
-            width: 12,
-            height: 12,
-            background: "hsl(var(--primary))",
-            cursor: "nwse-resize",
-            borderRadius: 2,
-          }}
-        />
+        <>
+          {handles.map((hd) => (
+            <div
+              key={hd.h}
+              onMouseDown={(e) => startResize(e, hd.h)}
+              style={{
+                position: "absolute",
+                width: 10,
+                height: 10,
+                background: "white",
+                border: "2px solid hsl(var(--primary))",
+                cursor: hd.cursor,
+                borderRadius: 2,
+                zIndex: 10,
+                ...hd.style,
+              }}
+            />
+          ))}
+          <button
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            style={{
+              position: "absolute",
+              right: -12,
+              top: -32,
+              background: "hsl(var(--destructive))",
+              color: "white",
+              border: "none",
+              borderRadius: 4,
+              padding: "2px 8px",
+              fontSize: 11,
+              cursor: "pointer",
+              zIndex: 11,
+              boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
+            }}
+            title="Xoá block (Delete)"
+          >
+            ✕ Xoá
+          </button>
+        </>
       )}
     </div>
   );
