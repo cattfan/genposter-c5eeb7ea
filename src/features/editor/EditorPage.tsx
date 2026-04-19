@@ -784,6 +784,40 @@ export function EditorPage() {
                       onChange={(e) => updateSlotStyle(selectedSlot.slotId, { overlayColor: e.target.value })}
                       placeholder="rgba(0,0,0,0.4)"
                     />
+
+                    {/* Crop info */}
+                    {selectedSlot.crop && (
+                      <div className="flex items-center justify-between text-xs bg-muted/50 p-2 rounded">
+                        <span>✂️ Đã crop {Math.round(selectedSlot.crop.w * 100)}×{Math.round(selectedSlot.crop.h * 100)}%</span>
+                        <Button size="sm" variant="ghost" className="h-6" onClick={() => updateSlot(selectedSlot.slotId, { crop: undefined })}>
+                          Reset
+                        </Button>
+                      </div>
+                    )}
+                    <p className="text-[10px] text-muted-foreground italic">Mẹo: nháy đúp ảnh trên canvas để crop.</p>
+
+                    {/* Filters */}
+                    <div className="border-t pt-2 space-y-2">
+                      <Label className="text-xs uppercase text-muted-foreground">Filters</Label>
+                      <FilterSlider label="Brightness" value={selectedSlot.style?.brightness ?? 1} min={0} max={2} step={0.05}
+                        onChange={(v) => updateSlotStyle(selectedSlot.slotId, { brightness: v })} />
+                      <FilterSlider label="Contrast" value={selectedSlot.style?.contrast ?? 1} min={0} max={2} step={0.05}
+                        onChange={(v) => updateSlotStyle(selectedSlot.slotId, { contrast: v })} />
+                      <FilterSlider label="Saturate" value={selectedSlot.style?.saturate ?? 1} min={0} max={2} step={0.05}
+                        onChange={(v) => updateSlotStyle(selectedSlot.slotId, { saturate: v })} />
+                      <FilterSlider label="Blur (px)" value={selectedSlot.style?.blur ?? 0} min={0} max={20} step={0.5}
+                        onChange={(v) => updateSlotStyle(selectedSlot.slotId, { blur: v })} />
+                      <FilterSlider label="Hue rotate (°)" value={selectedSlot.style?.hueRotate ?? 0} min={0} max={360} step={5}
+                        onChange={(v) => updateSlotStyle(selectedSlot.slotId, { hueRotate: v })} />
+                      <FilterSlider label="Grayscale" value={selectedSlot.style?.grayscale ?? 0} min={0} max={1} step={0.05}
+                        onChange={(v) => updateSlotStyle(selectedSlot.slotId, { grayscale: v })} />
+                      <Button size="sm" variant="ghost" className="w-full h-7 text-xs"
+                        onClick={() => updateSlotStyle(selectedSlot.slotId, {
+                          brightness: 1, contrast: 1, saturate: 1, blur: 0, hueRotate: 0, grayscale: 0,
+                        })}>
+                        Reset filters
+                      </Button>
+                    </div>
                   </div>
                 )}
 
