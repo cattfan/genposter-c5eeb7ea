@@ -14,6 +14,9 @@ import {
   Type,
   Image as ImageIcon,
   Square,
+  Circle,
+  Triangle,
+  Minus,
   Layers as LayersIcon,
   Trash2,
   ArrowUp,
@@ -24,6 +27,10 @@ import {
   Save,
   ArrowLeft,
   Upload,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -33,6 +40,8 @@ export function EditorPage() {
   const [draft, setDraft] = useState<PageTemplate | null>(null);
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(0.4);
+  const [leftOpen, setLeftOpen] = useState(true);
+  const [rightOpen, setRightOpen] = useState(true);
 
   useEffect(() => {
     if (tpl) setDraft(JSON.parse(JSON.stringify(tpl)));
