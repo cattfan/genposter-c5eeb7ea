@@ -8,8 +8,14 @@ import type { PageTemplate, Slot, Section } from "@/models";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  TEXT_BINDING_OPTIONS,
+  IMAGE_BINDING_OPTIONS,
+  slotHasBinding,
+} from "@/engines/binding/dataBinding";
 import {
   Type,
   Image as ImageIcon,
@@ -31,6 +37,14 @@ import {
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
+  RotateCw,
+  RotateCcw,
+  FlipHorizontal,
+  FlipVertical,
+  Link2,
+  Link2Off,
+  Undo2,
+  Redo2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -43,6 +57,10 @@ export function EditorPage() {
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const canvasScrollRef = useRef<HTMLDivElement>(null);
+  // Undo/Redo stacks (lưu snapshot draft trước khi thay đổi)
+  const pastRef = useRef<PageTemplate[]>([]);
+  const futureRef = useRef<PageTemplate[]>([]);
+  const skipHistoryRef = useRef(false);
 
   // Ctrl/Cmd + wheel = zoom (native listener vì React onWheel là passive)
   useEffect(() => {
@@ -63,29 +81,93 @@ export function EditorPage() {
   }, []);
 
   useEffect(() => {
-    if (tpl) setDraft(JSON.parse(JSON.stringify(tpl)));
+    if (tpl) {
+      setDraft(JSON.parse(JSON.stringify(tpl)));
+      pastRef.current = [];
+      futureRef.current = [];
+    }
   }, [tpl]);
 
-  // Keyboard: Delete/Backspace removes selected slot
+  const undo = () => {
+    setDraft((prev) => {
+      if (!prev) return prev;
+      const last = pastRef.current.pop();
+      if (!last) return prev;
+      futureRef.current.push(prev);
+      return last;
+    });
+  };
+  const redo = () => {
+    setDraft((prev) => {
+      if (!prev) return prev;
+      const next = futureRef.current.pop();
+      if (!next) return prev;
+      pastRef.current.push(prev);
+      return next;
+    });
+  };
+
+  // Keyboard shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!selectedSlotId) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable) return;
+      const mod = e.ctrlKey || e.metaKey;
+      // Undo/Redo
+      if (mod && e.key.toLowerCase() === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      if (mod && ((e.key.toLowerCase() === "z" && e.shiftKey) || e.key.toLowerCase() === "y")) {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if (!selectedSlotId) return;
+      // Delete
       if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
         setDraft((prev) => {
           if (!prev) return prev;
+          pastRef.current.push(JSON.parse(JSON.stringify(prev)));
+          futureRef.current = [];
           const next = JSON.parse(JSON.stringify(prev)) as PageTemplate;
           next.slots = next.slots.filter((s) => s.slotId !== selectedSlotId);
           return next;
         });
         setSelectedSlotId(null);
+        return;
+      }
+      // Ctrl+D = duplicate
+      if (mod && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        duplicateSlot(selectedSlotId);
+        return;
+      }
+      // [ ] = z-index
+      if (e.key === "]") {
+        e.preventDefault();
+        moveZ(selectedSlotId, 1);
+        return;
+      }
+      if (e.key === "[") {
+        e.preventDefault();
+        moveZ(selectedSlotId, -1);
+        return;
+      }
+      // R = rotate 15°
+      if (e.key.toLowerCase() === "r" && !mod) {
+        e.preventDefault();
+        const cur = draft?.slots.find((s) => s.slotId === selectedSlotId);
+        if (cur) updateSlot(selectedSlotId, { rotation: ((cur.rotation ?? 0) + 15) % 360 });
+        return;
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedSlotId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSlotId, draft]);
 
   if (!draft) {
     return <div className="p-8 text-muted-foreground">Đang tải...</div>;
@@ -93,9 +175,15 @@ export function EditorPage() {
 
   const selectedSlot = draft.slots.find((s) => s.slotId === selectedSlotId) ?? null;
 
-  const updateDraft = (updater: (d: PageTemplate) => void) => {
+  const updateDraft = (updater: (d: PageTemplate) => void, skipHistory = false) => {
     setDraft((prev) => {
       if (!prev) return prev;
+      if (!skipHistory && !skipHistoryRef.current) {
+        pastRef.current.push(JSON.parse(JSON.stringify(prev)));
+        if (pastRef.current.length > 50) pastRef.current.shift();
+        futureRef.current = [];
+      }
+      skipHistoryRef.current = false;
       const next = JSON.parse(JSON.stringify(prev)) as PageTemplate;
       updater(next);
       return next;
@@ -359,11 +447,14 @@ export function EditorPage() {
                     >
                       <button
                         onClick={() => setSelectedSlotId(s.slotId)}
-                        className="flex-1 text-left truncate"
+                        className="flex-1 text-left truncate flex items-center gap-1"
                       >
-                        [{s.kind}
-                        {s.kind === "shape" && s.shapeKind ? `:${s.shapeKind}` : ""}]{" "}
-                        {s.staticText?.slice(0, 14) ?? s.slotId.slice(0, 6)}
+                        {s.bindingPath && <Link2 className="size-3 text-purple-400 shrink-0" />}
+                        <span className="truncate">
+                          [{s.kind}
+                          {s.kind === "shape" && s.shapeKind ? `:${s.shapeKind}` : ""}]{" "}
+                          {s.staticText?.slice(0, 14) ?? s.bindingPath?.slice(0, 14) ?? s.slotId.slice(0, 6)}
+                        </span>
                       </button>
                       <button
                         onClick={(e) => {
@@ -439,6 +530,12 @@ export function EditorPage() {
           <span className="text-xs w-12 text-center" title="Ctrl/⌘ + lăn chuột để zoom">{Math.round(zoom * 100)}%</span>
           <Button variant="ghost" size="icon" onClick={() => setZoom((z) => Math.min(3, z + 0.1))} title="Zoom in (Ctrl + scroll)">
             <ZoomIn className="size-4" />
+          </Button>
+          <Button variant="ghost" size="icon" onClick={undo} title="Hoàn tác (Ctrl+Z)">
+            <Undo2 className="size-4" />
+          </Button>
+          <Button variant="ghost" size="icon" onClick={redo} title="Làm lại (Ctrl+Shift+Z)">
+            <Redo2 className="size-4" />
           </Button>
           <Button onClick={save} size="sm">
             <Save className="size-4 mr-2" /> Lưu
@@ -536,6 +633,74 @@ export function EditorPage() {
                   <NumField label="Z" value={selectedSlot.zIndex ?? 0} onChange={(v) => updateSlot(selectedSlot.slotId, { zIndex: v })} />
                 </div>
 
+                {/* Transform: rotate 90°, flip, opacity */}
+                <div className="border-t pt-2 space-y-2">
+                  <Label className="text-xs uppercase text-muted-foreground">Biến đổi</Label>
+                  <div className="flex gap-1">
+                    <Button size="sm" variant="outline" className="flex-1"
+                      onClick={() => updateSlot(selectedSlot.slotId, { rotation: ((selectedSlot.rotation ?? 0) - 90 + 360) % 360 })}
+                      title="Xoay -90°">
+                      <RotateCcw className="size-3" />
+                    </Button>
+                    <Button size="sm" variant="outline" className="flex-1"
+                      onClick={() => updateSlot(selectedSlot.slotId, { rotation: ((selectedSlot.rotation ?? 0) + 90) % 360 })}
+                      title="Xoay +90°">
+                      <RotateCw className="size-3" />
+                    </Button>
+                    <Button size="sm" variant={selectedSlot.style?.flipH ? "default" : "outline"} className="flex-1"
+                      onClick={() => updateSlotStyle(selectedSlot.slotId, { flipH: !selectedSlot.style?.flipH })}
+                      title="Lật ngang">
+                      <FlipHorizontal className="size-3" />
+                    </Button>
+                    <Button size="sm" variant={selectedSlot.style?.flipV ? "default" : "outline"} className="flex-1"
+                      onClick={() => updateSlotStyle(selectedSlot.slotId, { flipV: !selectedSlot.style?.flipV })}
+                      title="Lật dọc">
+                      <FlipVertical className="size-3" />
+                    </Button>
+                  </div>
+                  <div>
+                    <Label className="text-xs">Opacity ({Math.round((selectedSlot.style?.opacity ?? 1) * 100)}%)</Label>
+                    <Slider
+                      value={[(selectedSlot.style?.opacity ?? 1) * 100]}
+                      min={0} max={100} step={1}
+                      onValueChange={(v) => updateSlotStyle(selectedSlot.slotId, { opacity: v[0] / 100 })}
+                    />
+                  </div>
+                </div>
+
+                {/* Bind data — chỉ cho text & image */}
+                {(selectedSlot.kind === "text" || selectedSlot.kind === "image") && (
+                  <div className="border-t pt-2 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs uppercase text-muted-foreground">
+                        {slotHasBinding(selectedSlot) ? <><Link2 className="size-3 inline mr-1 text-purple-500" /> Đã liên kết</> : "Nguồn dữ liệu"}
+                      </Label>
+                      {slotHasBinding(selectedSlot) && (
+                        <Button size="sm" variant="ghost" className="h-6 px-2 text-xs"
+                          onClick={() => updateSlot(selectedSlot.slotId, { bindingPath: undefined })}>
+                          <Link2Off className="size-3 mr-1" /> Xoá liên kết
+                        </Button>
+                      )}
+                    </div>
+                    <Select
+                      value={selectedSlot.bindingPath ?? "_static"}
+                      onValueChange={(v) => updateSlot(selectedSlot.slotId, { bindingPath: v === "_static" ? undefined : v })}
+                    >
+                      <SelectTrigger className="h-8"><SelectValue placeholder="Cố định" /></SelectTrigger>
+                      <SelectContent>
+                        {(selectedSlot.kind === "text" ? TEXT_BINDING_OPTIONS : IMAGE_BINDING_OPTIONS).map((o) => (
+                          <SelectItem key={o.value || "_static"} value={o.value || "_static"}>
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[10px] text-muted-foreground italic">
+                      Block không liên kết = giữ nội dung tĩnh khi generate. Block đã liên kết = nhận dữ liệu từ entity.
+                    </p>
+                  </div>
+                )}
+
                 {selectedSlot.kind === "text" && (
                   <div className="space-y-2">
                     <Label>Văn bản</Label>
@@ -628,6 +793,40 @@ export function EditorPage() {
                       onChange={(e) => updateSlotStyle(selectedSlot.slotId, { overlayColor: e.target.value })}
                       placeholder="rgba(0,0,0,0.4)"
                     />
+
+                    {/* Crop info */}
+                    {selectedSlot.crop && (
+                      <div className="flex items-center justify-between text-xs bg-muted/50 p-2 rounded">
+                        <span>✂️ Đã crop {Math.round(selectedSlot.crop.w * 100)}×{Math.round(selectedSlot.crop.h * 100)}%</span>
+                        <Button size="sm" variant="ghost" className="h-6" onClick={() => updateSlot(selectedSlot.slotId, { crop: undefined })}>
+                          Reset
+                        </Button>
+                      </div>
+                    )}
+                    <p className="text-[10px] text-muted-foreground italic">Mẹo: nháy đúp ảnh trên canvas để crop.</p>
+
+                    {/* Filters */}
+                    <div className="border-t pt-2 space-y-2">
+                      <Label className="text-xs uppercase text-muted-foreground">Filters</Label>
+                      <FilterSlider label="Brightness" value={selectedSlot.style?.brightness ?? 1} min={0} max={2} step={0.05}
+                        onChange={(v) => updateSlotStyle(selectedSlot.slotId, { brightness: v })} />
+                      <FilterSlider label="Contrast" value={selectedSlot.style?.contrast ?? 1} min={0} max={2} step={0.05}
+                        onChange={(v) => updateSlotStyle(selectedSlot.slotId, { contrast: v })} />
+                      <FilterSlider label="Saturate" value={selectedSlot.style?.saturate ?? 1} min={0} max={2} step={0.05}
+                        onChange={(v) => updateSlotStyle(selectedSlot.slotId, { saturate: v })} />
+                      <FilterSlider label="Blur (px)" value={selectedSlot.style?.blur ?? 0} min={0} max={20} step={0.5}
+                        onChange={(v) => updateSlotStyle(selectedSlot.slotId, { blur: v })} />
+                      <FilterSlider label="Hue rotate (°)" value={selectedSlot.style?.hueRotate ?? 0} min={0} max={360} step={5}
+                        onChange={(v) => updateSlotStyle(selectedSlot.slotId, { hueRotate: v })} />
+                      <FilterSlider label="Grayscale" value={selectedSlot.style?.grayscale ?? 0} min={0} max={1} step={0.05}
+                        onChange={(v) => updateSlotStyle(selectedSlot.slotId, { grayscale: v })} />
+                      <Button size="sm" variant="ghost" className="w-full h-7 text-xs"
+                        onClick={() => updateSlotStyle(selectedSlot.slotId, {
+                          brightness: 1, contrast: 1, saturate: 1, blur: 0, hueRotate: 0, grayscale: 0,
+                        })}>
+                        Reset filters
+                      </Button>
+                    </div>
                   </div>
                 )}
 
@@ -731,6 +930,32 @@ export function EditorPage() {
       )}
 
       {/* Shape selection in shape kind select - add triangle option */}
+    </div>
+  );
+}
+
+function FilterSlider({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div>
+      <Label className="text-xs flex justify-between">
+        <span>{label}</span>
+        <span className="text-muted-foreground">{value.toFixed(2)}</span>
+      </Label>
+      <Slider value={[value]} min={min} max={max} step={step} onValueChange={(v) => onChange(v[0])} />
     </div>
   );
 }

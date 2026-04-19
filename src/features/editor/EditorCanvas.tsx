@@ -1,5 +1,7 @@
-import { useRef, useCallback } from "react";
+import { useRef, useCallback, useState } from "react";
 import type { PageTemplate, Slot } from "@/models";
+import { buildBoxShadow, buildCssFilter, buildFlipTransform, slotHasBinding } from "@/engines/binding/dataBinding";
+import { CropOverlay } from "./CropOverlay";
 
 export function NumField({
   label,
@@ -39,6 +41,9 @@ export function Canvas({
   onDeleteSlot?: (slotId: string) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [cropSlotId, setCropSlotId] = useState<string | null>(null);
+
+  const cropSlot = cropSlotId ? template.slots.find((s) => s.slotId === cropSlotId) : null;
 
   return (
     <div
@@ -65,9 +70,34 @@ export function Canvas({
             onSelect={() => onSelect(slot.slotId)}
             onUpdate={(patch) => onUpdateSlot(slot.slotId, patch)}
             onDelete={() => onDeleteSlot?.(slot.slotId)}
+            onStartCrop={() => setCropSlotId(slot.slotId)}
             template={template}
           />
         ))}
+      {cropSlot && cropSlot.staticImage && (
+        <div
+          style={{
+            position: "absolute",
+            left: cropSlot.x * zoom,
+            top: cropSlot.y * zoom,
+            width: cropSlot.width * zoom,
+            height: cropSlot.height * zoom,
+          }}
+        >
+          <CropOverlay
+            src={cropSlot.staticImage}
+            initial={cropSlot.crop}
+            zoom={zoom}
+            width={cropSlot.width}
+            height={cropSlot.height}
+            onCommit={(crop) => {
+              onUpdateSlot(cropSlot.slotId, { crop });
+              setCropSlotId(null);
+            }}
+            onCancel={() => setCropSlotId(null)}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -81,6 +111,7 @@ function SlotEditor({
   onSelect,
   onUpdate,
   onDelete,
+  onStartCrop,
   template,
 }: {
   slot: Slot;
@@ -89,10 +120,12 @@ function SlotEditor({
   onSelect: () => void;
   onUpdate: (patch: Partial<Slot>) => void;
   onDelete: () => void;
+  onStartCrop: () => void;
   template: PageTemplate;
 }) {
   const startMove = useCallback(
     (e: React.MouseEvent) => {
+      if (slot.locked) return;
       e.stopPropagation();
       e.preventDefault();
       onSelect();
@@ -153,22 +186,34 @@ function SlotEditor({
     [slot, zoom, onSelect, onUpdate],
   );
 
+  const hasBinding = slotHasBinding(slot);
+  const flip = buildFlipTransform(slot.style);
+  const rot = slot.rotation ? `rotate(${slot.rotation}deg)` : "";
+  const transform = (rot + flip).trim() || undefined;
+
   const baseStyle: React.CSSProperties = {
     position: "absolute",
     left: slot.x * zoom,
     top: slot.y * zoom,
     width: slot.width * zoom,
     height: slot.height * zoom,
-    transform: slot.rotation ? `rotate(${slot.rotation}deg)` : undefined,
-    cursor: "move",
-    outline: selected ? "2px solid hsl(var(--primary))" : "1px dashed rgba(0,0,0,0.15)",
+    transform,
+    cursor: slot.locked ? "not-allowed" : "move",
+    outline: selected
+      ? "2px solid hsl(var(--primary))"
+      : hasBinding
+        ? "2px dashed #a855f7"
+        : "1px dashed rgba(0,0,0,0.15)",
     outlineOffset: 0,
     boxSizing: "border-box",
+    opacity: slot.style?.opacity ?? 1,
+    boxShadow: buildBoxShadow(slot.style, zoom),
   };
 
   let content: React.ReactNode = null;
   if (slot.kind === "text") {
     const s = slot.style ?? {};
+    const displayText = hasBinding ? `{{${slot.bindingPath}}}` : slot.staticText;
     content = (
       <div
         style={{
@@ -179,36 +224,79 @@ function SlotEditor({
           textAlign: s.textAlign ?? "left",
           textTransform: s.textTransform ?? "none",
           letterSpacing: (s.letterSpacing ?? 0) * zoom,
+          textShadow: s.textShadow,
           whiteSpace: "pre-wrap",
           width: "100%",
           height: "100%",
           overflow: "hidden",
+          fontStyle: hasBinding ? "italic" : undefined,
         }}
       >
-        {slot.staticText}
+        {displayText}
       </div>
     );
   } else if (slot.kind === "image") {
-    content = slot.staticImage ? (
-      <img
-        src={slot.staticImage}
-        alt=""
-        draggable={false}
-        onDragStart={(e) => e.preventDefault()}
+    const filter = buildCssFilter(slot.style);
+    const objectFit = (slot.style?.fit === "stretch" ? "fill" : slot.style?.fit ?? "cover") as React.CSSProperties["objectFit"];
+    const displaySrc = slot.staticImage;
+    const crop = slot.crop;
+
+    // Khi có crop, render qua wrapper overflow:hidden + img scale lên rồi offset
+    const imgEl = displaySrc ? (
+      crop ? (
+        <img
+          src={displaySrc}
+          alt=""
+          draggable={false}
+          onDragStart={(e) => e.preventDefault()}
+          style={{
+            position: "absolute",
+            left: `${-crop.x * 100}%`,
+            top: `${-crop.y * 100}%`,
+            width: `${100 / crop.w}%`,
+            height: `${100 / crop.h}%`,
+            objectFit: "fill",
+            filter,
+            userSelect: "none",
+            pointerEvents: "none",
+          }}
+        />
+      ) : (
+        <img
+          src={displaySrc}
+          alt=""
+          draggable={false}
+          onDragStart={(e) => e.preventDefault()}
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit,
+            borderRadius: (slot.style?.borderRadius ?? 0) * zoom,
+            filter,
+            userSelect: "none",
+            pointerEvents: "none",
+          }}
+        />
+      )
+    ) : (
+      <div className="w-full h-full bg-muted/50 grid place-items-center text-xs text-muted-foreground">
+        {hasBinding ? `🔗 ${slot.bindingPath}` : "Image (bind data)"}
+      </div>
+    );
+    content = (
+      <div
         style={{
           width: "100%",
           height: "100%",
-          objectFit: (slot.style?.fit === "stretch"
-            ? "fill"
-            : slot.style?.fit ?? "cover") as React.CSSProperties["objectFit"],
+          position: "relative",
+          overflow: "hidden",
           borderRadius: (slot.style?.borderRadius ?? 0) * zoom,
-          userSelect: "none",
-          pointerEvents: "none",
         }}
-      />
-    ) : (
-      <div className="w-full h-full bg-muted/50 grid place-items-center text-xs text-muted-foreground">
-        Image (bind data)
+      >
+        {imgEl}
+        {slot.style?.overlayColor && (
+          <div style={{ position: "absolute", inset: 0, background: slot.style.overlayColor, pointerEvents: "none" }} />
+        )}
       </div>
     );
   } else if (slot.kind === "shape") {
@@ -268,6 +356,12 @@ function SlotEditor({
     <div
       style={baseStyle}
       onMouseDown={startMove}
+      onDoubleClick={(e) => {
+        if (slot.kind === "image" && slot.staticImage && !slot.locked) {
+          e.stopPropagation();
+          onStartCrop();
+        }
+      }}
       onKeyDown={(e) => {
         if ((e.key === "Delete" || e.key === "Backspace") && selected) {
           e.preventDefault();
@@ -277,7 +371,25 @@ function SlotEditor({
       tabIndex={selected ? 0 : -1}
     >
       {content}
-      {selected && (
+      {hasBinding && (
+        <div
+          style={{
+            position: "absolute",
+            top: -22,
+            left: 0,
+            background: "#a855f7",
+            color: "white",
+            fontSize: 10,
+            padding: "1px 6px",
+            borderRadius: 3,
+            pointerEvents: "none",
+            whiteSpace: "nowrap",
+          }}
+        >
+          🔗 {slot.bindingPath}
+        </div>
+      )}
+      {selected && !slot.locked && (
         <>
           {handles.map((hd) => (
             <div

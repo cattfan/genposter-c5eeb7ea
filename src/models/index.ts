@@ -97,6 +97,29 @@ export interface SlotStyle {
   background?: string;
   padding?: number;
   rotation?: number;
+  // image filters (CSS filter)
+  brightness?: number; // 1 = normal
+  contrast?: number;
+  saturate?: number;
+  blur?: number; // px
+  hueRotate?: number; // deg
+  grayscale?: number; // 0..1
+  // flip
+  flipH?: boolean;
+  flipV?: boolean;
+  // drop shadow
+  shadowColor?: string;
+  shadowBlur?: number;
+  shadowX?: number;
+  shadowY?: number;
+}
+
+// Crop ảnh: % so với ảnh gốc (0..1)
+export interface ImageCrop {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 export type OverflowRule = "shrink" | "ellipsis" | "max_lines" | "hard_fail";
@@ -132,6 +155,8 @@ export interface Slot {
   sectionRefId?: ID;
   // ảnh upload từ máy → mặc định là layer nền, không cho nhân bản
   isUploadedBackground?: boolean;
+  // crop ảnh (chỉ dùng cho kind=image)
+  crop?: ImageCrop;
 }
 
 export type PartnerMode = "strict_partner" | "priority_partner" | "balanced_partner";

@@ -10,6 +10,13 @@ import type {
   Section,
   Slot,
 } from "@/models";
+import {
+  buildBoxShadow,
+  buildCssFilter,
+  buildFlipTransform,
+  resolveImageBinding,
+  resolveTextBinding,
+} from "@/engines/binding/dataBinding";
 
 interface Props {
   template: PageTemplate;
@@ -19,6 +26,8 @@ interface Props {
   scale?: number;
   debug?: boolean;
   innerRef?: React.Ref<HTMLDivElement>;
+  // Chế độ generate-theo-entity: 1 entity ăn vào tất cả block có bindingPath
+  entity?: Entity;
 }
 
 export function PageRenderer({
@@ -29,6 +38,7 @@ export function PageRenderer({
   scale = 1,
   debug = false,
   innerRef,
+  entity,
 }: Props) {
   const entityMap = useMemo(() => new Map(entities.map((e) => [e.entityId, e])), [entities]);
   const assetMap = useMemo(() => new Map(assets.map((a) => [a.assetId, a])), [assets]);
@@ -84,6 +94,8 @@ export function PageRenderer({
             template={template}
             entityMap={entityMap}
             assetMap={assetMap}
+            assets={assets}
+            entity={entity}
             sectionItemsMap={sectionItemsMap}
             slotOverride={slotEntityOverride.get(slot.slotId)}
             debug={debug}
@@ -99,6 +111,8 @@ function SlotRenderer({
   template,
   entityMap,
   assetMap,
+  assets,
+  entity,
   sectionItemsMap,
   slotOverride,
   debug,
@@ -108,18 +122,26 @@ function SlotRenderer({
   template: PageTemplate;
   entityMap: Map<string, Entity>;
   assetMap: Map<string, Asset>;
+  assets: Asset[];
+  entity?: Entity;
   sectionItemsMap: Map<string, Array<{ entityId?: string; assetId?: string }>>;
   slotOverride?: { entityId?: string; assetId?: string };
   debug?: boolean;
 }) {
+  const flip = buildFlipTransform(slot.style);
+  const rot = slot.rotation ? `rotate(${slot.rotation}deg)` : "";
+  const transform = (rot + flip).trim() || undefined;
+
   const baseStyle: React.CSSProperties = {
     position: "absolute",
     left: slot.x * scale,
     top: slot.y * scale,
     width: slot.width * scale,
     height: slot.height * scale,
-    transform: slot.rotation ? `rotate(${slot.rotation}deg)` : undefined,
+    transform,
     transformOrigin: "center",
+    boxShadow: buildBoxShadow(slot.style, scale),
+    opacity: slot.style?.opacity ?? 1,
   };
 
   if (slot.kind === "shape") {
@@ -133,7 +155,6 @@ function SlotRenderer({
           border: slot.style?.stroke
             ? `${(slot.style?.strokeWidth ?? 1) * scale}px solid ${slot.style.stroke}`
             : undefined,
-          opacity: slot.style?.opacity ?? 1,
         }}
       >
         <DebugBadge debug={debug} text={`shape`} />
@@ -145,6 +166,16 @@ function SlotRenderer({
     let src = slot.staticImage;
     let entityIdLog: string | undefined;
     let assetIdLog: string | undefined;
+    // Ưu tiên: bindingPath + entity (chế độ generate theo entity)
+    if (slot.bindingPath && entity) {
+      const r = resolveImageBinding(slot.bindingPath, entity, assets, src);
+      if (r.src) {
+        src = r.src;
+        assetIdLog = r.assetId;
+        entityIdLog = r.entityId;
+      }
+    }
+    // Fallback: page items override (luồng pack/section cũ)
     if (!src && slotOverride?.assetId) {
       const a = assetMap.get(slotOverride.assetId);
       if (a) {
@@ -153,21 +184,42 @@ function SlotRenderer({
         entityIdLog = a.entityId;
       }
     }
+    const filter = buildCssFilter(slot.style);
+    const objectFit = (slot.style?.fit === "stretch" ? "fill" : slot.style?.fit ?? "cover") as React.CSSProperties["objectFit"];
+    const crop = slot.crop;
     return (
       <div style={{ ...baseStyle, overflow: "hidden", borderRadius: (slot.style?.borderRadius ?? 0) * scale }}>
         {src ? (
-          <img
-            src={src}
-            crossOrigin="anonymous"
-            style={{
-              width: "100%",
-              height: "100%",
-              objectFit: (slot.style?.fit === "stretch" ? "fill" : slot.style?.fit ?? "cover") as React.CSSProperties["objectFit"],
-              opacity: slot.style?.opacity ?? 1,
-              display: "block",
-            }}
-            alt=""
-          />
+          crop ? (
+            <img
+              src={src}
+              crossOrigin="anonymous"
+              style={{
+                position: "absolute",
+                left: `${-crop.x * 100}%`,
+                top: `${-crop.y * 100}%`,
+                width: `${100 / crop.w}%`,
+                height: `${100 / crop.h}%`,
+                objectFit: "fill",
+                filter,
+                display: "block",
+              }}
+              alt=""
+            />
+          ) : (
+            <img
+              src={src}
+              crossOrigin="anonymous"
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit,
+                filter,
+                display: "block",
+              }}
+              alt=""
+            />
+          )
         ) : (
           <div
             style={{
@@ -200,6 +252,9 @@ function SlotRenderer({
 
   if (slot.kind === "text") {
     const s = slot.style ?? {};
+    const text = slot.bindingPath
+      ? resolveTextBinding(slot.bindingPath, entity, slot.staticText)
+      : (slot.staticText ?? "Văn bản");
     return (
       <div
         style={{
@@ -224,7 +279,7 @@ function SlotRenderer({
           overflow: "hidden",
         }}
       >
-        {slot.staticText ?? "Văn bản"}
+        {text}
         <DebugBadge debug={debug} text="text" />
       </div>
     );
