@@ -141,7 +141,6 @@ function EditorPage() {
     input.click();
   };
 
-
   const deleteSlot = (slotId: string) => {
     updateDraft((d) => {
       d.slots = d.slots.filter((s) => s.slotId !== slotId);
