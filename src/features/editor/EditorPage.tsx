@@ -679,6 +679,9 @@ export function EditorPage() {
           </TabsContent>
         </Tabs>
       </aside>
+      )}
+
+      {/* Shape selection in shape kind select - add triangle option */}
     </div>
   );
 }
