@@ -507,9 +507,11 @@ export function EditorPage() {
             {selectedSlot && (
               <>
                 <div className="flex gap-1">
-                  <Button size="sm" variant="outline" onClick={() => duplicateSlot(selectedSlot.slotId)}>
-                    <Copy className="size-3 mr-1" /> Copy
-                  </Button>
+                  {!selectedSlot.isUploadedBackground && (
+                    <Button size="sm" variant="outline" onClick={() => duplicateSlot(selectedSlot.slotId)}>
+                      <Copy className="size-3 mr-1" /> Copy
+                    </Button>
+                  )}
                   <Button size="sm" variant="outline" onClick={() => moveZ(selectedSlot.slotId, 1)}>
                     <ArrowUp className="size-3" />
                   </Button>
@@ -520,6 +522,11 @@ export function EditorPage() {
                     <Trash2 className="size-3" />
                   </Button>
                 </div>
+                {selectedSlot.isUploadedBackground && (
+                  <p className="text-xs text-muted-foreground italic">
+                    🖼 Ảnh nền upload — luôn ở layer dưới cùng, không nhân bản được.
+                  </p>
+                )}
                 <div className="grid grid-cols-2 gap-2">
                   <NumField label="X" value={selectedSlot.x} onChange={(v) => updateSlot(selectedSlot.slotId, { x: v })} />
                   <NumField label="Y" value={selectedSlot.y} onChange={(v) => updateSlot(selectedSlot.slotId, { y: v })} />

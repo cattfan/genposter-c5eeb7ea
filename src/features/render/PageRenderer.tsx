@@ -64,7 +64,8 @@ export function PageRenderer({
         width: width * scale,
         height: height * scale,
         position: "relative",
-        background: background ?? "#fff",
+        // Nếu template không set background → để trong suốt (không fallback #fff).
+        background: background ?? "transparent",
         backgroundImage: backgroundImage ? `url(${backgroundImage})` : undefined,
         backgroundSize: "cover",
         backgroundPosition: "center",
