@@ -27,6 +27,7 @@ import {
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/templates/$id/edit")({
+  codeSplitGroupings: [],
   component: EditorPage,
 });
 
@@ -41,7 +42,9 @@ function EditorPage() {
     if (tpl) setDraft(JSON.parse(JSON.stringify(tpl)));
   }, [tpl]);
 
-  if (!draft) return <div className="p-8 text-muted-foreground">Đang tải...</div>;
+  if (!draft) {
+    return <div className="p-8 text-muted-foreground">Đang tải...</div>;
+  }
 
   const selectedSlot = draft.slots.find((s) => s.slotId === selectedSlotId) ?? null;
 
