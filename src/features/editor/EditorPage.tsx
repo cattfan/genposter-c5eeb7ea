@@ -58,6 +58,20 @@ export function EditorPage() {
   const [rightOpen, setRightOpen] = useState(true);
   const canvasScrollRef = useRef<HTMLDivElement>(null);
 
+export function EditorPage() {
+  const { id } = useParams({ from: "/templates/$id/edit" });
+  const tpl = useLiveQuery(() => db.pageTemplates.get(id), [id]);
+  const [draft, setDraft] = useState<PageTemplate | null>(null);
+  const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(0.4);
+  const [leftOpen, setLeftOpen] = useState(true);
+  const [rightOpen, setRightOpen] = useState(true);
+  const canvasScrollRef = useRef<HTMLDivElement>(null);
+  // Undo/Redo stacks (lưu snapshot draft trước khi thay đổi)
+  const pastRef = useRef<PageTemplate[]>([]);
+  const futureRef = useRef<PageTemplate[]>([]);
+  const skipHistoryRef = useRef(false);
+
   // Ctrl/Cmd + wheel = zoom (native listener vì React onWheel là passive)
   useEffect(() => {
     const el = canvasScrollRef.current;
@@ -77,29 +91,93 @@ export function EditorPage() {
   }, []);
 
   useEffect(() => {
-    if (tpl) setDraft(JSON.parse(JSON.stringify(tpl)));
+    if (tpl) {
+      setDraft(JSON.parse(JSON.stringify(tpl)));
+      pastRef.current = [];
+      futureRef.current = [];
+    }
   }, [tpl]);
 
-  // Keyboard: Delete/Backspace removes selected slot
+  const undo = () => {
+    setDraft((prev) => {
+      if (!prev) return prev;
+      const last = pastRef.current.pop();
+      if (!last) return prev;
+      futureRef.current.push(prev);
+      return last;
+    });
+  };
+  const redo = () => {
+    setDraft((prev) => {
+      if (!prev) return prev;
+      const next = futureRef.current.pop();
+      if (!next) return prev;
+      pastRef.current.push(prev);
+      return next;
+    });
+  };
+
+  // Keyboard shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!selectedSlotId) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable) return;
+      const mod = e.ctrlKey || e.metaKey;
+      // Undo/Redo
+      if (mod && e.key.toLowerCase() === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      if (mod && ((e.key.toLowerCase() === "z" && e.shiftKey) || e.key.toLowerCase() === "y")) {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if (!selectedSlotId) return;
+      // Delete
       if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
         setDraft((prev) => {
           if (!prev) return prev;
+          pastRef.current.push(JSON.parse(JSON.stringify(prev)));
+          futureRef.current = [];
           const next = JSON.parse(JSON.stringify(prev)) as PageTemplate;
           next.slots = next.slots.filter((s) => s.slotId !== selectedSlotId);
           return next;
         });
         setSelectedSlotId(null);
+        return;
+      }
+      // Ctrl+D = duplicate
+      if (mod && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        duplicateSlot(selectedSlotId);
+        return;
+      }
+      // [ ] = z-index
+      if (e.key === "]") {
+        e.preventDefault();
+        moveZ(selectedSlotId, 1);
+        return;
+      }
+      if (e.key === "[") {
+        e.preventDefault();
+        moveZ(selectedSlotId, -1);
+        return;
+      }
+      // R = rotate 15°
+      if (e.key.toLowerCase() === "r" && !mod) {
+        e.preventDefault();
+        const cur = draft?.slots.find((s) => s.slotId === selectedSlotId);
+        if (cur) updateSlot(selectedSlotId, { rotation: ((cur.rotation ?? 0) + 15) % 360 });
+        return;
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedSlotId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSlotId, draft]);
 
   if (!draft) {
     return <div className="p-8 text-muted-foreground">Đang tải...</div>;
@@ -107,9 +185,15 @@ export function EditorPage() {
 
   const selectedSlot = draft.slots.find((s) => s.slotId === selectedSlotId) ?? null;
 
-  const updateDraft = (updater: (d: PageTemplate) => void) => {
+  const updateDraft = (updater: (d: PageTemplate) => void, skipHistory = false) => {
     setDraft((prev) => {
       if (!prev) return prev;
+      if (!skipHistory && !skipHistoryRef.current) {
+        pastRef.current.push(JSON.parse(JSON.stringify(prev)));
+        if (pastRef.current.length > 50) pastRef.current.shift();
+        futureRef.current = [];
+      }
+      skipHistoryRef.current = false;
       const next = JSON.parse(JSON.stringify(prev)) as PageTemplate;
       updater(next);
       return next;
