@@ -138,20 +138,6 @@ function EditorPage() {
     input.click();
   };
 
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = "image/*";
-    input.multiple = true;
-    input.onchange = async (e) => {
-      const files = Array.from((e.target as HTMLInputElement).files ?? []);
-      let offset = 0;
-      for (const f of files) {
-        await addImageFromFile(f, 80 + offset, 80 + offset);
-        offset += 30;
-      }
-    };
-    input.click();
-  };
 
   const deleteSlot = (slotId: string) => {
     updateDraft((d) => {
