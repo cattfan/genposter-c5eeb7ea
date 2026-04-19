@@ -1,5 +1,5 @@
 import { Link, useParams } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, saveBlob, getBlobURL } from "@/storage/db";
 import { nanoid } from "nanoid";
@@ -42,6 +42,25 @@ export function EditorPage() {
   const [zoom, setZoom] = useState(0.4);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
+  const canvasScrollRef = useRef<HTMLDivElement>(null);
+
+  // Ctrl/Cmd + wheel = zoom (native listener vì React onWheel là passive)
+  useEffect(() => {
+    const el = canvasScrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      const delta = -e.deltaY;
+      setZoom((z) => {
+        const factor = delta > 0 ? 1.1 : 1 / 1.1;
+        const next = Math.min(3, Math.max(0.05, z * factor));
+        return Math.round(next * 1000) / 1000;
+      });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
 
   useEffect(() => {
     if (tpl) setDraft(JSON.parse(JSON.stringify(tpl)));
@@ -400,11 +419,11 @@ export function EditorPage() {
             />
           </div>
           <div className="flex-1" />
-          <Button variant="ghost" size="icon" onClick={() => setZoom((z) => Math.max(0.1, z - 0.1))}>
+          <Button variant="ghost" size="icon" onClick={() => setZoom((z) => Math.max(0.05, z - 0.1))} title="Zoom out (Ctrl + scroll)">
             <ZoomOut className="size-4" />
           </Button>
-          <span className="text-xs w-12 text-center">{Math.round(zoom * 100)}%</span>
-          <Button variant="ghost" size="icon" onClick={() => setZoom((z) => Math.min(2, z + 0.1))}>
+          <span className="text-xs w-12 text-center" title="Ctrl/⌘ + lăn chuột để zoom">{Math.round(zoom * 100)}%</span>
+          <Button variant="ghost" size="icon" onClick={() => setZoom((z) => Math.min(3, z + 0.1))} title="Zoom in (Ctrl + scroll)">
             <ZoomIn className="size-4" />
           </Button>
           <Button onClick={save} size="sm">
@@ -420,6 +439,7 @@ export function EditorPage() {
           </Button>
         </div>
         <div
+          ref={canvasScrollRef}
           className="flex-1 overflow-auto p-8 grid place-items-center relative"
           onDragOver={(e) => {
             if (Array.from(e.dataTransfer.types).includes("Files")) {
