@@ -204,6 +204,7 @@ function SlotEditor({
           borderRadius: (slot.style?.borderRadius ?? 0) * zoom,
           userSelect: "none",
           pointerEvents: "none",
+        }}
       />
     ) : (
       <div className="w-full h-full bg-muted/50 grid place-items-center text-xs text-muted-foreground">
