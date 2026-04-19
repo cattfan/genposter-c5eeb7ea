@@ -439,6 +439,7 @@ export function EditorPage() {
           </Button>
         </div>
         <div
+          ref={canvasScrollRef}
           className="flex-1 overflow-auto p-8 grid place-items-center relative"
           onDragOver={(e) => {
             if (Array.from(e.dataTransfer.types).includes("Files")) {
