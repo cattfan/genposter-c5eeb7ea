@@ -96,18 +96,28 @@ export function EditorPage() {
     });
   };
 
-  const addSlot = (kind: Slot["kind"]) => {
+  const addSlot = (kind: Slot["kind"], shapeKind?: NonNullable<Slot["shapeKind"]>) => {
+    const isLine = kind === "shape" && (shapeKind === "line" || shapeKind === "divider");
     const newSlot: Slot = {
       slotId: nanoid(),
       kind,
       x: 100,
       y: 100,
-      width: kind === "text" ? 600 : 300,
-      height: kind === "text" ? 80 : 300,
+      width: kind === "text" ? 600 : isLine ? 400 : 300,
+      height: kind === "text" ? 80 : isLine ? 20 : 300,
       zIndex: (draft.slots.length || 0) + 1,
       ...(kind === "text" ? { staticText: "Văn bản mới", style: { fontSize: 48, fontWeight: 700, color: "#0f172a" } } : {}),
       ...(kind === "image" ? { staticImage: "", style: { fit: "cover", borderRadius: 12 } } : {}),
-      ...(kind === "shape" ? { shapeKind: "rectangle", style: { fill: "#facc15", borderRadius: 8 } } : {}),
+      ...(kind === "shape"
+        ? {
+            shapeKind: shapeKind ?? "rectangle",
+            style: {
+              fill: "#facc15",
+              borderRadius: shapeKind === "circle" ? 0 : 8,
+              strokeWidth: isLine ? 4 : undefined,
+            },
+          }
+        : {}),
       ...(kind === "section" ? { sectionRefId: draft.sections[0]?.sectionId } : {}),
     } as Slot;
     updateDraft((d) => {
