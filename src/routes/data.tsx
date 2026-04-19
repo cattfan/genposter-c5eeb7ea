@@ -18,6 +18,7 @@ import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { parseCsvFile, parseJsonFile, fetchSheetCsv, type ParsedTable } from "@/features/data/parsers";
 import { autoMap, normalizeRows, standardFieldOptions, type FieldMapping } from "@/engines/normalize/normalizer";
+import { BulkImageUpload } from "@/features/data/BulkImageUpload";
 
 export const Route = createFileRoute("/data")({
   component: DataPage,
@@ -77,10 +78,15 @@ function DataPage() {
 
       <Tabs defaultValue="import">
         <TabsList>
-          <TabsTrigger value="import">Import</TabsTrigger>
-          <TabsTrigger value="entities">Entities ({entities?.length ?? 0})</TabsTrigger>
-          <TabsTrigger value="assets">Assets ({assets?.length ?? 0})</TabsTrigger>
+          <TabsTrigger value="import">Import dữ liệu</TabsTrigger>
+          <TabsTrigger value="images">Ảnh hàng loạt</TabsTrigger>
+          <TabsTrigger value="entities">Quán ({entities?.length ?? 0})</TabsTrigger>
+          <TabsTrigger value="assets">Ảnh ({assets?.length ?? 0})</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="images">
+          <BulkImageUpload />
+        </TabsContent>
 
         <TabsContent value="import" className="space-y-4">
           <Card>
