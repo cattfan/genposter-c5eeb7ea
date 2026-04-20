@@ -79,10 +79,13 @@ function bboxOfGroup(slots: Slot[], groupId: string): { x: number; y: number; w:
 }
 
 /**
- * Expand 1 PageTemplate theo cardGroups.
- * - Slot ngoài cardGroups giữ nguyên.
- * - Slot trong group: card index 0 giữ nguyên (entity bản gốc — entity[0] của pool).
- *   Các card index 1..N-1 là clone, offset theo direction × (bbox + gap).
+ * Expand 1 PageTemplate theo cardGroups + auto group-binding.
+ *
+ * Quy tắc:
+ * - cardGroups cấu hình rõ ràng: clone N card, mỗi card ăn 1 entity kế tiếp trong pool.
+ * - group thường (có groupId, chưa bật cardGroups): nếu có bind entity/asset thì cả group sẽ ăn 1 entity riêng,
+ *   lần lượt theo thứ tự trên xuống / trái sang phải. Điều này sửa case user vẽ tay 4 card riêng nhưng muốn 4 quán khác nhau.
+ * - slot không thuộc group nào giữ nguyên, fallback dùng entity của page như cũ.
  */
 export function expandPageWithCardGroups(
   template: PageTemplate,
@@ -92,7 +95,7 @@ export function expandPageWithCardGroups(
   const entityBySlotId = new Map<string, Entity>();
   const cardsByGroup = new Map<string, Entity[]>();
 
-  if (cardGroups.length === 0) {
+  if (cardGroups.length === 0 && entityPool.length === 0) {
     return {
       slots: template.slots.map((s) => ({ ...s, originalSlotId: s.slotId, cardIndex: 0 })),
       entityBySlotId,
@@ -100,15 +103,72 @@ export function expandPageWithCardGroups(
     };
   }
 
-  // Slot không thuộc cardGroup nào
-  const groupIds = new Set(cardGroups.map((g) => g.groupId));
+  const configuredGroupIds = new Set(cardGroups.map((g) => g.groupId));
+  let cursor = 0;
+
+  const sortedCardGroups = cardGroups
+    .slice()
+    .sort((a, b) => {
+      const boxA = bboxOfGroup(template.slots, a.groupId);
+      const boxB = bboxOfGroup(template.slots, b.groupId);
+      if (!boxA || !boxB) return 0;
+      return boxA.y - boxB.y || boxA.x - boxB.x;
+    });
+
+  const expanded: ExpandedSlot[] = [];
+
+  // 1) Group thường chưa bật card repeater: mỗi group ăn 1 entity riêng
+  const autoGroupIds = Array.from(
+    new Set(
+      template.slots
+        .filter((s) => s.groupId && !configuredGroupIds.has(s.groupId))
+        .map((s) => s.groupId as string),
+    ),
+  )
+    .filter((groupId) => {
+      const groupSlots = template.slots.filter((s) => s.groupId === groupId);
+      return groupSlots.some(
+        (s) => !!s.bindingPath && (s.bindingPath.startsWith("entity.") || s.bindingPath.startsWith("asset.")),
+      );
+    })
+    .sort((a, b) => {
+      const boxA = bboxOfGroup(template.slots, a);
+      const boxB = bboxOfGroup(template.slots, b);
+      if (!boxA || !boxB) return 0;
+      return boxA.y - boxB.y || boxA.x - boxB.x;
+    });
+
+  const autoGroupIdSet = new Set(autoGroupIds);
+
+  for (const groupId of autoGroupIds) {
+    const ent = entityPool.length > 0 ? entityPool[cursor % entityPool.length] : undefined;
+    const groupSlots = template.slots.filter((s) => s.groupId === groupId);
+    const cardEntities = ent ? [ent] : [];
+
+    for (const s of groupSlots) {
+      const cloned: ExpandedSlot = {
+        ...s,
+        originalSlotId: s.slotId,
+        cardIndex: 0,
+        cardGroupId: groupId,
+        __cardEntityId: ent?.entityId,
+      };
+      expanded.push(cloned);
+      if (ent) entityBySlotId.set(s.slotId, ent);
+    }
+
+    cardsByGroup.set(groupId, cardEntities);
+    cursor += 1;
+  }
+
+  // 2) Slot ngoài mọi group hoặc group không bind entity/asset giữ nguyên
   const untouched: ExpandedSlot[] = template.slots
-    .filter((s) => !s.groupId || !groupIds.has(s.groupId))
+    .filter((s) => !s.groupId || (!configuredGroupIds.has(s.groupId) && !autoGroupIdSet.has(s.groupId)))
     .map((s) => ({ ...s, originalSlotId: s.slotId, cardIndex: 0 }));
+  expanded.push(...untouched);
 
-  const expanded: ExpandedSlot[] = [...untouched];
-
-  for (const cfg of cardGroups) {
+  // 3) Group có Card Repeater cấu hình: clone N card, consume entity tuần tự
+  for (const cfg of sortedCardGroups) {
     const bbox = bboxOfGroup(template.slots, cfg.groupId);
     if (!bbox) continue;
     const groupSlots = template.slots.filter((s) => s.groupId === cfg.groupId);
@@ -119,7 +179,7 @@ export function expandPageWithCardGroups(
 
     const cardEntities: Entity[] = [];
     for (let i = 0; i < repeat; i++) {
-      const ent = pool[i % Math.max(1, pool.length)];
+      const ent = pool.length > 0 ? pool[(cursor + i) % pool.length] : undefined;
       if (ent) cardEntities.push(ent);
 
       for (const s of groupSlots) {
@@ -138,7 +198,9 @@ export function expandPageWithCardGroups(
         if (ent) entityBySlotId.set(newId, ent);
       }
     }
+
     cardsByGroup.set(cfg.groupId, cardEntities);
+    cursor += repeat;
   }
 
   return { slots: expanded, entityBySlotId, cardsByGroup };
