@@ -50,12 +50,19 @@ export async function fetchSheetCsv(input: string): Promise<ParsedTable> {
   if (!url) {
     throw new Error("Không nhận diện được link Google Sheets. Hãy dán link share của file sheet.");
   }
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(
-      "Không tải được CSV từ Google Sheets. Hãy đảm bảo sheet đã 'Anyone with the link' hoặc 'Publish to web' (Tệp → Chia sẻ → Xuất bản lên web → CSV).",
-    );
+  // Thử fetch trực tiếp trước (nhanh nếu sheet public + CORS open)
+  try {
+    const res = await fetch(url);
+    if (res.ok) {
+      const text = await res.text();
+      if (!text.trim().startsWith("<")) return parseCsvText(text);
+    }
+  } catch {
+    // CORS hoặc lỗi mạng → fallback server fn
   }
-  const text = await res.text();
-  return parseCsvText(text);
+  // Fallback: gọi server function
+  const { fetchSheetCsvServer } = await import("@/server/sheetFetch");
+  const r = await fetchSheetCsvServer({ data: { url: input } });
+  if (!r.ok) throw new Error(r.error);
+  return parseCsvText(r.csv);
 }

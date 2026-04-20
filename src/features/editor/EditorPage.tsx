@@ -307,6 +307,151 @@ export function EditorPage() {
     setSelectedSlotId(newSlot.slotId);
   };
 
+  // Preset: cụm "Item card" gồm 4 slot (ảnh tròn + tên + địa chỉ + badge giá).
+  // Có thể dùng làm khối lặp trong section, hoặc đặt thủ công trên page.
+  const insertItemCard = (variant: "image-left" | "image-right" = "image-left") => {
+    const groupId = nanoid();
+    const baseY = 200;
+    const baseX = variant === "image-left" ? 80 : 380;
+    const textX = variant === "image-left" ? 380 : 80;
+    const slots: Slot[] = [
+      {
+        slotId: nanoid(),
+        kind: "shape",
+        shapeKind: "circle",
+        x: baseX,
+        y: baseY,
+        width: 240,
+        height: 240,
+        zIndex: 2,
+        groupId,
+        bindingPath: "asset.cover",
+        style: { fit: "cover", borderRadius: 9999 },
+      } as Slot,
+      {
+        slotId: nanoid(),
+        kind: "text",
+        x: textX,
+        y: baseY + 20,
+        width: 580,
+        height: 60,
+        staticText: "Tên địa điểm",
+        zIndex: 2,
+        groupId,
+        bindingPath: "entity.name",
+        style: {
+          fontFamily: "'Be Vietnam Pro', sans-serif",
+          fontSize: 36,
+          fontWeight: 800,
+          color: "#0f172a",
+          textAlign: variant === "image-left" ? "left" : "right",
+        },
+      } as Slot,
+      {
+        slotId: nanoid(),
+        kind: "text",
+        x: textX,
+        y: baseY + 90,
+        width: 580,
+        height: 50,
+        staticText: "Địa chỉ",
+        zIndex: 2,
+        groupId,
+        bindingPath: "entity.address",
+        style: {
+          fontFamily: "'Be Vietnam Pro', sans-serif",
+          fontSize: 24,
+          fontWeight: 500,
+          color: "#475569",
+          textAlign: variant === "image-left" ? "left" : "right",
+        },
+      } as Slot,
+      {
+        slotId: nanoid(),
+        kind: "shape",
+        shapeKind: "rectangle",
+        x: textX,
+        y: baseY + 160,
+        width: 200,
+        height: 56,
+        zIndex: 2,
+        groupId,
+        style: {
+          fill: "#f97316",
+          borderRadius: 9999,
+        },
+      } as Slot,
+      {
+        slotId: nanoid(),
+        kind: "text",
+        x: textX,
+        y: baseY + 168,
+        width: 200,
+        height: 40,
+        staticText: "$0",
+        zIndex: 3,
+        groupId,
+        bindingPath: "entity.priceRange",
+        style: {
+          fontFamily: "'Be Vietnam Pro', sans-serif",
+          fontSize: 24,
+          fontWeight: 800,
+          color: "#ffffff",
+          textAlign: "center",
+        },
+      } as Slot,
+    ];
+    updateDraft((d) => {
+      d.slots.push(...slots);
+    });
+    setSelectedSlotId(slots[0].slotId);
+    toast.success("Đã chèn cụm Item Card (ảnh + tên + địa chỉ + badge giá)");
+  };
+
+  // Preset: header badge "NGÀY {{day}} - ${{total}}" — rectangle đỏ + text trắng.
+  const insertDayHeaderBadge = () => {
+    const groupId = nanoid();
+    const slots: Slot[] = [
+      {
+        slotId: nanoid(),
+        kind: "shape",
+        shapeKind: "rectangle",
+        x: 80,
+        y: 80,
+        width: 600,
+        height: 110,
+        zIndex: 2,
+        groupId,
+        style: { fill: "#dc2626", borderRadius: 9999 },
+      } as Slot,
+      {
+        slotId: nanoid(),
+        kind: "text",
+        x: 80,
+        y: 105,
+        width: 600,
+        height: 60,
+        staticText: "NGÀY 1 - $690",
+        zIndex: 3,
+        groupId,
+        style: {
+          fontFamily: "'Be Vietnam Pro', sans-serif",
+          fontSize: 44,
+          fontWeight: 900,
+          color: "#ffffff",
+          textAlign: "center",
+          textTransform: "uppercase",
+          letterSpacing: 2,
+        },
+      } as Slot,
+    ];
+    updateDraft((d) => {
+      d.slots.push(...slots);
+    });
+    setSelectedSlotId(slots[0].slotId);
+    toast.success("Đã chèn Header Badge ngày — sửa text 'NGÀY 1 - $690' cho phù hợp");
+  };
+
   const addImageFromFile = async (file: File, dropX?: number, dropY?: number) => {
     if (!file.type.startsWith("image/")) {
       toast.error("File không phải ảnh: " + file.name);
@@ -603,6 +748,17 @@ export function EditorPage() {
 
             <Button variant="outline" size="sm" className="w-full justify-start mt-2" onClick={() => addSlot("section")}>
               <LayersIcon className="size-4 mr-2" /> Section
+            </Button>
+
+            <div className="text-xs font-semibold text-muted-foreground uppercase pt-2">Preset 4N3Đ</div>
+            <Button variant="outline" size="sm" className="w-full justify-start" onClick={() => insertItemCard("image-left")}>
+              <ImageIcon className="size-4 mr-2" /> Item Card (ảnh trái)
+            </Button>
+            <Button variant="outline" size="sm" className="w-full justify-start" onClick={() => insertItemCard("image-right")}>
+              <ImageIcon className="size-4 mr-2" /> Item Card (ảnh phải)
+            </Button>
+            <Button variant="outline" size="sm" className="w-full justify-start" onClick={insertDayHeaderBadge}>
+              <Type className="size-4 mr-2" /> Header Ngày
             </Button>
           </div>
           <div className="p-3 border-t flex-1 overflow-y-auto">

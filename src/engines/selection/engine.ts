@@ -43,12 +43,17 @@ export function selectForSection(req: SelectionRequest): SelectionResult {
   const warnings: string[] = [];
   const exclude = new Set(excludeEntityIds ?? []);
 
-  // 1. Filter theo section
+  // 1. Filter theo section (categoryQuery + filterRules)
   const cats = section.categoryQuery?.split(",").map((s) => s.trim()).filter(Boolean) ?? [];
   let pool = entities.filter((e) => {
     if (e.status !== "active") return false;
     if (exclude.has(e.entityId)) return false;
     if (cats.length > 0 && e.categoryMain && !cats.includes(e.categoryMain)) return false;
+    if (section.filterRules?.length) {
+      for (const rule of section.filterRules) {
+        if (!matchFilterRule(e, rule)) return false;
+      }
+    }
     return true;
   });
 
@@ -138,5 +143,42 @@ function applyPartnerMode<T extends { entity: Entity; score: number; reasons: st
       }
       return taken;
     }
+  }
+}
+
+/**
+ * Đọc giá trị field từ entity (ưu tiên top-level, fallback metadata).
+ */
+function readEntityField(entity: Entity, field: string): unknown {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const top = (entity as any)[field];
+  if (top !== undefined && top !== null && top !== "") return top;
+  return entity.metadata?.[field];
+}
+
+function matchFilterRule(entity: Entity, rule: import("@/models").FilterRule): boolean {
+  const v = readEntityField(entity, rule.field);
+  if (v === undefined || v === null) return false;
+  switch (rule.op) {
+    case "eq":
+      return String(v) === String(rule.value);
+    case "in": {
+      const arr = Array.isArray(rule.value) ? rule.value : [String(rule.value)];
+      return arr.map(String).includes(String(v));
+    }
+    case "gte": {
+      const n = Number(v);
+      const target = Number(rule.value);
+      return Number.isFinite(n) && Number.isFinite(target) && n >= target;
+    }
+    case "lte": {
+      const n = Number(v);
+      const target = Number(rule.value);
+      return Number.isFinite(n) && Number.isFinite(target) && n <= target;
+    }
+    case "contains":
+      return String(v).toLowerCase().includes(String(rule.value).toLowerCase());
+    default:
+      return true;
   }
 }

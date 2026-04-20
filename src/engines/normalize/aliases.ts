@@ -1,7 +1,20 @@
 // Field aliases để normalize dữ liệu import vào model chuẩn
 
 export const FIELD_ALIASES: Record<string, string[]> = {
-  name: ["name", "ten", "ten_quan", "tên", "tên quán", "ten quan", "title"],
+  name: [
+    "name",
+    "ten",
+    "ten_quan",
+    "tên",
+    "tên quán",
+    "ten quan",
+    "title",
+    "tên địa điểm",
+    "ten dia diem",
+    "tên homestay",
+    "ten homestay",
+    "địa điểm",
+  ],
   categoryMain: [
     "category",
     "categoryMain",
@@ -12,21 +25,87 @@ export const FIELD_ALIASES: Record<string, string[]> = {
     "mo_hinh",
     "mô hình",
     "type",
+    "nhóm",
+    "nhom",
   ],
-  categorySub: ["sub", "subcategory", "categorySub", "loai_phu", "loại phụ", "phong_cach", "phong cách"],
-  address: ["address", "dia_chi", "địa chỉ", "dia chi", "addr"],
+  categorySub: [
+    "sub",
+    "subcategory",
+    "categorySub",
+    "loai_phu",
+    "loại phụ",
+    "phong_cach",
+    "phong cách",
+  ],
+  address: [
+    "address",
+    "dia_chi",
+    "địa chỉ",
+    "dia chi",
+    "addr",
+    "vị trí",
+    "vi tri",
+    "location",
+  ],
   phone: ["phone", "sdt", "hotline", "điện thoại", "dien_thoai"],
   openingHours: ["hours", "gio_mo_cua", "giờ mở cửa", "open"],
-  priceRange: ["price", "gia", "giá", "khoảng giá", "khoang_gia", "priceRange"],
+  priceRange: [
+    "price",
+    "gia",
+    "giá",
+    "khoảng giá",
+    "khoang_gia",
+    "priceRange",
+    "chi phí",
+    "chi phi",
+    "cost",
+  ],
   style: ["style"],
-  partnerFlag: ["partner", "doi_tac", "đối tác", "doi tac", "sponsor", "partnerFlag"],
+  partnerFlag: [
+    "partner",
+    "doi_tac",
+    "đối tác",
+    "doi tac",
+    "sponsor",
+    "partnerFlag",
+  ],
   partnerPriority: ["priority", "uu_tien", "ưu tiên", "partnerPriority"],
   partnerType: ["partnerType", "loai_doi_tac", "loại đối tác"],
-  campaignTags: ["tags", "campaign", "campaignTags", "chien_dich", "chiến dịch"],
+  campaignTags: [
+    "tags",
+    "campaign",
+    "campaignTags",
+    "chien_dich",
+    "chiến dịch",
+  ],
   seoKeywords: ["keywords", "seo", "seoKeywords"],
-  signatureDish: ["mon_an_noi_bat", "món ăn nổi bật", "mon_noi_bat", "signature", "signatureDish", "highlight"],
-  image: ["image", "img", "hinh_anh", "hình ảnh", "ảnh", "anh", "photo", "photo_url", "cover"],
+  signatureDish: [
+    "mon_an_noi_bat",
+    "món ăn nổi bật",
+    "mon_noi_bat",
+    "signature",
+    "signatureDish",
+    "highlight",
+  ],
+  image: [
+    "image",
+    "img",
+    "hinh_anh",
+    "hình ảnh",
+    "ảnh",
+    "anh",
+    "photo",
+    "photo_url",
+    "cover",
+    "hình",
+    "hinh",
+    "link ảnh",
+    "link anh",
+  ],
   images: ["images", "anh_phu", "ảnh phụ", "gallery"],
+  // Cột tuỳ ý cho lịch trình du lịch — sẽ chui vào entity.metadata
+  day: ["day", "ngày", "ngay", "ngay_thu", "day_no"],
+  description: ["description", "desc", "mô tả", "mo ta", "ghi chú", "ghi chu", "notes"],
 };
 
 export function normalizeKey(key: string): string {
@@ -60,3 +139,9 @@ export function parseNumber(v: unknown, fallback = 0): number {
   const n = Number(String(v).replace(/[^\d.-]/g, ""));
   return Number.isFinite(n) ? n : fallback;
 }
+
+/**
+ * Các "standard fields" mà sau khi map sẽ được dồn vào entity.metadata
+ * (không phải core field của Entity).
+ */
+export const METADATA_FIELDS = new Set(["day", "description", "signatureDish"]);

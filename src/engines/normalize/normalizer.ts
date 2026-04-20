@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid";
 import type { Asset, Entity } from "@/models";
-import { FIELD_ALIASES, normalizeKey, parseBool, parseList, parseNumber } from "./aliases";
+import { FIELD_ALIASES, METADATA_FIELDS, normalizeKey, parseBool, parseList, parseNumber } from "./aliases";
 
 export interface RawRow {
   [key: string]: unknown;
@@ -50,6 +50,18 @@ export function normalizeRows(rows: RawRow[], mapping: FieldMapping, sheetName?:
     }
 
     const entityId = nanoid();
+    // Gom các trường tuỳ ý (day, description, signatureDish, hoặc bất kỳ key chưa nhận diện) vào metadata
+    const metadata: Record<string, string | number> = {};
+    for (const [k, v] of Object.entries(std)) {
+      if (v == null || v === "") continue;
+      if (METADATA_FIELDS.has(k)) {
+        const n = parseNumber(v, NaN);
+        metadata[k] = Number.isFinite(n) && k === "day" ? n : String(v).trim();
+      } else if (!(k in FIELD_ALIASES) && k !== "image" && k !== "images") {
+        // Cột "lạ" không có trong alias chuẩn → giữ nguyên trong metadata để filterRules dùng
+        metadata[k] = String(v).trim();
+      }
+    }
     const entity: Entity = {
       entityId,
       name,
@@ -68,9 +80,7 @@ export function normalizeRows(rows: RawRow[], mapping: FieldMapping, sheetName?:
       status: "active",
       sourceRowId: String(idx),
       sheetName: sheetName?.trim() || undefined,
-      metadata: std.signatureDish
-        ? { signatureDish: String(std.signatureDish).trim() }
-        : undefined,
+      metadata: Object.keys(metadata).length ? metadata : undefined,
     };
     entities.push(entity);
 

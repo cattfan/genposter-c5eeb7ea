@@ -179,6 +179,16 @@ export interface Slot {
 export type PartnerMode = "strict_partner" | "priority_partner" | "balanced_partner";
 export type ImageMode = "section_mood" | "anchor_entity";
 
+export type FilterOp = "eq" | "in" | "gte" | "lte" | "contains";
+
+export interface FilterRule {
+  field: string; // tên cột — đọc từ entity[field] hoặc entity.metadata[field]
+  op: FilterOp;
+  value: string | number | string[];
+}
+
+export type SectionLayoutMode = "stack" | "zigzag" | "grid";
+
 export interface Section {
   sectionId: ID;
   title: string;
@@ -192,6 +202,10 @@ export interface Section {
   sortRule?: "partner_first" | "diversity" | "alpha" | "none";
   partnerMode: PartnerMode;
   overflowPolicy?: OverflowRule;
+  // Lọc thêm theo cột tuỳ ý (vd day=1, category=homestay)
+  filterRules?: FilterRule[];
+  // Cách bố trí item trong section khi render (stack | zigzag trái/phải | grid)
+  layoutMode?: SectionLayoutMode;
 }
 
 export type PageType = "cover" | "itinerary" | "board" | "mixed";
