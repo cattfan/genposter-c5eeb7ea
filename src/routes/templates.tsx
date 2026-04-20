@@ -6,7 +6,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Plus, Pencil, Copy, Trash2 } from "lucide-react";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
+import { useEffect, useRef, useState } from "react";
 import type { PageTemplate } from "@/models";
+import { PageRenderer } from "@/features/render/PageRenderer";
 
 export const Route = createFileRoute("/templates")({
   component: TemplatesPage,
@@ -67,15 +69,12 @@ function TemplatesPage() {
           <Card key={t.pageTemplateId} className="overflow-hidden">
             <button
               onClick={() => openEdit(t.pageTemplateId)}
-              className="w-full text-left aspect-[4/5] bg-gradient-to-br from-muted to-muted-foreground/10 flex items-center justify-center text-muted-foreground text-xs relative hover:opacity-90 transition"
-              style={{ background: t.canvas.background }}
+              className="block w-full text-left relative hover:opacity-90 transition bg-muted/40"
+              style={{ aspectRatio: `${t.canvas.width} / ${t.canvas.height}` }}
             >
-              <div className="absolute top-2 left-2 text-[10px] px-2 py-0.5 bg-black/60 text-white rounded">
-                {t.canvas.width}×{t.canvas.height}
-              </div>
-              <div className="text-center">
-                <div className="text-xs uppercase tracking-wider opacity-60 mb-1">{t.type}</div>
-                <div className="text-sm font-semibold opacity-80">{t.slots.length} slot · {t.sections.length} section</div>
+              <TemplatePreview tpl={t} />
+              <div className="absolute top-2 left-2 text-[10px] px-2 py-0.5 bg-black/60 text-white rounded z-10">
+                {t.canvas.width}×{t.canvas.height} · {t.slots.length} slot
               </div>
             </button>
             <CardContent className="p-4">
