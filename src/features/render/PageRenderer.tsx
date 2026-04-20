@@ -90,6 +90,7 @@ export function PageRenderer({
     >
       {template.slots
         .slice()
+        .filter((s) => !s.style?.hidden)
         .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
         .map((slot) => (
           <SlotRenderer

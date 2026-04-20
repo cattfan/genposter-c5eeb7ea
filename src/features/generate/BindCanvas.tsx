@@ -51,6 +51,7 @@ export function BindCanvas({
     >
       {template.slots
         .slice()
+        .filter((s) => !s.style?.hidden)
         .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
         .map((slot) => (
           <BindSlot
