@@ -6,7 +6,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Plus, Pencil, Copy, Trash2 } from "lucide-react";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
+import { useEffect, useRef, useState } from "react";
 import type { PageTemplate } from "@/models";
+import { PageRenderer } from "@/features/render/PageRenderer";
 
 export const Route = createFileRoute("/templates")({
   component: TemplatesPage,
@@ -67,15 +69,12 @@ function TemplatesPage() {
           <Card key={t.pageTemplateId} className="overflow-hidden">
             <button
               onClick={() => openEdit(t.pageTemplateId)}
-              className="w-full text-left aspect-[4/5] bg-gradient-to-br from-muted to-muted-foreground/10 flex items-center justify-center text-muted-foreground text-xs relative hover:opacity-90 transition"
-              style={{ background: t.canvas.background }}
+              className="block w-full text-left relative hover:opacity-90 transition bg-muted/40"
+              style={{ aspectRatio: `${t.canvas.width} / ${t.canvas.height}` }}
             >
-              <div className="absolute top-2 left-2 text-[10px] px-2 py-0.5 bg-black/60 text-white rounded">
-                {t.canvas.width}×{t.canvas.height}
-              </div>
-              <div className="text-center">
-                <div className="text-xs uppercase tracking-wider opacity-60 mb-1">{t.type}</div>
-                <div className="text-sm font-semibold opacity-80">{t.slots.length} slot · {t.sections.length} section</div>
+              <TemplatePreview tpl={t} />
+              <div className="absolute top-2 left-2 text-[10px] px-2 py-0.5 bg-black/60 text-white rounded z-10">
+                {t.canvas.width}×{t.canvas.height} · {t.slots.length} slot
               </div>
             </button>
             <CardContent className="p-4">
@@ -117,6 +116,50 @@ function TemplatesPage() {
           </Card>
         ))}
       </div>
+    </div>
+  );
+}
+
+function TemplatePreview({ tpl }: { tpl: PageTemplate }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(0.2);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const compute = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (!w || !h) return;
+      setScale(Math.min(w / tpl.canvas.width, h / tpl.canvas.height));
+    };
+    compute();
+    const ro = new ResizeObserver(compute);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [tpl.canvas.width, tpl.canvas.height]);
+
+  const isEmpty = tpl.slots.length === 0;
+
+  return (
+    <div ref={ref} className="absolute inset-0 overflow-hidden" style={{ background: tpl.canvas.background ?? "#fff" }}>
+      {isEmpty ? (
+        <div className="w-full h-full flex items-center justify-center text-muted-foreground text-xs uppercase tracking-wider">
+          {tpl.type} · trống
+        </div>
+      ) : (
+        <div
+          style={{
+            position: "absolute",
+            left: "50%",
+            top: "50%",
+            transform: "translate(-50%, -50%)",
+            pointerEvents: "none",
+          }}
+        >
+          <PageRenderer template={tpl} entities={[]} assets={[]} scale={scale} />
+        </div>
+      )}
     </div>
   );
 }
