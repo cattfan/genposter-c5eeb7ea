@@ -88,6 +88,60 @@ function autoClusterSlots(
   slots: Slot[],
   excludeGroupIds: Set<string>,
 ): Array<{ key: string; slots: Slot[] }> {
+  const clusterAlongAxis = (items: Slot[], axis: "x" | "y", prefix: string): Array<{ key: string; slots: Slot[] }> => {
+    if (items.length === 0) return [];
+    const sorted = items.slice().sort((a, b) => {
+      const primary = axis === "y" ? a.y - b.y : a.x - b.x;
+      if (primary !== 0) return primary;
+      return axis === "y" ? a.x - b.x : a.y - b.y;
+    });
+    const sizes = sorted
+      .map((s) => (axis === "y" ? s.height : s.width))
+      .sort((a, b) => a - b);
+    const medianSize = sizes[Math.floor(sizes.length / 2)] ?? 80;
+    const gapThreshold = medianSize * 0.6;
+
+    const out: Array<{ key: string; slots: Slot[] }> = [];
+    let current: Slot[] = [];
+    let currentEnd = -Infinity;
+    let idx = 0;
+
+    for (const s of sorted) {
+      const start = axis === "y" ? s.y : s.x;
+      const end = axis === "y" ? s.y + s.height : s.x + s.width;
+      if (current.length === 0 || start - currentEnd < gapThreshold) {
+        current.push(s);
+        currentEnd = Math.max(currentEnd, end);
+      } else {
+        out.push({ key: `${prefix}_${idx++}`, slots: current });
+        current = [s];
+        currentEnd = end;
+      }
+    }
+
+    if (current.length > 0) {
+      out.push({ key: `${prefix}_${idx++}`, slots: current });
+    }
+
+    return out;
+  };
+
+  const splitSpatially = (items: Slot[], prefix: string): Array<{ key: string; slots: Slot[] }> => {
+    if (items.length <= 1) return [{ key: prefix, slots: items }];
+    const bbox = bboxOfGroup(items, items[0]?.groupId ?? "") ?? {
+      x: Math.min(...items.map((s) => s.x)),
+      y: Math.min(...items.map((s) => s.y)),
+      w: Math.max(...items.map((s) => s.x + s.width)) - Math.min(...items.map((s) => s.x)),
+      h: Math.max(...items.map((s) => s.y + s.height)) - Math.min(...items.map((s) => s.y)),
+    };
+    const vertical = clusterAlongAxis(items, "y", `${prefix}__row`);
+    const horizontal = clusterAlongAxis(items, "x", `${prefix}__col`);
+    if (vertical.length <= 1 && horizontal.length <= 1) return [{ key: prefix, slots: items }];
+    if (vertical.length > 1 && horizontal.length <= 1) return vertical;
+    if (horizontal.length > 1 && vertical.length <= 1) return horizontal;
+    return bbox.h >= bbox.w ? vertical : horizontal;
+  };
+
   const bindable = slots.filter((s) => {
     if (!s.bindingPath) return false;
     if (!s.bindingPath.startsWith("entity.") && !s.bindingPath.startsWith("asset.")) return false;
@@ -109,31 +163,24 @@ function autoClusterSlots(
     }
   }
 
+  const groupedClusters = new Map<string, Slot[]>();
+  for (const [groupId, groupSlots] of byGroup.entries()) {
+    const splits = splitSpatially(groupSlots, groupId);
+    for (const split of splits) {
+      groupedClusters.set(split.key, split.slots);
+    }
+  }
+  byGroup.clear();
+  for (const [key, value] of groupedClusters.entries()) {
+    byGroup.set(key, value);
+  }
+
   // Bước 2: với slot không group, tự cluster theo gap dọc (Y)
   // Heuristic: sort theo Y, gap > medianHeight * 0.6 = ranh giới row mới
   if (noGroup.length > 0) {
-    const sorted = noGroup.slice().sort((a, b) => a.y - b.y || a.x - b.x);
-    const heights = sorted.map((s) => s.height).sort((a, b) => a - b);
-    const medianH = heights[Math.floor(heights.length / 2)] ?? 80;
-    const gapThreshold = medianH * 0.6;
-
-    let currentRow: Slot[] = [];
-    let currentBottom = -Infinity;
-    let rowIdx = 0;
-    for (const s of sorted) {
-      if (currentRow.length === 0 || s.y - currentBottom < gapThreshold) {
-        currentRow.push(s);
-        currentBottom = Math.max(currentBottom, s.y + s.height);
-      } else {
-        if (currentRow.length > 0) {
-          byGroup.set(`__autorow_${rowIdx++}`, currentRow);
-        }
-        currentRow = [s];
-        currentBottom = s.y + s.height;
-      }
-    }
-    if (currentRow.length > 0) {
-      byGroup.set(`__autorow_${rowIdx++}`, currentRow);
+    const splits = splitSpatially(noGroup, "__auto");
+    for (const split of splits) {
+      byGroup.set(split.key, split.slots);
     }
   }
 
