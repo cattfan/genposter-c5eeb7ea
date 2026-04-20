@@ -760,7 +760,7 @@ export function EditorPage() {
                     {/* Crop info */}
                     {selectedSlot.crop && (
                       <div className="flex items-center justify-between text-xs bg-muted/50 p-2 rounded">
-                        <span>✂️ Đã crop {Math.round(selectedSlot.crop.w * 100)}×{Math.round(selectedSlot.crop.h * 100)}%</span>
+                        <span>Đã crop {Math.round(selectedSlot.crop.w * 100)}×{Math.round(selectedSlot.crop.h * 100)}%</span>
                         <Button size="sm" variant="ghost" className="h-6" onClick={() => updateSlot(selectedSlot.slotId, { crop: undefined })}>
                           Reset
                         </Button>

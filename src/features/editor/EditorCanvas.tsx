@@ -1,6 +1,7 @@
 import { useRef, useCallback, useState } from "react";
+import { X, ImageIcon, Layers as LayersIcon } from "lucide-react";
 import type { PageTemplate, Slot } from "@/models";
-import { buildBoxShadow, buildCssFilter, buildFlipTransform, slotHasBinding } from "@/engines/binding/dataBinding";
+import { buildBoxShadow, buildCssFilter, buildFlipTransform } from "@/engines/binding/dataBinding";
 import { CropOverlay } from "./CropOverlay";
 
 export function NumField({
