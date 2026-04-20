@@ -562,6 +562,22 @@ function GeneratePage() {
                         </p>
                       )}
                     </div>
+                    {selectedSlot.kind === "text" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="w-full"
+                        onClick={runAiCaption}
+                        disabled={captionBusy || !previewEntity}
+                      >
+                        {captionBusy ? (
+                          <Loader2 className="size-3 mr-1 animate-spin" />
+                        ) : (
+                          <Wand2 className="size-3 mr-1" />
+                        )}
+                        AI caption (từ data thật)
+                      </Button>
+                    )}
                     {selectedSlot.bindingPath && (
                       <Button
                         size="sm"
