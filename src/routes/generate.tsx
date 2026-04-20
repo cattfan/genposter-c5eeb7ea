@@ -680,6 +680,7 @@ function GeneratePage() {
                             entities={entities ?? []}
                             assets={assets ?? []}
                             entity={ent}
+                            entityPool={entities ?? []}
                             scale={previewScale}
                             debug={debug}
                           />

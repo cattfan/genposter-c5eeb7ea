@@ -833,6 +833,7 @@ export function PackTabContent({
                           entities={entities}
                           assets={assets}
                           entity={ent}
+                          entityPool={filteredEntities}
                           scale={previewScale}
                           debug={debug}
                         />
