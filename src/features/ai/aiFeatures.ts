@@ -63,7 +63,10 @@ const LAYOUT_SYSTEM =
   "4. Ảnh đại diện địa điểm dùng kind=shape + shapeKind=circle.\n" +
   "5. Badge giá tiền dùng kind=shape + shapeKind=badge + fill cam '#F97316', kèm 1 text overlay '{{giá}}' màu trắng.\n" +
   "6. Header ngày dùng shape badge fill đỏ '#dc2626' + text '{{tiêu đề}}' trắng.\n" +
-  "7. Trả về qua tool build_layout, KHÔNG nói gì thêm.";
+  "7. ƯU TIÊN layout gọn, cân đối, ít block: tối đa 12 slot, tối đa 3 nhóm item lặp, chừa margin ngoài 4%.\n" +
+  "8. KHÔNG xếp chồng chéo text/image. Mỗi block phải có khoảng thở rõ ràng; tránh item rơi ra mép dưới canvas.\n" +
+  "9. Nếu ảnh mẫu quá rối, hãy đơn giản hoá về bố cục editorial sạch thay vì copy y nguyên.\n" +
+  "10. Trả về qua tool build_layout, KHÔNG nói gì thêm.";
 
 export async function aiGenerateTemplateFromImage(imageDataUrl: string) {
   const result = await callAi({
@@ -381,16 +384,16 @@ export async function aiGenerateComboFromImages(input: {
 
   let done = 0;
   const layouts = await runWithLimit(classified, 3, async (c) => {
-    const roleHint =
+      const roleHint =
       c.role === "cover"
-        ? "Trang bìa: tiêu đề lớn, sub-title, ảnh nền."
+        ? "Trang bìa: 1 hero image lớn, tiêu đề lớn, sub-title ngắn, tối đa 5 slot."
         : c.role === "utilities"
-          ? "Trang tiện ích: list địa điểm dạng item card."
+          ? "Trang tiện ích: danh sách ngắn 3-4 item card, canh hàng thẳng, tránh nhồi quá nhiều block."
           : c.role === "day"
-            ? `Trang lịch trình Ngày ${c.dayNumber ?? "?"}: badge header đỏ, list 4-6 item card có ảnh tròn + tên + địa chỉ + badge giá cam.`
+            ? `Trang lịch trình Ngày ${c.dayNumber ?? "?"}: badge header đỏ, 3-4 item card rõ ràng có ảnh tròn + tên + địa chỉ + badge giá cam, ưu tiên zigzag sạch.`
             : c.role === "outro"
-              ? "Trang kết / CTA."
-              : "Page nội dung tự do.";
+              ? "Trang kết / CTA: ít thành phần, tập trung 1 lời kêu gọi hành động rõ ràng."
+              : "Page nội dung tự do nhưng tối đa 8 slot, bố cục sạch và dễ bind dữ liệu.";
     const r = await genOnePageWithHint(input.images[c.index].dataUrl, roleHint);
     done++;
     input.onProgress?.(
