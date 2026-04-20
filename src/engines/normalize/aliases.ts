@@ -150,3 +150,34 @@ export function parseNumber(v: unknown, fallback = 0): number {
  * (không phải core field của Entity).
  */
 export const METADATA_FIELDS = new Set(["day", "description", "signatureDish"]);
+
+/**
+ * Nhãn tiếng Việt hiển thị trong dropdown mapping cột.
+ * Key = standard field name (chuẩn nội bộ), Value = nhãn UI tiếng Việt.
+ */
+export const FIELD_LABELS_VI: Record<string, string> = {
+  __ignore__: "— Bỏ qua —",
+  name: "Tên",
+  categoryMain: "Mô hình / Loại dịch vụ",
+  categorySub: "Phong cách phụ",
+  address: "Địa chỉ",
+  phone: "SĐT",
+  openingHours: "Giờ mở cửa",
+  priceRange: "Khoảng giá",
+  style: "Phong cách",
+  partnerFlag: "Đối tác (cờ)",
+  partnerPriority: "Độ ưu tiên đối tác",
+  partnerType: "Loại đối tác",
+  campaignTags: "Tag chiến dịch",
+  seoKeywords: "Từ khoá SEO",
+  signatureDish: "Món / điểm nhấn",
+  image: "Ảnh chính",
+  images: "Ảnh phụ (gallery)",
+  day: "Ngày (lịch trình)",
+  description: "Mô tả / ghi chú",
+};
+
+export function fieldLabelVi(key: string): string {
+  return FIELD_LABELS_VI[key] ?? key;
+}
+
