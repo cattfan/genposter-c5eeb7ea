@@ -157,6 +157,77 @@ export function generatePackJob(input: GenerateInput): GenerationJob {
   };
 }
 
+/**
+ * Bind theo entity (không section selection, chỉ resolve text/image bindingPath ở renderer).
+ * - one-entity-per-pack: mỗi entity sinh đủ pack (orderedPages.length pages)
+ * - one-entity-per-page: round-robin entity vào từng page của 1 pack
+ */
+function generateEntityBindJob(
+  pack: PackTemplate,
+  pageTemplates: PageTemplate[],
+  entityPool: Entity[],
+  mode: "one-entity-per-pack" | "one-entity-per-page",
+  bindOverrides: Record<string, Record<string, string | undefined>>,
+): GenerationJob {
+  const pageMap = new Map(pageTemplates.map((p) => [p.pageTemplateId, p]));
+  const renderedPages: RenderedPage[] = [];
+  const orderedTpls = pack.orderedPages
+    .map((id) => pageMap.get(id))
+    .filter((t): t is PageTemplate => !!t);
+
+  if (orderedTpls.length === 0 || entityPool.length === 0) {
+    return {
+      jobId: nanoid(),
+      packTemplateId: pack.packTemplateId,
+      packTemplateName: pack.name,
+      createdAt: Date.now(),
+      pages: [],
+      status: "generated",
+    };
+  }
+
+  let pageIndex = 0;
+  const pushPage = (tpl: PageTemplate, ent: Entity, perPackIdx: number) => {
+    const ov = bindOverrides[tpl.pageTemplateId];
+    const slugEnt = slugify(ent.name);
+    renderedPages.push({
+      pageIndex,
+      pageFile: `${slugEnt}-p${perPackIdx + 1}-${slugify(tpl.name)}.png`,
+      pageTemplateId: tpl.pageTemplateId,
+      state: "accepted",
+      selected: true,
+      healthScore: 100,
+      warnings: [],
+      items: [],
+      renderedAt: Date.now(),
+      entityId: ent.entityId,
+      entityName: ent.name,
+      bindOverrides: ov,
+    });
+    pageIndex += 1;
+  };
+
+  if (mode === "one-entity-per-pack") {
+    for (const ent of entityPool) {
+      orderedTpls.forEach((tpl, i) => pushPage(tpl, ent, i));
+    }
+  } else {
+    orderedTpls.forEach((tpl, i) => {
+      const ent = entityPool[i % entityPool.length];
+      pushPage(tpl, ent, i);
+    });
+  }
+
+  return {
+    jobId: nanoid(),
+    packTemplateId: pack.packTemplateId,
+    packTemplateName: pack.name,
+    createdAt: Date.now(),
+    pages: renderedPages,
+    status: "generated",
+  };
+}
+
 function computeHealth(tpl: PageTemplate, items: RenderedItem[], warnings: string[]): number {
   let score = 100;
   // Trừ theo warning
