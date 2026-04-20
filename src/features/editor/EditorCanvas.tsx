@@ -227,7 +227,6 @@ function SlotEditor({
           width: "100%",
           height: "100%",
           overflow: "hidden",
-          fontStyle: hasBinding ? "italic" : undefined,
         }}
       >
         {displayText}
@@ -277,8 +276,9 @@ function SlotEditor({
         />
       )
     ) : (
-      <div className="w-full h-full bg-muted/50 grid place-items-center text-xs text-muted-foreground">
-        {hasBinding ? `🔗 ${slot.bindingPath}` : "Image (bind data)"}
+      <div className="w-full h-full bg-muted/50 grid place-items-center text-xs text-muted-foreground gap-1 flex-col">
+        <ImageIcon className="size-5 opacity-50" />
+        <span>Image placeholder</span>
       </div>
     );
     content = (
@@ -332,8 +332,9 @@ function SlotEditor({
   } else if (slot.kind === "section") {
     const sec = template.sections.find((s) => s.sectionId === slot.sectionRefId);
     content = (
-      <div className="w-full h-full bg-accent/30 border-2 border-dashed border-accent grid place-items-center text-accent-foreground text-xs p-2 text-center">
-        📦 Section: {sec?.title ?? "(chưa gán)"}
+      <div className="w-full h-full bg-accent/30 border-2 border-dashed border-accent grid place-items-center text-accent-foreground text-xs p-2 text-center gap-1">
+        <LayersIcon className="size-4" />
+        <span>Section: {sec?.title ?? "(chưa gán)"}</span>
       </div>
     );
   }
@@ -369,24 +370,6 @@ function SlotEditor({
       tabIndex={selected ? 0 : -1}
     >
       {content}
-      {hasBinding && (
-        <div
-          style={{
-            position: "absolute",
-            top: -22,
-            left: 0,
-            background: "#a855f7",
-            color: "white",
-            fontSize: 10,
-            padding: "1px 6px",
-            borderRadius: 3,
-            pointerEvents: "none",
-            whiteSpace: "nowrap",
-          }}
-        >
-          🔗 {slot.bindingPath}
-        </div>
-      )}
       {selected && !slot.locked && (
         <>
           {handles.map((hd) => (
