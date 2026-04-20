@@ -31,6 +31,12 @@ export const IMAGE_BINDING_OPTIONS: BindingFieldOption[] = [
   { value: "asset.byRole:section_image", label: "Ảnh role: section_image", group: "Asset" },
 ];
 
+function toDisplayText(value: unknown, fallback: string | undefined): string {
+  if (value == null) return fallback ?? "";
+  const text = String(value).trim();
+  return text || (fallback ?? "");
+}
+
 export function resolveTextBinding(
   bindingPath: string | undefined,
   entity: Entity | undefined,
@@ -39,21 +45,16 @@ export function resolveTextBinding(
   if (!bindingPath) return fallback ?? "";
   if (!entity) return `{{${bindingPath}}}`;
   if (bindingPath === "entity.signatureDish") {
-    const v = (entity.metadata?.signatureDish as string | undefined) ?? "";
-    return v || (fallback ?? "");
+    return toDisplayText(entity.metadata?.signatureDish, fallback);
   }
   // Cột raw từ sheet: entity.metadata.<key> (vd entity.metadata.Loai_dich_vu)
   if (bindingPath.startsWith("entity.metadata.")) {
     const key = bindingPath.slice("entity.metadata.".length);
-    const v = entity.metadata?.[key];
-    if (v == null || v === "") return fallback ?? "";
-    return String(v);
+    return toDisplayText(entity.metadata?.[key], fallback);
   }
   if (bindingPath.startsWith("entity.")) {
     const key = bindingPath.slice("entity.".length) as keyof Entity;
-    const v = entity[key];
-    if (v == null || v === "") return fallback ?? "";
-    return String(v);
+    return toDisplayText(entity[key], fallback);
   }
   return fallback ?? "";
 }
