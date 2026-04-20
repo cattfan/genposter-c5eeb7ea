@@ -146,19 +146,17 @@ export function EditorPage() {
         redo();
         return;
       }
+      // Paste có thể chạy ngay cả khi không có selection
+      if (mod && e.key.toLowerCase() === "v") {
+        e.preventDefault();
+        pasteSlot();
+        return;
+      }
       if (!selectedSlotId) return;
       // Delete
       if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
-        setDraft((prev) => {
-          if (!prev) return prev;
-          pastRef.current.push(JSON.parse(JSON.stringify(prev)));
-          futureRef.current = [];
-          const next = JSON.parse(JSON.stringify(prev)) as PageTemplate;
-          next.slots = next.slots.filter((s) => s.slotId !== selectedSlotId);
-          return next;
-        });
-        setSelectedSlotId(null);
+        deleteSlot(selectedSlotId);
         return;
       }
       // Ctrl+D = duplicate
@@ -167,15 +165,67 @@ export function EditorPage() {
         duplicateSlot(selectedSlotId);
         return;
       }
-      // [ ] = z-index
-      if (e.key === "]") {
+      // Ctrl+C = copy
+      if (mod && e.key.toLowerCase() === "c") {
         e.preventDefault();
-        moveZ(selectedSlotId, 1);
+        copySlot(selectedSlotId);
         return;
       }
-      if (e.key === "[") {
+      // Ctrl+X = cut
+      if (mod && e.key.toLowerCase() === "x") {
         e.preventDefault();
-        moveZ(selectedSlotId, -1);
+        cutSlot(selectedSlotId);
+        return;
+      }
+      // Z-order: Ctrl+Shift+] / Ctrl+] / Ctrl+[ / Ctrl+Shift+[
+      if (mod && e.key === "]") {
+        e.preventDefault();
+        orderSlot(selectedSlotId, e.shiftKey ? "front" : "forward");
+        return;
+      }
+      if (mod && e.key === "[") {
+        e.preventDefault();
+        orderSlot(selectedSlotId, e.shiftKey ? "back" : "backward");
+        return;
+      }
+      if (e.key === "]" && !mod) {
+        e.preventDefault();
+        orderSlot(selectedSlotId, "forward");
+        return;
+      }
+      if (e.key === "[" && !mod) {
+        e.preventDefault();
+        orderSlot(selectedSlotId, "backward");
+        return;
+      }
+      // F2 = rename
+      if (e.key === "F2") {
+        e.preventDefault();
+        setRenamingSlotId(selectedSlotId);
+        setLeftOpen(true);
+        return;
+      }
+      // Ctrl+H = toggle hidden
+      if (mod && e.key.toLowerCase() === "h") {
+        e.preventDefault();
+        toggleHidden(selectedSlotId);
+        return;
+      }
+      // Ctrl+L = toggle lock
+      if (mod && e.key.toLowerCase() === "l") {
+        e.preventDefault();
+        toggleLock(selectedSlotId);
+        return;
+      }
+      // Mũi tên = nudge ±1, Shift+Mũi tên = ±10
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "ArrowUp" || e.key === "ArrowDown") {
+        const cur = draft?.slots.find((s) => s.slotId === selectedSlotId);
+        if (!cur || cur.locked) return;
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+        const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+        updateSlot(selectedSlotId, { x: cur.x + dx, y: cur.y + dy });
         return;
       }
       // R = rotate 15°
