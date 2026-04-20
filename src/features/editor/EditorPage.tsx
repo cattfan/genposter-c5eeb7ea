@@ -443,11 +443,11 @@ export function EditorPage() {
                         onClick={() => setSelectedSlotId(s.slotId)}
                         className="flex-1 text-left truncate flex items-center gap-1"
                       >
-                        {s.bindingPath && <Link2 className="size-3 text-purple-400 shrink-0" />}
+                        {s.isUploadedBackground && <Lock className="size-3 shrink-0 opacity-60" />}
                         <span className="truncate">
                           [{s.kind}
                           {s.kind === "shape" && s.shapeKind ? `:${s.shapeKind}` : ""}]{" "}
-                          {s.staticText?.slice(0, 14) ?? s.bindingPath?.slice(0, 14) ?? s.slotId.slice(0, 6)}
+                          {s.staticText?.slice(0, 14) ?? s.slotId.slice(0, 6)}
                         </span>
                       </button>
                       <button
@@ -614,8 +614,8 @@ export function EditorPage() {
                   </Button>
                 </div>
                 {selectedSlot.isUploadedBackground && (
-                  <p className="text-xs text-muted-foreground italic">
-                    🖼 Ảnh nền upload — luôn ở layer dưới cùng, không nhân bản được.
+                  <p className="text-xs text-muted-foreground italic flex items-center gap-1">
+                    <Lock className="size-3" /> Ảnh nền upload — luôn ở layer dưới cùng, không nhân bản được.
                   </p>
                 )}
                 <div className="grid grid-cols-2 gap-2">
@@ -662,38 +662,7 @@ export function EditorPage() {
                   </div>
                 </div>
 
-                {/* Bind data — chỉ cho text & image */}
-                {(selectedSlot.kind === "text" || selectedSlot.kind === "image") && (
-                  <div className="border-t pt-2 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-xs uppercase text-muted-foreground">
-                        {slotHasBinding(selectedSlot) ? <><Link2 className="size-3 inline mr-1 text-purple-500" /> Đã liên kết</> : "Nguồn dữ liệu"}
-                      </Label>
-                      {slotHasBinding(selectedSlot) && (
-                        <Button size="sm" variant="ghost" className="h-6 px-2 text-xs"
-                          onClick={() => updateSlot(selectedSlot.slotId, { bindingPath: undefined })}>
-                          <Link2Off className="size-3 mr-1" /> Xoá liên kết
-                        </Button>
-                      )}
-                    </div>
-                    <Select
-                      value={selectedSlot.bindingPath ?? "_static"}
-                      onValueChange={(v) => updateSlot(selectedSlot.slotId, { bindingPath: v === "_static" ? undefined : v })}
-                    >
-                      <SelectTrigger className="h-8"><SelectValue placeholder="Cố định" /></SelectTrigger>
-                      <SelectContent>
-                        {(selectedSlot.kind === "text" ? TEXT_BINDING_OPTIONS : IMAGE_BINDING_OPTIONS).map((o) => (
-                          <SelectItem key={o.value || "_static"} value={o.value || "_static"}>
-                            {o.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-[10px] text-muted-foreground italic">
-                      Block không liên kết = giữ nội dung tĩnh khi generate. Block đã liên kết = nhận dữ liệu từ entity.
-                    </p>
-                  </div>
-                )}
+                {/* Bind dữ liệu được thực hiện ở trang "Tạo nội dung" — editor không còn dropdown bind. */}
 
                 {selectedSlot.kind === "text" && (
                   <div className="space-y-2">
