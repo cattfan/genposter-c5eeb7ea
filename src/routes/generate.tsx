@@ -35,6 +35,8 @@ import {
   Image as ImageIcon,
   Type,
   Star,
+  Wand2,
+  Loader2,
 } from "lucide-react";
 import type { Entity, Slot } from "@/models";
 import {
@@ -45,6 +47,8 @@ import {
 } from "@/engines/binding/dataBinding";
 import { BindCanvas } from "@/features/generate/BindCanvas";
 import { useBindOverrides, useEffectiveTemplate } from "@/features/generate/useBindOverrides";
+import { aiSuggestBindingsServer, aiCaptionFromEntityServer } from "@/server/aiTemplate";
+import { SuggestBindingsModal, type BindSuggestion } from "@/features/ai/SuggestBindingsModal";
 
 export const Route = createFileRoute("/generate")({
   component: GeneratePage,
@@ -117,6 +121,14 @@ function GeneratePage() {
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
   const [previewEntityId, setPreviewEntityId] = useState<string | undefined>(undefined);
   const { overrides: bindOverrides, setBinding, clearBinding, resetAll } = useBindOverrides();
+
+  // === AI suggest bindings ===
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [suggestBusy, setSuggestBusy] = useState(false);
+  const [suggestions, setSuggestions] = useState<BindSuggestion[]>([]);
+
+  // === AI caption ===
+  const [captionBusy, setCaptionBusy] = useState(false);
 
   const selectedTpl = tpls?.find((t) => t.pageTemplateId === tplId);
   const effectiveTpl = useEffectiveTemplate(selectedTpl, bindOverrides);
@@ -197,6 +209,78 @@ function GeneratePage() {
     }
     return set;
   }, [effectiveTpl, selectedSlot]);
+
+  // Tập cột data có sẵn từ entity (top-level + metadata) — feed cho AI bind suggest.
+  const dataColumns = useMemo(() => {
+    const set = new Set<string>();
+    (entities ?? []).slice(0, 50).forEach((e) => {
+      ["name", "address", "phone", "priceRange", "style", "openingHours", "categoryMain", "categorySub"].forEach((k) => {
+        const v = (e as unknown as Record<string, unknown>)[k];
+        if (v != null && v !== "") set.add(k);
+      });
+      if (e.metadata) Object.keys(e.metadata).forEach((k) => set.add("metadata." + k));
+    });
+    return Array.from(set);
+  }, [entities]);
+
+  const runAiSuggest = async () => {
+    if (!effectiveTpl) return toast.error("Chưa chọn template");
+    const slotsForAi = effectiveTpl.slots
+      .filter((s) => s.kind === "text" || s.kind === "image" || s.kind === "shape")
+      .map((s) => ({
+        slotId: s.slotId,
+        kind: s.kind,
+        placeholder: s.staticText,
+        staticText: s.staticText,
+      }));
+    if (slotsForAi.length === 0) return toast.error("Template không có slot bindable");
+    setSuggestBusy(true);
+    try {
+      const out = await aiSuggestBindingsServer({
+        data: { slots: slotsForAi, columns: dataColumns },
+      });
+      if (!out.ok) return toast.error(out.error);
+      setSuggestions(out.suggestions);
+      setSuggestOpen(true);
+    } catch (e) {
+      toast.error("AI lỗi: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setSuggestBusy(false);
+    }
+  };
+
+  const applyAiSuggestions = (selected: BindSuggestion[]) => {
+    selected.forEach((s) => setBinding(s.slotId, s.suggestedBindingPath));
+    toast.success(`Đã áp dụng ${selected.length} liên kết`);
+  };
+
+  const runAiCaption = async () => {
+    if (!selectedSlot || selectedSlot.kind !== "text") return;
+    if (!previewEntity) return toast.error("Chọn entity preview trước");
+    setCaptionBusy(true);
+    try {
+      const out = await aiCaptionFromEntityServer({
+        data: { entity: previewEntity as unknown as Record<string, unknown>, style: "instagram" },
+      });
+      if (!out.ok) return toast.error(out.error);
+      setBinding(selectedSlot.slotId, undefined);
+      if (effectiveTpl) {
+        const tpl = await db.pageTemplates.get(effectiveTpl.pageTemplateId);
+        if (tpl) {
+          tpl.slots = tpl.slots.map((s) =>
+            s.slotId === selectedSlot.slotId ? { ...s, staticText: out.caption } : s,
+          );
+          tpl.updatedAt = Date.now();
+          await db.pageTemplates.put(tpl);
+        }
+      }
+      toast.success("Đã sinh caption");
+    } catch (e) {
+      toast.error("AI lỗi: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setCaptionBusy(false);
+    }
+  };
 
   const generateByEntity = () => {
     if (!effectiveTpl) return toast.error("Chưa chọn template");
@@ -369,11 +453,27 @@ function GeneratePage() {
                   <MousePointerClick className="size-4" />
                   Click block để liên kết dữ liệu
                 </CardTitle>
-                {Object.keys(bindOverrides).length > 0 && (
-                  <Button size="sm" variant="ghost" onClick={resetAll} className="h-7 text-xs">
-                    <Link2Off className="size-3 mr-1" /> Reset bind
+                <div className="flex gap-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={runAiSuggest}
+                    disabled={!effectiveTpl || suggestBusy}
+                    className="h-7 text-xs"
+                  >
+                    {suggestBusy ? (
+                      <Loader2 className="size-3 mr-1 animate-spin" />
+                    ) : (
+                      <Wand2 className="size-3 mr-1" />
+                    )}
+                    AI gợi ý bind
                   </Button>
-                )}
+                  {Object.keys(bindOverrides).length > 0 && (
+                    <Button size="sm" variant="ghost" onClick={resetAll} className="h-7 text-xs">
+                      <Link2Off className="size-3 mr-1" /> Reset
+                    </Button>
+                  )}
+                </div>
               </CardHeader>
               <CardContent>
                 {!effectiveTpl ? (
@@ -462,6 +562,22 @@ function GeneratePage() {
                         </p>
                       )}
                     </div>
+                    {selectedSlot.kind === "text" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="w-full"
+                        onClick={runAiCaption}
+                        disabled={captionBusy || !previewEntity}
+                      >
+                        {captionBusy ? (
+                          <Loader2 className="size-3 mr-1 animate-spin" />
+                        ) : (
+                          <Wand2 className="size-3 mr-1" />
+                        )}
+                        AI caption (từ data thật)
+                      </Button>
+                    )}
                     {selectedSlot.bindingPath && (
                       <Button
                         size="sm"
@@ -588,6 +704,14 @@ function GeneratePage() {
               </CardContent>
             </Card>
           )}
+
+          <SuggestBindingsModal
+            open={suggestOpen}
+            onOpenChange={setSuggestOpen}
+            suggestions={suggestions}
+            slots={effectiveTpl?.slots ?? []}
+            onApply={applyAiSuggestions}
+          />
         </TabsContent>
 
         {/* === TAB: theo pack (luồng cũ) === */}
