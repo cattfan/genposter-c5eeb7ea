@@ -162,7 +162,7 @@ function BindSlot({
         {src ? (
           <>
             <img
-              src={src}
+              src={resolvedSrc ?? src}
               alt=""
               draggable={false}
               style={{ width: "100%", height: "100%", objectFit: fit, filter, pointerEvents: "none" }}
@@ -182,6 +182,7 @@ function BindSlot({
       const r = resolveImageBinding(slot.bindingPath, entity, assets, src);
       if (r.src) src = r.src;
     }
+    const resolvedImgSrc = useResolvedImageSrc(src);
     const filter = buildCssFilter(slot.style);
     const objectFit = (slot.style?.fit === "stretch" ? "fill" : slot.style?.fit ?? "cover") as React.CSSProperties["objectFit"];
     const crop = slot.crop;
@@ -190,7 +191,7 @@ function BindSlot({
         {src ? (
           crop ? (
             <img
-              src={src}
+              src={resolvedImgSrc ?? src}
               alt=""
               draggable={false}
               style={{
@@ -206,7 +207,7 @@ function BindSlot({
             />
           ) : (
             <img
-              src={src}
+              src={resolvedImgSrc ?? src}
               alt=""
               draggable={false}
               style={{ width: "100%", height: "100%", objectFit, filter, pointerEvents: "none" }}
