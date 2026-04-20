@@ -13,6 +13,7 @@ import {
 } from "@/engines/binding/dataBinding";
 import { CropOverlay } from "./CropOverlay";
 import { SlotContextMenu, type SlotMenuActions } from "./SlotContextMenu";
+import { useResolvedImageSrc } from "@/storage/imageSrc";
 
 export function NumField({
   label,
@@ -245,7 +246,7 @@ function SlotEditor({
   } else if (slot.kind === "image") {
     const filter = buildCssFilter(slot.style);
     const objectFit = (slot.style?.fit === "stretch" ? "fill" : slot.style?.fit ?? "cover") as React.CSSProperties["objectFit"];
-    const displaySrc = slot.staticImage;
+    const displaySrc = useResolvedImageSrc(slot.staticImage) ?? slot.staticImage;
     const crop = slot.crop;
 
     // Khi có crop, render qua wrapper overflow:hidden + img scale lên rồi offset
@@ -315,7 +316,7 @@ function SlotEditor({
     const radius = shapeBorderRadius(slot.shapeKind, slot.style?.borderRadius, zoom);
     const clip = slot.shapeKind ? shapeClipPath(slot.shapeKind) : undefined;
     const objectFit = (slot.style?.fit === "stretch" ? "fill" : slot.style?.fit ?? "cover") as React.CSSProperties["objectFit"];
-    const src = slot.staticImage;
+    const src = useResolvedImageSrc(slot.staticImage) ?? slot.staticImage;
 
     if (slot.shapeKind === "line" || slot.shapeKind === "divider") {
       content = (
