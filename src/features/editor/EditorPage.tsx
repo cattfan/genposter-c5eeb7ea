@@ -607,47 +607,39 @@ export function EditorPage() {
             <div className="text-xs font-semibold text-muted-foreground uppercase mb-2">
               Layers ({draft.slots.length})
             </div>
-            <div className="space-y-1">
+            <div className="space-y-0.5">
               {draft.slots
                 .slice()
                 .sort((a, b) => (b.zIndex ?? 0) - (a.zIndex ?? 0))
-                .map((s) => {
-                  const isSel = s.slotId === selectedSlotId;
-                  return (
-                    <div
-                      key={s.slotId}
-                      className={
-                        "group flex items-center gap-1 px-2 py-1 text-xs rounded " +
-                        (isSel ? "bg-primary text-primary-foreground" : "hover:bg-muted")
-                      }
-                    >
-                      <button
-                        onClick={() => setSelectedSlotId(s.slotId)}
-                        className="flex-1 text-left truncate flex items-center gap-1"
-                      >
-                        {s.isUploadedBackground && <Lock className="size-3 shrink-0 opacity-60" />}
-                        <span className="truncate">
-                          [{s.kind}
-                          {s.kind === "shape" && s.shapeKind ? `:${s.shapeKind}` : ""}]{" "}
-                          {s.staticText?.slice(0, 14) ?? s.slotId.slice(0, 6)}
-                        </span>
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteSlot(s.slotId);
-                        }}
-                        className={
-                          "opacity-0 group-hover:opacity-100 p-0.5 rounded " +
-                          (isSel ? "hover:bg-primary-foreground/20" : "hover:bg-destructive hover:text-destructive-foreground")
-                        }
-                        title="Xoá layer"
-                      >
-                        <Trash2 className="size-3" />
-                      </button>
-                    </div>
-                  );
-                })}
+                .map((s) => (
+                  <LayerRow
+                    key={s.slotId}
+                    slot={s}
+                    selected={s.slotId === selectedSlotId}
+                    renaming={renamingSlotId === s.slotId}
+                    onSelect={() => setSelectedSlotId(s.slotId)}
+                    onStartRename={() => {
+                      setSelectedSlotId(s.slotId);
+                      setRenamingSlotId(s.slotId);
+                    }}
+                    onCommitRename={(name) => {
+                      renameSlot(s.slotId, name);
+                      setRenamingSlotId(null);
+                    }}
+                    onCancelRename={() => setRenamingSlotId(null)}
+                    onToggleHidden={() => toggleHidden(s.slotId)}
+                    onToggleLock={() => toggleLock(s.slotId)}
+                    onDelete={() => deleteSlot(s.slotId)}
+                    menuActions={buildSlotMenuActions(s.slotId)}
+                    dragOver={dragOverLayerId === s.slotId}
+                    onDragStart={() => {
+                      dragLayerIdRef.current = s.slotId;
+                    }}
+                    onDragEnter={() => setDragOverLayerId(s.slotId)}
+                    onDragLeave={() => setDragOverLayerId(null)}
+                    onDrop={() => handleLayerDrop(s.slotId)}
+                  />
+                ))}
               {draft.slots.length === 0 && (
                 <p className="text-xs text-muted-foreground italic">Chưa có layer nào</p>
               )}
@@ -752,6 +744,7 @@ export function EditorPage() {
             onSelect={setSelectedSlotId}
             onUpdateSlot={updateSlot}
             onDeleteSlot={deleteSlot}
+            buildMenuActions={buildSlotMenuActions}
           />
           {draft.slots.length === 0 && (
             <div className="absolute inset-8 pointer-events-none border-2 border-dashed border-muted-foreground/30 rounded-xl grid place-items-center">
