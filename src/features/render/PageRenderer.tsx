@@ -24,6 +24,7 @@ import {
 } from "@/engines/binding/dataBinding";
 import { buildSlotImagePlan, type PlannedImage, type SlotImagePlan } from "@/engines/binding/imagePlan";
 import { useResolvedImageSrc } from "@/storage/imageSrc";
+import { expandPageWithCardGroups, type ExpandedSlot } from "@/engines/binding/cardRepeater";
 
 interface Props {
   template: PageTemplate;
@@ -35,6 +36,8 @@ interface Props {
   innerRef?: React.Ref<HTMLDivElement>;
   // Chế độ generate-theo-entity: 1 entity ăn vào tất cả block có bindingPath
   entity?: Entity;
+  /** Pool entity dùng cho Card Repeater (template.cardGroups). Mặc định = [entity]. */
+  entityPool?: Entity[];
 }
 
 export function PageRenderer({
@@ -46,6 +49,7 @@ export function PageRenderer({
   debug = false,
   innerRef,
   entity,
+  entityPool,
 }: Props) {
   const entityMap = useMemo(() => new Map(entities.map((e) => [e.entityId, e])), [entities]);
   const assetMap = useMemo(() => new Map(assets.map((a) => [a.assetId, a])), [assets]);
