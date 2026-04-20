@@ -255,17 +255,58 @@ function GeneratePage() {
                   </Select>
                 </div>
                 <div>
-                  <Label className="text-xs">Lọc category</Label>
-                  <Input
-                    value={filterCategory}
-                    onChange={(e) => setFilterCategory(e.target.value)}
-                    placeholder="vd: cafe, quan_an"
-                  />
+                  <Label className="text-xs">Nguồn dữ liệu (sheet)</Label>
+                  <Select value={selectedSheet} onValueChange={(v) => { setSelectedSheet(v); setFilterMoHinh("__all__"); setFilterPhongCach("__all__"); }}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">Tất cả</SelectItem>
+                      {sheetOptions.map((s) => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
+                <div>
+                  <Label className="text-xs">Lọc Mô hình (Mo_hinh)</Label>
+                  <Select value={filterMoHinh} onValueChange={setFilterMoHinh}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">Tất cả</SelectItem>
+                      {moHinhOptions.map((s) => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">Lọc Phong cách (Phong_cach)</Label>
+                  <Select value={filterPhongCach} onValueChange={setFilterPhongCach}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">Tất cả</SelectItem>
+                      {phongCachOptions.map((s) => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox checked={prioritizePartner} onCheckedChange={(v) => setPrioritizePartner(!!v)} />
+                  Ưu tiên đối tác (xếp lên đầu)
+                </label>
                 <label className="flex items-center gap-2 text-sm">
                   <Checkbox checked={onlyPartner} onCheckedChange={(v) => setOnlyPartner(!!v)} />
                   Chỉ entity đối tác
                 </label>
+                <div>
+                  <Label className="text-xs">Số trang tối đa</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={maxPages}
+                    onChange={(e) => setMaxPages(Number(e.target.value) || 1)}
+                  />
+                </div>
                 <div className="border-t pt-3 space-y-2 text-xs text-muted-foreground">
                   <div className="flex justify-between">
                     <span>Entity phù hợp</span>
@@ -284,7 +325,7 @@ function GeneratePage() {
                       <SelectContent>
                         {filteredEntities.map((e) => (
                           <SelectItem key={e.entityId} value={e.entityId}>
-                            {e.name}
+                            {e.partnerFlag ? "★ " : ""}{e.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
