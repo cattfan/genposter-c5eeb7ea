@@ -573,6 +573,7 @@ export function PackTabContent({
                       onSelectSlot={setSelectedSlotId}
                       entity={previewEntity}
                       assets={assets}
+                      entityPool={filteredEntities}
                     />
                   </div>
                 )}

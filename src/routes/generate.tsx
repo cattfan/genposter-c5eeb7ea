@@ -490,6 +490,7 @@ function GeneratePage() {
                       onSelectSlot={setSelectedSlotId}
                       entity={previewEntity}
                       assets={assets ?? []}
+                      entityPool={entities ?? []}
                     />
                   </div>
                 )}

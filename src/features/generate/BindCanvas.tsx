@@ -15,6 +15,7 @@ import {
 } from "@/engines/binding/dataBinding";
 import { buildSlotImagePlan, type PlannedImage, type SlotImagePlan } from "@/engines/binding/imagePlan";
 import { useResolvedImageSrc } from "@/storage/imageSrc";
+import { expandPageWithCardGroups } from "@/engines/binding/cardRepeater";
 
 export function BindCanvas({
   template,
@@ -23,6 +24,7 @@ export function BindCanvas({
   onSelectSlot,
   entity,
   assets,
+  entityPool,
 }: {
   template: PageTemplate;
   scale: number;
@@ -30,6 +32,7 @@ export function BindCanvas({
   onSelectSlot: (id: string | null) => void;
   entity?: Entity;
   assets: Asset[];
+  entityPool?: Entity[];
 }) {
   const { width, height, background, backgroundImage } = template.canvas;
   const resolvedBg = useResolvedImageSrc(backgroundImage);
@@ -38,6 +41,16 @@ export function BindCanvas({
   const imagePlan: SlotImagePlan = useMemo(
     () => buildSlotImagePlan(template, entity, assets),
     [template, entity, assets],
+  );
+
+  // Card Repeater: ghost preview các card clone (cardIndex >= 1) — mờ, không clickable.
+  const expanded = useMemo(() => {
+    const pool = entityPool && entityPool.length > 0 ? entityPool : entity ? [entity] : [];
+    return expandPageWithCardGroups(template, pool);
+  }, [template, entityPool, entity]);
+  const ghostSlots = useMemo(
+    () => expanded.slots.filter((s) => s.cardIndex > 0),
+    [expanded],
   );
 
   return (
@@ -58,21 +71,133 @@ export function BindCanvas({
         boxShadow: "0 8px 24px rgba(0,0,0,0.08)",
       }}
     >
+      {/* Ghost cards (clone) — render TRƯỚC để slot gốc nằm trên */}
+      {ghostSlots.map((slot) => {
+        const cardEnt = slot.__cardEntityId
+          ? expanded.entityBySlotId.get(slot.slotId)
+          : undefined;
+        return (
+          <GhostSlot
+            key={slot.slotId}
+            slot={slot}
+            scale={scale}
+            entity={cardEnt}
+            label={
+              slot.cardIndex === 1 && isFirstSlotOfCard(slot, expanded.slots)
+                ? `Card ${slot.cardIndex + 1}: ${cardEnt?.name ?? "—"}`
+                : undefined
+            }
+          />
+        );
+      })}
+
       {template.slots
         .slice()
         .filter((s) => !s.style?.hidden)
         .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
-        .map((slot) => (
-          <BindSlot
-            key={slot.slotId}
-            slot={slot}
-            scale={scale}
-            selected={slot.slotId === selectedSlotId}
-            onSelect={() => onSelectSlot(slot.slotId)}
-            entity={entity}
-            planned={imagePlan.get(slot.slotId)}
-          />
-        ))}
+        .map((slot) => {
+          const inCardGroup = !!slot.groupId &&
+            (template.cardGroups ?? []).some((g) => g.groupId === slot.groupId);
+          const cardCfg = inCardGroup
+            ? (template.cardGroups ?? []).find((g) => g.groupId === slot.groupId)
+            : undefined;
+          return (
+            <BindSlot
+              key={slot.slotId}
+              slot={slot}
+              scale={scale}
+              selected={slot.slotId === selectedSlotId}
+              onSelect={() => onSelectSlot(slot.slotId)}
+              entity={entity}
+              planned={imagePlan.get(slot.slotId)}
+              cardBadge={cardCfg ? `↻ ${cardCfg.repeatCount}` : undefined}
+            />
+          );
+        })}
+    </div>
+  );
+}
+
+/** Slot đầu tiên của 1 card (theo y/x nhỏ nhất trong cùng cardIndex+cardGroupId). */
+function isFirstSlotOfCard(slot: Slot & { cardIndex: number; cardGroupId?: string }, allExpanded: Array<Slot & { cardIndex: number; cardGroupId?: string }>): boolean {
+  const sameCard = allExpanded.filter(
+    (s) => s.cardGroupId === slot.cardGroupId && s.cardIndex === slot.cardIndex,
+  );
+  const top = sameCard.reduce((acc, s) => (s.y < acc.y ? s : acc), sameCard[0]);
+  return top.slotId === slot.slotId;
+}
+
+function GhostSlot({
+  slot,
+  scale,
+  entity,
+  label,
+}: {
+  slot: Slot & { __cardEntityId?: string };
+  scale: number;
+  entity?: Entity;
+  label?: string;
+}) {
+  const baseStyle: React.CSSProperties = {
+    position: "absolute",
+    left: slot.x * scale,
+    top: slot.y * scale,
+    width: slot.width * scale,
+    height: slot.height * scale,
+    opacity: 0.45,
+    pointerEvents: "none",
+    outline: "1px dashed hsl(var(--primary) / 0.4)",
+    outlineOffset: 0,
+    boxSizing: "border-box",
+    overflow: "hidden",
+  };
+
+  let inner: React.ReactNode = null;
+  if (slot.kind === "text") {
+    const text = slot.bindingPath ? resolveTextBinding(slot.bindingPath, entity, slot.staticText) : (slot.staticText ?? "");
+    const textCss = buildTextStyle(slot.style, scale);
+    inner = <div style={textCss}>{text}</div>;
+  } else if (slot.kind === "image" || slot.kind === "shape") {
+    inner = (
+      <div
+        style={{
+          width: "100%",
+          height: "100%",
+          background: slot.kind === "shape" ? slot.style?.fill ?? "hsl(var(--muted))" : "hsl(var(--muted))",
+          borderRadius: shapeBorderRadius(slot.shapeKind, slot.style?.borderRadius, scale),
+          display: "grid",
+          placeItems: "center",
+          color: "hsl(var(--muted-foreground))",
+          fontSize: 10 * scale,
+        }}
+      >
+        {slot.kind === "image" ? "🖼" : ""}
+      </div>
+    );
+  }
+
+  return (
+    <div style={baseStyle}>
+      {inner}
+      {label && (
+        <div
+          style={{
+            position: "absolute",
+            top: -18,
+            left: 0,
+            background: "hsl(var(--primary))",
+            color: "hsl(var(--primary-foreground))",
+            fontSize: 10,
+            padding: "2px 6px",
+            borderRadius: 4,
+            fontWeight: 600,
+            opacity: 1,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {label}
+        </div>
+      )}
     </div>
   );
 }
@@ -84,6 +209,7 @@ function BindSlot({
   onSelect,
   entity,
   planned,
+  cardBadge,
 }: {
   slot: Slot;
   scale: number;
@@ -91,6 +217,7 @@ function BindSlot({
   onSelect: () => void;
   entity?: Entity;
   planned?: PlannedImage;
+  cardBadge?: string;
 }) {
   const flip = buildFlipTransform(slot.style);
   const rot = slot.rotation ? `rotate(${slot.rotation}deg)` : "";
@@ -250,6 +377,7 @@ function BindSlot({
             ảnh trùng
           </div>
         )}
+        {selected && cardBadge && <CardBadge label={cardBadge} />}
       </div>
     );
   }
@@ -268,6 +396,7 @@ function BindSlot({
         }}
       >
         {text}
+        {selected && cardBadge && <CardBadge label={cardBadge} />}
       </div>
     );
   }
@@ -295,4 +424,28 @@ function BindSlot({
   }
 
   return null;
+}
+
+function CardBadge({ label }: { label: string }) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: -22,
+        right: -2,
+        background: "hsl(var(--primary))",
+        color: "hsl(var(--primary-foreground))",
+        fontSize: 10,
+        padding: "2px 6px",
+        borderRadius: 4,
+        fontWeight: 700,
+        whiteSpace: "nowrap",
+        pointerEvents: "none",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+      }}
+      title="Block này thuộc Card mẫu — sẽ được lặp"
+    >
+      {label}
+    </div>
+  );
 }
