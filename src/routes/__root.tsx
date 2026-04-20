@@ -1,8 +1,11 @@
 import { Outlet, Link, createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
 import { Toaster } from "@/components/ui/sonner";
 import { AppShell } from "@/components/AppShell";
+import { buildGoogleFontsUrl } from "@/features/editor/fonts";
 
 import appCss from "../styles.css?url";
+
+const GOOGLE_FONTS_URL = buildGoogleFontsUrl();
 
 function NotFoundComponent() {
   return (
@@ -39,10 +42,9 @@ export const Route = createRootRoute({
     ],
     links: [
       { rel: "stylesheet", href: appCss },
-      {
-        rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800;900&display=swap",
-      },
+      { rel: "preconnect", href: "https://fonts.googleapis.com" },
+      { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
+      { rel: "stylesheet", href: GOOGLE_FONTS_URL },
     ],
   }),
   shellComponent: RootShell,
