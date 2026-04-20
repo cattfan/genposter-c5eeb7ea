@@ -451,6 +451,8 @@ export function EditorPage() {
     setSelectedSlotId(slots[0].slotId);
     toast.success("Đã chèn Header Badge ngày — sửa text 'NGÀY 1 - $690' cho phù hợp");
   };
+
+  const addImageFromFile = async (file: File, dropX?: number, dropY?: number) => {
     if (!file.type.startsWith("image/")) {
       toast.error("File không phải ảnh: " + file.name);
       return;
