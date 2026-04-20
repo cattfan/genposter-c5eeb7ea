@@ -317,7 +317,15 @@ function GeneratePage() {
                   </p>
                 )}
                 {selectedSlot && selectedSlot.kind !== "text" && selectedSlot.kind !== "image" && (
-                  <p className="text-xs text-muted-foreground">Block loại "{selectedSlot.kind}" không hỗ trợ liên kết.</p>
+                  <div className="rounded-md border border-dashed bg-muted/30 p-3 space-y-1">
+                    <div className="flex items-center gap-2 text-xs font-medium">
+                      <AlertTriangle className="size-3.5" />
+                      Block "{selectedSlot.kind}" là khối trang trí
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Shape / section dùng để tạo nền, viền, khung trang trí — không có dữ liệu để đổ vào. Chỉ block <b>text</b> và <b>image</b> mới liên kết được trường data.
+                    </p>
+                  </div>
                 )}
                 {selectedSlot && (selectedSlot.kind === "text" || selectedSlot.kind === "image") && (
                   <>
