@@ -1,86 +1,67 @@
 
 
-## Tính năng "Tạo combo mẫu" (multi-template pack)
+## Vấn đề
+Tab "Pack template (nâng cao)" hiện render slot `staticText` thô ("Tên quán", "Địa chỉ"…) vì:
+- `generatePackJob` không resolve `bindingPath` của text/image slot — chỉ xử lý `sections` cũ + 1 hero cover.
+- `PageRenderer` cho pack KHÔNG nhận `entity` prop nên `resolveTextBinding` không chạy.
+- Tab pack thiếu UI filter sheet, bind, AI suggest như tab entity.
 
-User chọn **cả 2 hướng** + **AI tự suy ra role mỗi page** + **không giới hạn số ảnh**.
+## Giải pháp — đồng bộ tab Pack với tab Entity
 
-## Phần A — AI dựng combo từ nhiều ảnh (1 lần upload → cả pack)
+### 1. Mở rộng `generatePackJob` (`src/engines/selection/generate.ts`)
+Thêm input mới:
+```ts
+{
+  mode: "one-entity-per-pack" | "one-entity-per-page",
+  entityPool: Entity[],   // đã filter sẵn từ UI
+  bindOverrides: BindOverride[], // override binding per-page (designer/AI)
+}
+```
+- **Mode `one-entity-per-pack`**: chọn N entity → với mỗi entity sinh đủ pack (orderedPages.length pages). Mỗi `RenderedPage` lưu `entityId` để renderer biết.
+- **Mode `one-entity-per-page`**: lặp orderedPages, mỗi page lấy 1 entity từ pool theo round-robin (ưu tiên đối tác).
+- Lưu `entityId` vào `RenderedPage` (bổ sung field optional vào model `RenderedPage`).
 
-### A1. Server function mới `aiGenerateComboFromImagesServer`
-File: `src/server/aiTemplate.ts` (thêm vào).
+### 2. `PageRenderer` cho pack
+Trong `generate.tsx` (tab pack), khi map `filteredPages` → truyền thêm prop `entity={entityMap.get(p.entityId)}` để text/image bindings tự resolve (cơ chế đã có sẵn trong renderer).
 
-Input: `{ images: Array<{ dataUrl: string; hint?: string }> }` (validate mỗi ảnh ≤6MB, tổng ≤30MB để khỏi vỡ payload).
+### 3. UI tab Pack (`src/routes/generate.tsx` tab `value="pack"`)
+Layout 3 cột giống tab entity:
 
-Pipeline 2 bước:
-- **Bước 1 — classify roles**: 1 lần gọi AI với tất cả ảnh thumbnail + tool `classify_pages` → trả `Array<{index, role: "cover"|"utilities"|"day"|"outro"|"other", dayNumber?, suggestedName, packTheme}>`. Để AI nhìn tổng thể đoán ra 6 ảnh là 4N3Đ Đà Lạt.
-- **Bước 2 — gen layout từng page**: lặp `aiGenerateTemplateFromImageServer` (đã có) cho từng ảnh, **truyền thêm hint role** vào prompt để AI biết "ảnh này là Cover/Day 1/Utilities" → layout chuẩn hơn (vd day page tự thêm badge `NGÀY {{day}} - $...`).
-- Trả về `{ ok, pages: Array<{layoutJson, role, dayNumber?, suggestedName}>, packMeta: {name, goal, tone, cta} }`.
+**Cột trái — Cấu hình** (copy nguyên từ tab entity):
+- Pack template select
+- Toggle chế độ: "1 entity / nguyên pack" ↔ "Mỗi page 1 entity"
+- Sheet, Mô hình, Phong cách, đối tác, max pages
+- Nút Generate + Debug
 
-Concurrency: chạy `Promise.all` nhưng giới hạn 3 song song để không vượt rate-limit.
+**Cột giữa — Canvas bind từng page**:
+- Tab ngang chọn page trong pack (page 1, page 2, page 3…)
+- `BindCanvas` của page đang xem → click slot để bind
+- Nút "AI gợi ý bind cho page này" (dùng `aiSuggestBindings` sẵn có)
+- Nút "AI gợi ý bind cho TẤT CẢ pages" (loop từng page)
+- Bind override lưu per-page vào store mới `usePackBindOverrides` (mở rộng từ `useBindOverrides`).
 
-### A2. Parser → tạo Pack + Pages
-File mới: `src/features/ai/comboFromImages.ts`.
+**Cột phải — Sheet fields & preview**:
+- `SheetFieldsPanel` (đã có) — click field → bind cho slot đang chọn ở page hiện tại
+- Preview entity dropdown để xem trước
 
-`buildComboFromAiResult(result)` →
-- Với mỗi page: gọi `aiLayoutToTemplate(layout, suggestedName)` để ra `PageTemplate`.
-- Nếu `role === "day"` và `dayNumber` có → set `sections[].filterRules = [{field:"day", op:"eq", value: dayNumber}]` + `layoutMode: "zigzag"` (chèn vào page nếu AI chưa tạo section).
-- Sắp xếp theo thứ tự: cover → utilities → day asc → outro → other.
-- Tạo `PackTemplate` từ `packMeta` với `orderedPages` đúng thứ tự.
-- `db.transaction` write tất cả pageTemplates + packTemplate.
+### 4. Kết quả render
+Lưới pages giữ nguyên cấu trúc cũ NHƯNG:
+- Mỗi card hiển thị tên entity được bind vào
+- Truyền `entity` prop vào `PageRenderer` ⇒ text/image bindings hiển thị đúng dữ liệu
+- Group theo entity nếu mode `one-entity-per-pack` (vd "Quán ABC: page 1, 2, 3, 4")
+- Export ZIP giữ nguyên, đổi tên file theo slug entity
 
-### A3. UI "AI dựng combo" trong /templates
-File: `src/routes/templates.tsx`.
+### 5. Files thay đổi
+- `src/models/index.ts` — thêm `entityId?: string` vào `RenderedPage`
+- `src/engines/selection/generate.ts` — extend `GenerateInput` + 2 mode
+- `src/features/generate/jobStore.ts` — không đổi (chỉ lưu job)
+- `src/features/generate/usePackBindOverrides.ts` (mới) — Map<pageTemplateId, BindOverride[]>
+- `src/routes/generate.tsx` — viết lại nội dung TabsContent `value="pack"` (~250 LoC)
 
-Thêm nút **"AI dựng combo từ nhiều ảnh"** cạnh nút "AI dựng từ ảnh" hiện tại:
-- Multi-file input (`accept="image/*" multiple`).
-- Modal preview thumbnail + cho user nhập **packName** (optional, AI tự đặt nếu trống).
-- Progress bar: "Phân loại ảnh..." → "Dựng page 1/N..." → "Tạo pack..."
-- Xong → toast + navigate `/packs` mở pack vừa tạo trong builder.
-
-## Phần B — Pack Builder UI mạnh hơn
-
-File: `src/routes/packs.tsx` (rewrite phần builder, giữ list cũ).
-
-### B1. Drag-drop sắp xếp page
-- Dùng `@dnd-kit/core` + `@dnd-kit/sortable` (đã có trong stack shadcn ecosystem; cần `add_dependency` nếu chưa có).
-- Mỗi page item: thumbnail mini (dùng `PageRenderer` scale nhỏ như trang /templates), tên, badge role nếu có (cover/day/outro), nút xoá / lên / xuống.
-- Drag để đổi thứ tự `orderedPages`.
-
-### B2. Picker template với search & filter
-- Thay `flex-wrap gap` bằng list có search box + filter theo `type` (cover/itinerary/board/mixed).
-- Click "+ Thêm" → push vào `orderedPages` (cho phép trùng template trong cùng pack).
-
-### B3. Preview cả pack dạng strip
-- Section riêng dưới builder: hiển thị **strip ngang** tất cả page theo `orderedPages` ở scale 0.15, scroll horizontal — designer thấy được flow tổng thể.
-- Click 1 thumbnail → mở `/templates/$id/edit` ở tab mới.
-
-### B4. Lưu nhiều phiên bản combo
-- Nút "Duplicate pack" → clone `PackTemplate` với id mới, đặt tên `"... (copy)"`. Designer có thể giữ nhiều variant cùng data nguồn.
-
-### B5. Pack metadata mở rộng
-- Thêm field `description?: string` vào `PackTemplate` model + textarea trong builder.
-- Hiển thị `goal/tone/cta` thành các chip có nút edit inline thay vì input rời.
-
-## Files đụng tới
-
-**Sửa:**
-- `src/models/index.ts` — thêm `PackTemplate.description?: string`
-- `src/server/aiTemplate.ts` — thêm `aiGenerateComboFromImagesServer` (classify + gen pages concurrent)
-- `src/routes/templates.tsx` — nút "AI dựng combo từ nhiều ảnh" + modal upload nhiều ảnh
-- `src/routes/packs.tsx` — rewrite builder: drag-drop, search picker, strip preview, duplicate
-
-**Tạo mới:**
-- `src/features/ai/comboFromImages.ts` — parser AI result → PageTemplate[] + PackTemplate
-- `src/features/packs/PackBuilder.tsx` — component builder tách riêng (drag-drop, preview strip)
-- `src/features/packs/PackPagePreview.tsx` — thumbnail page mini dùng chung
-
-**Dependency mới:**
-- `@dnd-kit/core`, `@dnd-kit/sortable`, `@dnd-kit/utilities` (nếu chưa có)
-
-## Thứ tự triển khai
-1. **A1+A2** — server fn classify + gen + parser (nền tảng AI combo)
-2. **A3** — UI upload nhiều ảnh trong /templates
-3. **B5** — model `PackTemplate.description` (cần trước builder)
-4. **B1+B2+B3** — pack builder mới với drag-drop + preview strip
-5. **B4** — duplicate pack
+### 6. Thứ tự triển khai
+1. Mở rộng model + `generatePackJob` 2 mode
+2. `usePackBindOverrides` hook
+3. UI tab pack 3 cột + truyền entity vào PageRenderer
+4. Tích hợp AI suggest bind (per-page và bulk)
+5. Test: chọn pack 4 page, mode "1 entity nguyên pack", filter sheet Choi_dem, bind text, generate → xem text "Tên quán" đổi thành tên thật
 
