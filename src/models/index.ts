@@ -217,6 +217,22 @@ export interface CanvasSize {
   backgroundImage?: string;
 }
 
+export interface CardGroupConfig {
+  /** ID của group (Slot.groupId) sẽ được lặp. */
+  groupId: ID;
+  /** Số card sẽ clone (gồm cả bản gốc). VD repeatCount=4 → 1 gốc + 3 clone. */
+  repeatCount: number;
+  /** Khoảng cách giữa 2 card liên tiếp (px ở canvas size, scale theo render). */
+  gap: number;
+  /** Chiều lặp card. */
+  direction: "vertical" | "horizontal";
+  /** (Tùy chọn) lọc entity nguồn — nếu trống dùng entityPool truyền vào renderer. */
+  entitySource?: {
+    sheetName?: string;
+    filterRules?: FilterRule[];
+  };
+}
+
 export interface PageTemplate {
   pageTemplateId: ID;
   name: string;
@@ -229,6 +245,8 @@ export interface PageTemplate {
   updatedAt: number;
   createdAt: number;
   thumbnail?: string;
+  /** Danh sách Card Repeater: mỗi mục biến 1 group slot thành N card lặp. */
+  cardGroups?: CardGroupConfig[];
 }
 
 export interface PackTemplate {
