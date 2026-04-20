@@ -52,9 +52,6 @@ function TemplatesPage() {
   };
 
   // === AI gen template từ ảnh ===
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [aiBusy, setAiBusy] = useState(false);
-
   const onPickAiImage = () => fileRef.current?.click();
 
   const onAiImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
