@@ -206,6 +206,7 @@ function SlotEditor({
   const rot = slot.rotation ? `rotate(${slot.rotation}deg)` : "";
   const transform = (rot + flip).trim() || undefined;
 
+  const isHidden = !!slot.style?.hidden;
   const baseStyle: React.CSSProperties = {
     position: "absolute",
     left: slot.x * zoom,
@@ -216,10 +217,13 @@ function SlotEditor({
     cursor: slot.locked ? "not-allowed" : "move",
     outline: selected
       ? "2px solid hsl(var(--primary))"
-      : "1px dashed rgba(0,0,0,0.15)",
+      : isHidden
+        ? "1px dashed rgba(239,68,68,0.5)"
+        : "1px dashed rgba(0,0,0,0.15)",
     outlineOffset: 0,
     boxSizing: "border-box",
-    opacity: slot.style?.opacity ?? 1,
+    // Khi ẩn: editor render mờ + viền đỏ để designer biết block tồn tại nhưng không xuất hiện trong export.
+    opacity: isHidden ? 0.25 : (slot.style?.opacity ?? 1),
     boxShadow: buildBoxShadow(slot.style, zoom),
   };
 
