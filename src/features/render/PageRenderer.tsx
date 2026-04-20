@@ -159,6 +159,7 @@ function SlotRenderer({
       const r = resolveImageBinding(slot.bindingPath, entity, assets, src);
       if (r.src) src = r.src;
     }
+    const resolvedShapeSrc = useResolvedImageSrc(src);
     const fit = (slot.style?.fit === "stretch" ? "fill" : slot.style?.fit ?? "cover") as React.CSSProperties["objectFit"];
     const filter = buildCssFilter(slot.style);
     const radius = shapeBorderRadius(slot.shapeKind, slot.style?.borderRadius, scale);
