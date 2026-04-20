@@ -49,6 +49,7 @@ import { BindCanvas } from "@/features/generate/BindCanvas";
 import { useBindOverrides, useEffectiveTemplate } from "@/features/generate/useBindOverrides";
 import { aiSuggestBindings, aiCaptionFromEntity } from "@/features/ai/aiFeatures";
 import { SuggestBindingsModal, type BindSuggestion } from "@/features/ai/SuggestBindingsModal";
+import { SheetFieldsPanel } from "@/features/generate/SheetFieldsPanel";
 
 export const Route = createFileRoute("/generate")({
   component: GeneratePage,
@@ -618,6 +619,27 @@ function GeneratePage() {
                     )}
                   </>
                 )}
+
+                {/* Panel field theo sheet — luôn hiện để designer chọn sheet và bind nhanh */}
+                <div className="border-t pt-3">
+                  <SheetFieldsPanel
+                    entities={entities ?? []}
+                    sheetOptions={sheetOptions}
+                    selectedSheet={selectedSheet}
+                    onSelectSheet={(s) => {
+                      setSelectedSheet(s);
+                      setFilterMoHinh("__all__");
+                      setFilterPhongCach("__all__");
+                    }}
+                    selectedSlot={selectedSlot}
+                    previewEntity={previewEntity}
+                    onBindToSelectedSlot={(path) => {
+                      if (!selectedSlot) return;
+                      setBinding(selectedSlot.slotId, path);
+                      toast.success(`Đã liên kết: ${path}`);
+                    }}
+                  />
+                </div>
               </CardContent>
             </Card>
           </div>
