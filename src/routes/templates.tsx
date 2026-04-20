@@ -23,6 +23,8 @@ function TemplatesPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const tpls = useLiveQuery(() => db.pageTemplates.orderBy("updatedAt").reverse().toArray(), []);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [aiBusy, setAiBusy] = useState(false);
 
   if (location.pathname !== "/templates") {
     return <Outlet />;
