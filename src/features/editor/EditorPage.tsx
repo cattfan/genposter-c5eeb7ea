@@ -5,6 +5,16 @@ import { db, saveBlob, getBlobURL } from "@/storage/db";
 import { nanoid } from "nanoid";
 import { Canvas, NumField } from "@/features/editor/EditorCanvas";
 import { FontPicker } from "@/features/editor/FontPicker";
+import { SlotContextMenu, type SlotMenuActions } from "@/features/editor/SlotContextMenu";
+import {
+  bringForward,
+  bringToFront,
+  inferLayerName,
+  reorderByPanel,
+  sendBackward,
+  sendToBack,
+} from "@/features/editor/layerOps";
+import { getClipboard, hasClipboard, pasteFromClipboard, setClipboard } from "@/features/editor/useClipboard";
 import type { PageTemplate, Slot, Section } from "@/models";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,6 +48,12 @@ import {
   FlipHorizontal,
   FlipVertical,
   Lock,
+  Unlock,
+  Eye,
+  EyeOff,
+  ChevronsUp,
+  ChevronsDown,
+  GripVertical,
   Undo2,
   Redo2,
   Bold,
