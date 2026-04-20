@@ -425,11 +425,18 @@ function SectionView({
             const ent = it.entityId ? entityMap.get(it.entityId) : undefined;
             const asset = it.assetId ? assetMap.get(it.assetId) : undefined;
             if (!ent) return null;
+            const isZigzag = section.layoutMode === "zigzag";
+            const flipRow = isZigzag && idx % 2 === 1;
+            const priceFromMeta =
+              (ent.metadata?.price as string | number | undefined) ??
+              (ent.metadata?.priceUsd as string | number | undefined);
+            const priceText = ent.priceRange ?? (priceFromMeta != null ? String(priceFromMeta) : undefined);
             return (
               <div
                 key={idx}
                 style={{
                   display: "flex",
+                  flexDirection: flipRow ? "row-reverse" : "row",
                   gap: 12 * scale,
                   alignItems: "center",
                   padding: 8 * scale,
@@ -445,13 +452,13 @@ function SectionView({
                       width: 80 * scale,
                       height: 80 * scale,
                       objectFit: "cover",
-                      borderRadius: 12 * scale,
+                      borderRadius: isZigzag ? 9999 : 12 * scale,
                       flexShrink: 0,
                     }}
                     alt=""
                   />
                 )}
-                <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ flex: 1, minWidth: 0, textAlign: flipRow ? "right" : "left" }}>
                   <div
                     style={{
                       fontWeight: 700,
@@ -492,9 +499,20 @@ function SectionView({
                       📍 {ent.address}
                     </div>
                   )}
-                  {ent.priceRange && (
-                    <div style={{ fontSize: 15 * scale, color: "#0f766e", fontWeight: 600 }}>
-                      💰 {ent.priceRange}
+                  {priceText && (
+                    <div
+                      style={{
+                        display: "inline-block",
+                        marginTop: 4 * scale,
+                        fontSize: 14 * scale,
+                        background: "#f97316",
+                        color: "#ffffff",
+                        fontWeight: 700,
+                        padding: `${3 * scale}px ${10 * scale}px`,
+                        borderRadius: 9999,
+                      }}
+                    >
+                      {priceText}
                     </div>
                   )}
                 </div>
