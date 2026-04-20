@@ -50,6 +50,7 @@ export function PageRenderer({
   const assetMap = useMemo(() => new Map(assets.map((a) => [a.assetId, a])), [assets]);
 
   const { width, height, background, backgroundImage } = template.canvas;
+  const resolvedBg = useResolvedImageSrc(backgroundImage);
 
   const sectionItemsMap = useMemo(() => {
     const m = new Map<string, Array<{ entityId?: string; assetId?: string }>>();
@@ -82,7 +83,7 @@ export function PageRenderer({
         position: "relative",
         // Nếu template không set background → để trong suốt (không fallback #fff).
         background: background ?? "transparent",
-        backgroundImage: backgroundImage ? `url(${backgroundImage})` : undefined,
+        backgroundImage: resolvedBg ? `url(${resolvedBg})` : undefined,
         backgroundSize: "cover",
         backgroundPosition: "center",
         overflow: "hidden",
