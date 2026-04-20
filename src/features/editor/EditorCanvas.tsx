@@ -388,10 +388,14 @@ function SlotEditor({
     { h: "w", style: { left: -5, top: "50%", marginTop: -5 }, cursor: "ew-resize" },
   ];
 
-  return (
+  const slotEl = (
     <div
       style={baseStyle}
       onMouseDown={startMove}
+      onContextMenu={(e) => {
+        // chọn slot trước khi mở context menu
+        if (!selected) onSelect();
+      }}
       onDoubleClick={(e) => {
         if (slot.kind === "image" && slot.staticImage && !slot.locked) {
           e.stopPropagation();
@@ -459,4 +463,13 @@ function SlotEditor({
       )}
     </div>
   );
+
+  if (menuActions) {
+    return (
+      <SlotContextMenu slot={slot} actions={menuActions}>
+        {slotEl}
+      </SlotContextMenu>
+    );
+  }
+  return slotEl;
 }
