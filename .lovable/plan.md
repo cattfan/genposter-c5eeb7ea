@@ -2,128 +2,135 @@
 
 ## Hiểu yêu cầu
 
-1. **Shape bind ảnh**: Người dùng muốn shape (rectangle/circle...) hoạt động như "khung giữ ảnh" — chọn shape → bind URL/ảnh, ảnh sẽ fill vào trong khung đúng theo borderRadius/shape. Sau này họ sẽ cập nhật URL trong sheet.
-2. **Designer toolkit cho text & block**: Bổ sung font, line-height, letter-spacing, gradient, shadow, stroke, hệ căn chỉnh… để biến editor + trang Tạo nội dung thành công cụ designer thật sự.
+1. **Layer controls đầy đủ** cho mọi block (text, shape, image, section): nút "lên 1 cấp / xuống 1 cấp / lên trên cùng / xuống dưới cùng" + **menu chuột phải** (context menu) trong cả canvas và panel Layers.
+2. Bổ sung **bộ tính năng designer kiểu Figma / Canva / Photoshop**, UX phải tốt.
+
+Hiện tại đã có: Undo/Redo, font picker, text styling đầy đủ, gradient, stroke, crop ảnh, transform/flip/rotate, opacity, lock cho upload-bg, Z + / − (chỉ ±1, không có "to front/back"). **Thiếu**: context menu, ẩn/hiện/khoá layer rõ ràng, multi-select, align/distribute, snap & smart guides, group, duplicate/paste shortcut chuẩn, mũi tên = nudge, đổi tên layer, drag-reorder layer.
 
 ---
 
-## A. Shape → bind ảnh được
+## A. Layer system (yêu cầu chính)
 
-### A1. Cho shape có thuộc tính ảnh
-Mở rộng `Slot` (model): với `kind === "shape"`, cho phép:
-- `staticImage?` (URL ảnh — cập nhật sau từ sheet)
-- `bindingPath?` (đã có sẵn) — cho phép chọn `asset.cover / asset.byRole:*`
-- `style.fit` (cover/contain), `style.overlayColor`, `style.opacity` (đã có)
+### A1. Bổ sung 4 thao tác Z-order
+Thêm helper `bringForward / sendBackward / bringToFront / sendToBack` (làm việc theo **thứ tự thực** trong mảng + chuẩn hoá `zIndex` để tránh lệch).
 
-Khi shape có `staticImage` hoặc `bindingPath`, render ảnh **clip** theo hình dạng shape:
-- `rectangle` → `border-radius: borderRadius`
-- `circle` → `border-radius: 50%`
-- `triangle` → `clip-path: polygon(50% 0, 100% 100%, 0 100%)`
-- `line/divider` → giữ nguyên (không có ảnh)
+### A2. Context menu chuột phải (Radix `ContextMenu` đã có)
+Bọc mỗi `SlotEditor` (canvas) và mỗi item trong panel **Layers** bằng `ContextMenu`:
+- Đưa lên trên cùng (Ctrl+Shift+])
+- Đưa lên 1 cấp (Ctrl+])
+- Đưa xuống 1 cấp (Ctrl+[)
+- Đưa xuống dưới cùng (Ctrl+Shift+[)
+- ─────
+- Nhân bản (Ctrl+D)
+- Đổi tên (F2)
+- Khoá / Mở khoá (Ctrl+L)
+- Ẩn / Hiện (Ctrl+H)
+- Xoá (Delete)
 
-Nếu không có ảnh → vẫn render fill màu như cũ.
+### A3. Panel Layers nâng cấp
+Mỗi row có:
+- Icon kiểu block (Type/Image/Square/…)
+- Tên layer (có thể đổi tên — `slot.name`)
+- Toggle Eye / EyeOff (visibility) → dùng field mới `style.hidden`
+- Toggle Lock / Unlock
+- Drag-reorder bằng kéo thả (cập nhật zIndex theo thứ tự mới)
+- Nút hiện đã có: xoá
 
-### A2. Cập nhật trang Tạo nội dung
-- Trong `BindCanvas.tsx`: shape render thêm ảnh nếu có binding/staticImage (clip theo shape).
-- Trong `routes/generate.tsx`: bỏ chặn "shape không bind được"; coi shape có cùng UI binding như image (`IMAGE_BINDING_OPTIONS`). Text vẫn chỉ áp dụng cho `kind === "text"`.
-- Selectable trong `BindCanvas`: thêm `shape` vào danh sách `isBindable`.
-
-### A3. Editor — thêm panel "Ảnh trong shape"
-Trong `EditorPage.tsx` panel phải khi `kind === "shape"`:
-- Field `URL ảnh (sẽ cập nhật sau)` → `staticImage`
-- Object fit: cover/contain
-- Overlay color
-→ Đây chính là cơ chế "khung giữ ảnh" để thiết kế trước, đổ ảnh sau.
-
-### A4. PageRenderer
-Cập nhật `PageRenderer.tsx` để render ảnh trong shape giống `BindCanvas` (đảm bảo export đúng).
-
----
-
-## B. Designer toolkit cho text
-
-### B1. Font picker (~30 font Google curated cho designer VN)
-Tạo `src/features/editor/fonts.ts` chứa danh mục font có hỗ trợ tiếng Việt:
-- **Sans** display/UI: Be Vietnam Pro, Inter, Manrope, Plus Jakarta Sans, DM Sans, Lexend, Outfit
-- **Sans bold/poster**: Archivo Black, Anton, Barlow Condensed, Bebas Neue (latin)
-- **Serif elegance**: Playfair Display, Lora, Cormorant Garamond, EB Garamond, Bitter
-- **Display/funky**: Fraunces, Unbounded, Bricolage Grotesque, Space Grotesque, Sora
-- **Script/handwritten**: Pacifico, Caveat, Dancing Script, Great Vibes (latin only)
-- **Mono**: JetBrains Mono, IBM Plex Mono
-
-Cách load: chèn 1 thẻ `<link>` Google Fonts duy nhất ở `__root.tsx` với danh sách `display=swap` để tải tất cả 1 lần (hoặc lazy theo nhóm). Mỗi font đánh dấu `vietnamese: true/false` để cảnh báo nếu user dùng cho text tiếng Việt.
-
-UI panel text bổ sung:
-- `Select` font với preview (mỗi item render bằng chính font đó).
-- Group theo loại: Sans / Serif / Display / Script / Mono.
-- Filter "Hỗ trợ tiếng Việt".
-
-### B2. Thuộc tính text mở rộng
-Thêm vào panel text (Editor):
-- **Line height** (slider 0.8 – 2.5)
-- **Letter spacing** (slider -5 – 20 px)
-- **Italic** toggle (`fontStyle`)
-- **Underline / Strike** (`textDecoration`)
-- **Text shadow** (color + blur + x + y) — đã có field, thêm UI slider
-- **Text stroke** (color + width)
-- **Gradient text** (linear, 2 màu, angle) → render qua `background-image: linear-gradient + -webkit-background-clip: text`
-- **Max lines** (line-clamp) → tận dụng `style.maxLines`
-
-Cần thêm vào `SlotStyle`: `fontStyle`, `textDecoration`, `gradientFrom`, `gradientTo`, `gradientAngle`.
-
-### B3. Áp dụng cho cả PageRenderer + BindCanvas
-Tạo helper `buildTextStyle(style, scale)` trong `dataBinding.ts` (hoặc file mới `textStyle.ts`) — return object CSS chuẩn để 3 nơi (EditorCanvas, BindCanvas, PageRenderer) dùng chung. Tránh lệch render.
+### A4. Toolbar trên block khi chọn
+Thêm nhóm 4 nút order ngay cạnh nút "Xoá" hiện có ở góc selection: ⤒ ⤴ ⤵ ⤓.
 
 ---
 
-## C. Designer toolkit cho image & shape (bổ sung)
+## B. Bộ tính năng kiểu Figma / Canva / Photoshop (UX tốt)
 
-- **Border**: `borderColor`, `borderWidth`, `borderStyle` (solid/dashed/dotted) — thêm vào `SlotStyle`, áp dụng cho image/shape.
-- **Gradient fill cho shape**: `gradientFrom/To/Angle` (chia sẻ field với text).
-- **Inner shadow** (optional v2).
-- **Aspect lock** khi resize (giữ tỉ lệ nếu Shift) — thêm vào `EditorCanvas.tsx`.
-- **Snap to grid / center guides**: khi kéo, hiện đường gióng đỏ tới giữa canvas hoặc cạnh slot khác (đã đề xuất Đợt 3, đẩy lên đây cho gọn).
+### B1. Multi-select + group
+- Shift+Click block để cộng/dồn `selectedSlotIds: string[]`.
+- Marquee (kéo chuột trên vùng trống) chọn nhiều block (bbox-intersect).
+- Khi chọn nhiều → bao quanh bằng bounding box chung; kéo = di chuyển cả nhóm; Delete xoá tất cả.
+- Group / Ungroup (Ctrl+G / Ctrl+Shift+G) — gắn `groupId` (đã có ở model).
+
+### B2. Snap & Smart Guides (đỉnh trải nghiệm Figma)
+Khi kéo/resize 1 block:
+- Snap mép & tâm với canvas + các block khác (ngưỡng ~6px màn hình).
+- Vẽ đường gióng đỏ realtime + hiển thị **khoảng cách** giữa các slot (Figma-style).
+- Giữ **Shift** = giữ tỉ lệ khi resize / di chuyển theo trục dọc-ngang.
+- Giữ **Alt** = nhân bản trong lúc kéo.
+
+### B3. Align & Distribute toolbar
+Khi chọn ≥1 block, hiện toolbar 6 nút align (so với canvas hoặc bbox nhóm) + 2 nút distribute (ngang/dọc khi ≥3).
+
+### B4. Nudge bằng phím mũi tên
+- Mũi tên = ±1 px, Shift+Mũi tên = ±10 px (đã chuẩn industry).
+
+### B5. Copy / Paste / Duplicate
+- Ctrl+C, Ctrl+V, Ctrl+D (có rồi), Ctrl+X — clipboard nội bộ (in-memory), paste offset +24/+24.
+
+### B6. Đổi tên layer + auto-name
+- `slot.name?: string`. Nếu trống → suy ra "Text · "Văn bản…"", "Shape · Tròn", "Image · file.png".
+- Double-click vào tên trong panel Layers = đổi tên (F2 cũng được).
+
+### B7. Visibility & Lock thực sự
+- `style.hidden` → editor render mờ + canvas xuất bản bỏ qua.
+- `slot.locked` → không cho move/resize/delete (đang chỉ áp cho upload-bg).
+
+### B8. Rulers + grid + safe area (gọn nhẹ)
+- Toggle hiện thước (px) trên-trái canvas.
+- Toggle grid (8/16/32 px) làm overlay.
+- Toggle safe area (margin %).
+
+### B9. Zoom-to-fit / Zoom-to-selection / 100%
+- Phím `1` = 100%, `0` = fit, `2` = fit selection.
+
+### B10. Color eyedropper + recent colors
+- Dùng `EyeDropper API` (Chromium) khi pick màu — fallback ẩn nếu không hỗ trợ.
+- Lưu 8 màu vừa dùng vào localStorage, hiện dưới color input.
 
 ---
 
-## D. Designer toolkit cấp page
+## C. Phạm vi triển khai (chia 2 đợt)
 
-- **Align toolbar** (cho slot đang chọn so với canvas): căn trái/giữa/phải/trên/giữa-dọc/dưới — 1 row 6 button trong panel phải.
-- **Distribute** (≥3 slot chọn): chia đều ngang/dọc.
-- **Lock/Unlock layer**: nút khoá trong panel Layers (hiện đã có flag `locked`, chưa có toggle UI ngoài upload-bg).
-- **Hiển thị/ẩn layer** (visibility toggle) — thêm `style.hidden?: boolean` hoặc dùng `visibilityRule`.
-- **Multi-select**: Shift+Click để chọn nhiều layer rồi căn chỉnh đồng loạt (phiên bản đơn giản: chỉ lưu `selectedSlotIds: string[]`).
+**Đợt 1 — Layer hoàn chỉnh + UX cốt lõi (ưu tiên cao)**
+1. Z-order: 4 thao tác + context menu (canvas + panel) + nút trong toolbar selection.
+2. Panel Layers: đổi tên (F2 / double-click), eye-toggle, lock-toggle, drag-reorder.
+3. Phím tắt order: Ctrl+] / Ctrl+[ / Ctrl+Shift+] / Ctrl+Shift+[, F2, Ctrl+H, Ctrl+L.
+4. Nudge mũi tên (±1 / ±10 với Shift).
+5. Copy/Paste/Cut clipboard nội bộ.
+
+**Đợt 2 — Designer pro**
+6. Multi-select (Shift-click + marquee) + group/ungroup.
+7. Snap & smart guides + Shift giữ tỉ lệ + Alt-drag duplicate.
+8. Align/Distribute toolbar.
+9. Rulers / grid / safe area / zoom-to-fit / zoom-to-selection.
+10. Eyedropper + recent colors.
 
 ---
 
-## E. Files dự kiến
+## D. Files đụng tới
 
-- **Sửa**:
-  - `src/models/index.ts` — bổ sung `staticImage` cho shape, thêm field style mới (fontStyle, textDecoration, gradient*, border*).
-  - `src/engines/binding/dataBinding.ts` — `resolveImageBinding` cho phép shape dùng chung; thêm helper `buildTextStyle`.
-  - `src/features/editor/EditorCanvas.tsx` — render ảnh trong shape; aspect lock; snap guides.
-  - `src/features/editor/EditorPage.tsx` — panel font picker, text mở rộng, panel ảnh-trong-shape, align toolbar, lock toggle.
-  - `src/features/generate/BindCanvas.tsx` — shape selectable + render ảnh; dùng `buildTextStyle`.
-  - `src/features/render/PageRenderer.tsx` — render shape có ảnh; dùng `buildTextStyle`.
-  - `src/routes/generate.tsx` — bỏ cảnh báo shape, mở `IMAGE_BINDING_OPTIONS` cho shape.
-  - `src/routes/__root.tsx` — chèn Google Fonts link.
+- **Sửa**: 
+  - `src/models/index.ts` — thêm `Slot.name?`, `SlotStyle.hidden?`.
+  - `src/features/editor/EditorPage.tsx` — context menu trong panel Layers, đổi tên, drag-reorder, phím tắt mới, clipboard, multi-select state, align toolbar render.
+  - `src/features/editor/EditorCanvas.tsx` — context menu trên SlotEditor, snap guides overlay, marquee select, Shift/Alt khi drag/resize, nudge phím mũi tên, ẩn block khi `hidden`, khoá khi `locked`.
+  - `src/features/render/PageRenderer.tsx` — bỏ qua block `hidden`.
+  - `src/features/generate/BindCanvas.tsx` — bỏ qua block `hidden`.
 - **Tạo mới**:
-  - `src/features/editor/fonts.ts` — danh mục font + helper.
-  - `src/features/editor/FontPicker.tsx` — Select có preview.
-  - `src/features/editor/AlignToolbar.tsx` — căn chỉnh.
+  - `src/features/editor/layerOps.ts` — `bringForward / sendBackward / bringToFront / sendToBack` + chuẩn hoá zIndex.
+  - `src/features/editor/AlignToolbar.tsx` — 6 align + 2 distribute.
+  - `src/features/editor/SmartGuides.tsx` — overlay guides.
+  - `src/features/editor/SlotContextMenu.tsx` — `ContextMenu` chia sẻ giữa canvas và panel Layers.
+  - `src/features/editor/useClipboard.ts` — copy/paste/cut nội bộ.
 
 ---
 
-## F. Phạm vi triển khai (chia 2 đợt nhỏ để dễ kiểm thử)
+## E. Sơ đồ thao tác Z-order
 
-**Đợt A (làm trước, đáp ứng đúng câu hỏi)**
-1. Shape bind ảnh được (model + EditorCanvas + BindCanvas + PageRenderer + generate.tsx).
-2. Font picker (~30 font) cho text.
-3. Text mở rộng: line-height, letter-spacing, italic, underline, stroke, gradient text.
-4. Shape: border (color/width/style), gradient fill.
+```text
+slots (theo zIndex tăng dần)  =  [bg=0] [shape=1] [text=2] [logo=3]
+chọn "shape", bringForward    →  [bg=0] [text=1] [shape=2] [logo=3]
+chọn "shape", bringToFront    →  [bg=0] [text=1] [logo=2] [shape=3]
+chọn "shape", sendToBack      →  [shape=0] [bg=1] [text=2] [logo=3]
+                                  (upload-bg vẫn ưu tiên dưới khi render canvas)
+```
 
-**Đợt B (sau)**
-5. Align toolbar + lock/unlock + visibility.
-6. Aspect-lock khi resize, snap-to-center guides.
-7. Multi-select.
+Sau mỗi thao tác → chuẩn hoá lại zIndex thành chuỗi liên tiếp 0..N để tránh tích luỹ số lớn.
 
