@@ -14,8 +14,13 @@ import {
   buildBoxShadow,
   buildCssFilter,
   buildFlipTransform,
+  buildBorder,
+  buildGradient,
+  buildTextStyle,
   resolveImageBinding,
   resolveTextBinding,
+  shapeBorderRadius,
+  shapeClipPath,
 } from "@/engines/binding/dataBinding";
 
 interface Props {
@@ -145,19 +150,67 @@ function SlotRenderer({
   };
 
   if (slot.kind === "shape") {
+    // Shape có thể bind ảnh (cover/byRole) hoặc staticImage URL — ảnh sẽ clip theo hình dạng
+    let src = slot.staticImage;
+    if (slot.bindingPath && entity) {
+      const r = resolveImageBinding(slot.bindingPath, entity, assets, src);
+      if (r.src) src = r.src;
+    }
+    const fit = (slot.style?.fit === "stretch" ? "fill" : slot.style?.fit ?? "cover") as React.CSSProperties["objectFit"];
+    const filter = buildCssFilter(slot.style);
+    const radius = shapeBorderRadius(slot.shapeKind, slot.style?.borderRadius, scale);
+    const clip = slot.shapeKind ? shapeClipPath(slot.shapeKind) : undefined;
+    const gradient = buildGradient(slot.style);
+    const border = buildBorder(slot.style, scale);
+    const isLine = slot.shapeKind === "line" || slot.shapeKind === "divider";
+
+    if (isLine) {
+      return (
+        <div
+          style={{
+            ...baseStyle,
+            background: gradient ?? slot.style?.fill ?? "#000",
+            height: Math.max(1, (slot.style?.strokeWidth ?? 2) * scale),
+            top: (slot.y + slot.height / 2) * scale - Math.max(1, (slot.style?.strokeWidth ?? 2) * scale) / 2,
+          }}
+        >
+          <DebugBadge debug={debug} text="line" />
+        </div>
+      );
+    }
+
+    const fillBg = gradient ?? slot.style?.fill ?? "#e5e7eb";
     return (
       <div
         style={{
           ...baseStyle,
-          background: slot.style?.fill ?? "#000",
-          borderRadius:
-            slot.shapeKind === "circle" ? "50%" : (slot.style?.borderRadius ?? 0) * scale,
-          border: slot.style?.stroke
-            ? `${(slot.style?.strokeWidth ?? 1) * scale}px solid ${slot.style.stroke}`
-            : undefined,
+          background: src ? undefined : fillBg,
+          borderRadius: radius,
+          clipPath: clip,
+          border: src ? undefined : border,
+          overflow: "hidden",
         }}
       >
-        <DebugBadge debug={debug} text={`shape`} />
+        {src && (
+          <>
+            <img
+              src={src}
+              crossOrigin="anonymous"
+              alt=""
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: fit,
+                filter,
+                display: "block",
+              }}
+            />
+            {slot.style?.overlayColor && (
+              <div style={{ position: "absolute", inset: 0, background: slot.style.overlayColor }} />
+            )}
+          </>
+        )}
+        <DebugBadge debug={debug} text="shape" />
       </div>
     );
   }
@@ -251,32 +304,15 @@ function SlotRenderer({
   }
 
   if (slot.kind === "text") {
-    const s = slot.style ?? {};
     const text = slot.bindingPath
       ? resolveTextBinding(slot.bindingPath, entity, slot.staticText)
       : (slot.staticText ?? "Văn bản");
+    const textCss = buildTextStyle(slot.style, scale);
     return (
       <div
         style={{
           ...baseStyle,
-          color: s.color ?? "#0f172a",
-          fontFamily: s.fontFamily ?? "'Be Vietnam Pro', sans-serif",
-          fontSize: (s.fontSize ?? 24) * scale,
-          fontWeight: s.fontWeight ?? 500,
-          lineHeight: s.lineHeight ?? 1.2,
-          letterSpacing: (s.letterSpacing ?? 0) * scale,
-          textAlign: s.textAlign ?? "left",
-          textTransform: s.textTransform ?? "none",
-          textShadow: s.textShadow,
-          WebkitTextStroke: s.textStroke,
-          padding: (s.padding ?? 0) * scale,
-          background: s.background,
-          display: "flex",
-          alignItems: "flex-start",
-          flexDirection: "column",
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
-          overflow: "hidden",
+          ...textCss,
         }}
       >
         {text}
