@@ -124,6 +124,88 @@ function TemplatesPage() {
     }
   };
 
+  // === AI dựng combo từ nhiều ảnh ===
+  const onPickComboImages = () => comboFileRef.current?.click();
+
+  const onComboFilesChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const list = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    if (list.length === 0) return;
+    // Validate
+    const oversize = list.find((f) => f.size > 6_000_000);
+    if (oversize) {
+      toast.error(`Ảnh "${oversize.name}" > 6MB. Resize trước nhé.`);
+      return;
+    }
+    const totalSize = list.reduce((a, f) => a + f.size, 0);
+    if (totalSize > 25_000_000) {
+      toast.error("Tổng dung lượng > 25MB. Bớt ảnh hoặc nén.");
+      return;
+    }
+    const previews = await Promise.all(
+      list.map(
+        (f) =>
+          new Promise<string>((res, rej) => {
+            const r = new FileReader();
+            r.onload = () => res(String(r.result));
+            r.onerror = () => rej(new Error("Đọc " + f.name + " lỗi"));
+            r.readAsDataURL(f);
+          }),
+      ),
+    );
+    setComboFiles(list);
+    setComboPreviews(previews);
+    setComboPackName("");
+    setComboOpen(true);
+  };
+
+  const removeComboImage = (idx: number) => {
+    setComboFiles((arr) => arr.filter((_, i) => i !== idx));
+    setComboPreviews((arr) => arr.filter((_, i) => i !== idx));
+  };
+
+  const startCombo = async () => {
+    if (comboPreviews.length === 0) return;
+    setComboBusy(true);
+    setComboStep(`Phân loại ${comboPreviews.length} ảnh...`);
+    setComboProgress(10);
+    try {
+      const out = await aiGenerateComboFromImagesServer({
+        data: {
+          images: comboPreviews.map((dataUrl) => ({ dataUrl })),
+          packNameHint: comboPackName.trim() || undefined,
+        },
+      });
+      if (!out.ok) {
+        toast.error(out.error);
+        return;
+      }
+      setComboStep(`Dựng ${out.pages.length} page → tạo pack...`);
+      setComboProgress(80);
+      const built = buildComboFromAiResult(
+        { pages: out.pages, packMeta: out.packMeta },
+        comboPackName,
+      );
+      const packId = await persistCombo(built);
+      setComboProgress(100);
+      if (out.warnings && out.warnings.length > 0) {
+        toast.warning(`Có ${out.warnings.length} page lỗi — pack vẫn tạo được`);
+      } else {
+        toast.success(`Đã tạo pack "${built.pack.name}" (${built.pages.length} page)`);
+      }
+      setComboOpen(false);
+      setComboFiles([]);
+      setComboPreviews([]);
+      navigate({ to: "/packs", search: { open: packId } });
+    } catch (err) {
+      toast.error("Lỗi: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setComboBusy(false);
+      setComboStep("");
+      setComboProgress(0);
+    }
+  };
+
   return (
     <div className="p-8 max-w-6xl">
       <input ref={fileRef} type="file" accept="image/*" hidden onChange={onAiImageChange} />
