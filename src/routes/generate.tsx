@@ -47,7 +47,7 @@ import {
 } from "@/engines/binding/dataBinding";
 import { BindCanvas } from "@/features/generate/BindCanvas";
 import { useBindOverrides, useEffectiveTemplate } from "@/features/generate/useBindOverrides";
-import { aiSuggestBindingsServer, aiCaptionFromEntityServer } from "@/server/aiTemplate";
+import { aiSuggestBindings, aiCaptionFromEntity } from "@/features/ai/aiFeatures";
 import { SuggestBindingsModal, type BindSuggestion } from "@/features/ai/SuggestBindingsModal";
 
 export const Route = createFileRoute("/generate")({

@@ -170,10 +170,12 @@ function TemplatesPage() {
     setComboStep(`Phân loại ${comboPreviews.length} ảnh...`);
     setComboProgress(10);
     try {
-      const out = await aiGenerateComboFromImagesServer({
-        data: {
-          images: comboPreviews.map((dataUrl) => ({ dataUrl })),
-          packNameHint: comboPackName.trim() || undefined,
+      const out = await aiGenerateComboFromImages({
+        images: comboPreviews.map((dataUrl) => ({ dataUrl })),
+        packNameHint: comboPackName.trim() || undefined,
+        onProgress: (step, progress) => {
+          setComboStep(step);
+          setComboProgress(progress);
         },
       });
       if (!out.ok) {
