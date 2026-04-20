@@ -66,7 +66,7 @@ interface Props {
   tpls: PageTemplate[];
   entities: Entity[];
   assets: Asset[];
-  currentJob: GenerationJob | undefined;
+  currentJob: GenerationJob | null | undefined;
   setJob: (j: GenerationJob) => void;
   toggleSelected: (idx: number) => void;
   setSelectedAll: (v: boolean) => void;
