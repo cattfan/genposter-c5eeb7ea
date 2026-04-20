@@ -49,16 +49,85 @@ function TemplatesPage() {
     navigate({ to: "/templates/$id/edit", params: { id } });
   };
 
+  // === AI gen template từ ảnh ===
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+
+  const onPickAiImage = () => fileRef.current?.click();
+
+  const onAiImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    if (f.size > 6_000_000) return toast.error("Ảnh > 6MB. Resize trước nhé.");
+    setAiBusy(true);
+    try {
+      const dataUrl = await new Promise<string>((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(String(r.result));
+        r.onerror = () => rej(new Error("Đọc ảnh lỗi"));
+        r.readAsDataURL(f);
+      });
+      const out = await aiGenerateTemplateFromImageServer({ data: { imageDataUrl: dataUrl } });
+      if (!out.ok) {
+        toast.error(out.error);
+        return;
+      }
+      const layout = JSON.parse(out.layoutJson);
+      const tpl = aiLayoutToTemplate(layout, "AI: " + f.name.replace(/\.[^.]+$/, ""));
+      await db.pageTemplates.put(tpl);
+      toast.success("AI dựng xong — mở editor để chỉnh");
+      navigate({ to: "/templates/$id/edit", params: { id: tpl.pageTemplateId } });
+    } catch (err) {
+      toast.error("AI lỗi: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const loadFlexPack = async () => {
+    try {
+      const r = await seedTravelFlexPack();
+      toast.success(`Đã nạp pack 4N3Đ (${r.pageIds.length} page)`);
+    } catch (e) {
+      toast.error("Lỗi nạp pack: " + (e instanceof Error ? e.message : String(e)));
+    }
+  };
+
+  const onCloneDay = async (pageId: string) => {
+    const dayStr = prompt("Nhân bản thành Ngày số mấy?", "2");
+    if (!dayStr) return;
+    const n = parseInt(dayStr, 10);
+    if (!Number.isFinite(n) || n < 1) return toast.error("Số ngày không hợp lệ");
+    try {
+      const newId = await cloneDayPage(pageId, n);
+      toast.success(`Đã tạo "Ngày ${n}"`);
+      navigate({ to: "/templates/$id/edit", params: { id: newId } });
+    } catch (e) {
+      toast.error("Lỗi: " + (e instanceof Error ? e.message : String(e)));
+    }
+  };
+
   return (
     <div className="p-8 max-w-6xl">
-      <div className="flex items-center justify-between mb-6">
+      <input ref={fileRef} type="file" accept="image/*" hidden onChange={onAiImageChange} />
+      <div className="flex items-center justify-between mb-6 gap-2 flex-wrap">
         <div>
           <h1 className="text-3xl font-bold">Page Templates</h1>
           <p className="text-muted-foreground mt-1">Mỗi page template là 1 layout có thể ghép vào pack.</p>
         </div>
-        <Button onClick={createNew}>
-          <Plus className="size-4 mr-2" /> Tạo mới
-        </Button>
+        <div className="flex gap-2 flex-wrap">
+          <Button variant="outline" onClick={loadFlexPack}>
+            <Package className="size-4 mr-2" /> Nạp pack 4N3Đ
+          </Button>
+          <Button variant="outline" onClick={onPickAiImage} disabled={aiBusy}>
+            {aiBusy ? <Loader2 className="size-4 mr-2 animate-spin" /> : <Sparkles className="size-4 mr-2" />}
+            AI dựng từ ảnh
+          </Button>
+          <Button onClick={createNew}>
+            <Plus className="size-4 mr-2" /> Tạo mới
+          </Button>
+        </div>
       </div>
 
       {tpls && tpls.length === 0 && (
