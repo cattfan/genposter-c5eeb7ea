@@ -236,9 +236,7 @@ function GeneratePage() {
     if (slotsForAi.length === 0) return toast.error("Template không có slot bindable");
     setSuggestBusy(true);
     try {
-      const out = await aiSuggestBindingsServer({
-        data: { slots: slotsForAi, columns: dataColumns },
-      });
+      const out = await aiSuggestBindings({ slots: slotsForAi, columns: dataColumns });
       if (!out.ok) return toast.error(out.error);
       setSuggestions(out.suggestions);
       setSuggestOpen(true);
@@ -259,8 +257,9 @@ function GeneratePage() {
     if (!previewEntity) return toast.error("Chọn entity preview trước");
     setCaptionBusy(true);
     try {
-      const out = await aiCaptionFromEntityServer({
-        data: { entity: previewEntity as unknown as Record<string, unknown>, style: "instagram" },
+      const out = await aiCaptionFromEntity({
+        entity: previewEntity as unknown as Record<string, unknown>,
+        style: "instagram",
       });
       if (!out.ok) return toast.error(out.error);
       setBinding(selectedSlot.slotId, undefined);
