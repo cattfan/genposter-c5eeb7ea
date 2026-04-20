@@ -3,12 +3,17 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/storage/db";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Plus, Pencil, Copy, Trash2 } from "lucide-react";
+import {
+  Plus, Pencil, Copy, Trash2, Sparkles, Loader2, CalendarPlus, Package,
+} from "lucide-react";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import { useEffect, useRef, useState } from "react";
 import type { PageTemplate } from "@/models";
 import { PageRenderer } from "@/features/render/PageRenderer";
+import { aiGenerateTemplateFromImageServer } from "@/server/aiTemplate";
+import { aiLayoutToTemplate } from "@/features/ai/templateFromImage";
+import { seedTravelFlexPack, cloneDayPage } from "@/storage/seedFlex";
 
 export const Route = createFileRoute("/templates")({
   component: TemplatesPage,
