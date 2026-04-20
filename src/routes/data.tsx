@@ -158,13 +158,8 @@ function DataPage() {
                         <SelectTrigger className="h-8 w-56"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           {standardFieldOptionsLabeled().map((s) => (
-                            <SelectItem key={s.value} value={s.value}>
-                              <span className="flex flex-col items-start leading-tight">
-                                <span>{s.label}</span>
-                                {s.value !== "__ignore__" && (
-                                  <span className="text-[10px] text-muted-foreground">{s.value}</span>
-                                )}
-                              </span>
+                            <SelectItem key={s.value} value={s.value} title={s.value}>
+                              {s.label}
                             </SelectItem>
                           ))}
                         </SelectContent>
