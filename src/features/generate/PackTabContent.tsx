@@ -672,11 +672,10 @@ export function PackTabContent({
                             <SelectItem
                               key={o.value || "_static"}
                               value={o.value || "_static"}
-                              disabled={isUsed}
                             >
                               {o.label}
                               {isUsed && (
-                                <span className="ml-2 text-[10px] text-muted-foreground">(đã dùng)</span>
+                                <span className="ml-2 text-[10px] text-muted-foreground">(đã dùng ở slot khác)</span>
                               )}
                             </SelectItem>
                           );
