@@ -704,6 +704,14 @@ function GeneratePage() {
               </CardContent>
             </Card>
           )}
+
+          <SuggestBindingsModal
+            open={suggestOpen}
+            onOpenChange={setSuggestOpen}
+            suggestions={suggestions}
+            slots={effectiveTpl?.slots ?? []}
+            onApply={applyAiSuggestions}
+          />
         </TabsContent>
 
         {/* === TAB: theo pack (luồng cũ) === */}
