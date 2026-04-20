@@ -348,6 +348,16 @@ export interface ManualOverride {
   lockSection?: boolean;
 }
 
+export type AiProviderPreset = "deepseek" | "lovable" | "custom";
+
+export interface AiProviderConfig {
+  preset: AiProviderPreset;
+  baseUrl: string; // vd https://api.deepseek.com/v1 hoặc http://localhost:20128/v1
+  model: string; // vd deepseek-chat, cx/gpt-5.4
+  apiKey?: string; // optional, có provider local không cần
+  visionModel?: string; // optional override cho ảnh; nếu trống dùng model
+}
+
 export interface AppSettings {
   language: "vi";
   captionProvider: "local" | "openai";
@@ -355,4 +365,5 @@ export interface AppSettings {
   exportScale: number;
   defaultCanvas: CanvasSize;
   theme?: "light" | "dark";
+  ai?: AiProviderConfig;
 }
