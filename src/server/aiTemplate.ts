@@ -305,3 +305,249 @@ export const aiCaptionFromEntityServer = createServerFn({ method: "POST" })
     if (!result.ok) return { ok: false as const, error: result.error };
     return { ok: true as const, caption: (result.content ?? "").trim() };
   });
+
+// ============================================================
+// Combo: classify nhiều ảnh + gen layout từng page
+// ============================================================
+
+const CLASSIFY_TOOL: GatewayTool = {
+  type: "function",
+  function: {
+    name: "classify_pages",
+    description:
+      "Phân loại từng ảnh trong combo content pack du lịch/ẩm thực. Trả thêm pack metadata tổng thể.",
+    parameters: {
+      type: "object",
+      properties: {
+        packMeta: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Tên pack đề xuất, vd 'Đà Lạt 4N3Đ'" },
+            goal: { type: "string", description: "Mục tiêu pack: save_post / guide / review..." },
+            tone: { type: "string", description: "Tone: thân thiện / sang / năng động..." },
+            cta: { type: "string", description: "CTA cuối pack, vd 'Save lại để dành tour sau!'" },
+          },
+          required: ["name"],
+        },
+        pages: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              index: { type: "number", description: "Index ảnh trong input array (0-based)" },
+              role: {
+                type: "string",
+                enum: ["cover", "utilities", "day", "outro", "other"],
+                description:
+                  "cover=trang bìa; utilities=tiện ích/info chung (transport,homestay); day=lịch trình 1 ngày; outro=trang kết/CTA; other=khác.",
+              },
+              dayNumber: {
+                type: "number",
+                description: "Bắt buộc nếu role=day. 1,2,3...",
+              },
+              suggestedName: { type: "string", description: "Tên page đề xuất, vd 'Cover Đà Lạt' hoặc 'Ngày 1 - Trung tâm'" },
+            },
+            required: ["index", "role", "suggestedName"],
+          },
+        },
+      },
+      required: ["packMeta", "pages"],
+    },
+  },
+};
+
+interface ComboPage {
+  index: number;
+  role: "cover" | "utilities" | "day" | "outro" | "other";
+  dayNumber?: number;
+  suggestedName: string;
+  layoutJson: string;
+}
+
+interface ComboPackMeta {
+  name: string;
+  goal?: string;
+  tone?: string;
+  cta?: string;
+}
+
+async function runWithLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, idx: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+async function generateOnePageLayout(
+  imageDataUrl: string,
+  roleHint: string,
+): Promise<{ ok: true; layoutJson: string } | { ok: false; error: string }> {
+  const result = await callGateway({
+    messages: [
+      {
+        role: "system",
+        content:
+          "Bạn là designer chuyển ảnh mẫu thành khung layout JSON. " +
+          "Quy tắc TUYỆT ĐỐI:\n" +
+          "1. CHỈ tạo khung + placeholder. KHÔNG bịa nội dung text thật.\n" +
+          "2. Mọi text phải là placeholder dạng {{tên}}, {{địa chỉ}}, {{giá}}, {{ngày}}, {{tiêu đề}}, {{mô tả}}.\n" +
+          "3. Toạ độ x/y/w/h là tỉ lệ 0..1 so với canvas portrait (cao gấp 1.25 rộng).\n" +
+          "4. Ảnh đại diện địa điểm dùng kind=shape + shapeKind=circle.\n" +
+          "5. Badge giá tiền dùng kind=shape + shapeKind=badge + fill cam '#F97316', kèm 1 text overlay '{{giá}}' màu trắng.\n" +
+          "6. Header ngày dùng shape badge fill đỏ '#dc2626' + text '{{tiêu đề}}' trắng.\n" +
+          `7. Hint vai trò page: ${roleHint}.\n` +
+          "8. Trả về qua tool build_layout, KHÔNG nói gì thêm.",
+      },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: `Đây là page có vai trò: ${roleHint}. Sinh khung layout JSON.` },
+          { type: "image_url", image_url: { url: imageDataUrl } },
+        ],
+      },
+    ],
+    tools: [TEMPLATE_TOOL],
+    tool_choice: { type: "function", function: { name: "build_layout" } },
+    temperature: 0.2,
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  if (!result.toolArgs) return { ok: false, error: "AI không trả layout" };
+  return { ok: true, layoutJson: JSON.stringify(result.toolArgs) };
+}
+
+export const aiGenerateComboFromImagesServer = createServerFn({ method: "POST" })
+  .inputValidator((input: { images: Array<{ dataUrl: string }>; packNameHint?: string }) => {
+    if (!Array.isArray(input?.images) || input.images.length === 0) {
+      throw new Error("Cần ít nhất 1 ảnh");
+    }
+    let total = 0;
+    for (const im of input.images) {
+      if (!im?.dataUrl?.startsWith("data:image/")) throw new Error("Có ảnh không hợp lệ");
+      if (im.dataUrl.length > 8_000_000) throw new Error("Có ảnh > 6MB — resize trước");
+      total += im.dataUrl.length;
+    }
+    if (total > 40_000_000) throw new Error("Tổng dung lượng > 30MB — bớt ảnh hoặc resize");
+    return input;
+  })
+  .handler(async ({ data }) => {
+    // Bước 1: classify - gộp tất cả ảnh vào 1 lần gọi
+    const userContent: Array<
+      { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }
+    > = [
+      {
+        type: "text",
+        text:
+          `Có ${data.images.length} ảnh (index 0..${data.images.length - 1}). ` +
+          (data.packNameHint ? `Pack hint: "${data.packNameHint}". ` : "") +
+          "Phân loại từng ảnh + đoán packMeta tổng thể.",
+      },
+    ];
+    data.images.forEach((im) => {
+      userContent.push({ type: "image_url", image_url: { url: im.dataUrl } });
+    });
+
+    const classifyRes = await callGateway({
+      messages: [
+        {
+          role: "system",
+          content:
+            "Bạn nhìn tổng thể nhiều ảnh content pack du lịch/ẩm thực → suy ra vai trò mỗi page và pack metadata. " +
+            "Quy tắc: ảnh đầu tiên thường là cover; ảnh có badge 'NGÀY X' / lịch trình là day; ảnh tổng hợp transport/homestay là utilities; ảnh CTA cuối là outro. " +
+            "Trả về qua tool classify_pages.",
+        },
+        { role: "user", content: userContent },
+      ],
+      tools: [CLASSIFY_TOOL],
+      tool_choice: { type: "function", function: { name: "classify_pages" } },
+      temperature: 0.2,
+    });
+
+    if (!classifyRes.ok) return { ok: false as const, error: classifyRes.error };
+    if (!classifyRes.toolArgs) return { ok: false as const, error: "AI không phân loại được" };
+
+    const parsed = classifyRes.toolArgs as {
+      packMeta?: ComboPackMeta;
+      pages?: Array<{
+        index?: number;
+        role?: ComboPage["role"];
+        dayNumber?: number;
+        suggestedName?: string;
+      }>;
+    };
+    const packMeta: ComboPackMeta = {
+      name: parsed.packMeta?.name ?? data.packNameHint ?? "Combo AI",
+      goal: parsed.packMeta?.goal,
+      tone: parsed.packMeta?.tone,
+      cta: parsed.packMeta?.cta,
+    };
+    const classified = (parsed.pages ?? [])
+      .filter((p) => typeof p.index === "number" && p.index! >= 0 && p.index! < data.images.length)
+      .map((p) => ({
+        index: p.index!,
+        role: (p.role ?? "other") as ComboPage["role"],
+        dayNumber: typeof p.dayNumber === "number" ? p.dayNumber : undefined,
+        suggestedName: p.suggestedName ?? `Page ${p.index! + 1}`,
+      }));
+
+    // Đảm bảo đủ page (nếu AI bỏ sót thì fill role=other)
+    for (let i = 0; i < data.images.length; i++) {
+      if (!classified.find((c) => c.index === i)) {
+        classified.push({ index: i, role: "other", suggestedName: `Page ${i + 1}` });
+      }
+    }
+    classified.sort((a, b) => a.index - b.index);
+
+    // Bước 2: gen layout từng ảnh, concurrency 3
+    const layouts = await runWithLimit(classified, 3, async (c) => {
+      const roleHint =
+        c.role === "cover"
+          ? "Trang bìa (cover): tiêu đề lớn, sub-title, ảnh nền."
+          : c.role === "utilities"
+            ? "Trang tiện ích: list địa điểm dạng item card đơn giản."
+            : c.role === "day"
+              ? `Trang lịch trình Ngày ${c.dayNumber ?? "?"}: badge header đỏ '{{tiêu đề}}', list 4-6 item card có ảnh tròn + tên + địa chỉ + badge giá cam.`
+              : c.role === "outro"
+                ? "Trang kết / CTA: 1 dòng CTA lớn + ảnh nền."
+                : "Page nội dung tự do.";
+      const r = await generateOnePageLayout(data.images[c.index].dataUrl, roleHint);
+      return { classified: c, gen: r };
+    });
+
+    const pages: ComboPage[] = [];
+    const errors: string[] = [];
+    for (const x of layouts) {
+      if (x.gen.ok) {
+        pages.push({
+          index: x.classified.index,
+          role: x.classified.role,
+          dayNumber: x.classified.dayNumber,
+          suggestedName: x.classified.suggestedName,
+          layoutJson: x.gen.layoutJson,
+        });
+      } else {
+        errors.push(`Page ${x.classified.index + 1}: ${x.gen.error}`);
+      }
+    }
+
+    if (pages.length === 0) {
+      return { ok: false as const, error: "Tất cả page đều fail:\n" + errors.join("\n") };
+    }
+
+    return {
+      ok: true as const,
+      pages,
+      packMeta,
+      warnings: errors,
+    };
+  });
