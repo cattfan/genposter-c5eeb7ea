@@ -1,5 +1,6 @@
 // Canvas read-only, chỉ để chọn block và bind data ở trang Tạo nội dung.
 // Render giống PageRenderer nhưng cho phép click + outline khi chọn / đã bind.
+import { useMemo } from "react";
 import type { Asset, Entity, PageTemplate, Slot } from "@/models";
 import {
   buildBoxShadow,
@@ -8,11 +9,11 @@ import {
   buildBorder,
   buildGradient,
   buildTextStyle,
-  resolveImageBinding,
   resolveTextBinding,
   shapeBorderRadius,
   shapeClipPath,
 } from "@/engines/binding/dataBinding";
+import { buildSlotImagePlan, type PlannedImage, type SlotImagePlan } from "@/engines/binding/imagePlan";
 import { useResolvedImageSrc } from "@/storage/imageSrc";
 
 export function BindCanvas({
@@ -32,6 +33,12 @@ export function BindCanvas({
 }) {
   const { width, height, background, backgroundImage } = template.canvas;
   const resolvedBg = useResolvedImageSrc(backgroundImage);
+  const bgUsable = resolvedBg && !resolvedBg.startsWith("idb://") ? resolvedBg : undefined;
+
+  const imagePlan: SlotImagePlan = useMemo(
+    () => buildSlotImagePlan(template, entity, assets),
+    [template, entity, assets],
+  );
 
   return (
     <div
@@ -43,7 +50,7 @@ export function BindCanvas({
         height: height * scale,
         position: "relative",
         background: background ?? "transparent",
-        backgroundImage: resolvedBg ? `url(${resolvedBg})` : undefined,
+        backgroundImage: bgUsable ? `url(${bgUsable})` : undefined,
         backgroundSize: "cover",
         backgroundPosition: "center",
         overflow: "hidden",
@@ -63,7 +70,7 @@ export function BindCanvas({
             selected={slot.slotId === selectedSlotId}
             onSelect={() => onSelectSlot(slot.slotId)}
             entity={entity}
-            assets={assets}
+            planned={imagePlan.get(slot.slotId)}
           />
         ))}
     </div>
@@ -76,14 +83,14 @@ function BindSlot({
   selected,
   onSelect,
   entity,
-  assets,
+  planned,
 }: {
   slot: Slot;
   scale: number;
   selected: boolean;
   onSelect: () => void;
   entity?: Entity;
-  assets: Asset[];
+  planned?: PlannedImage;
 }) {
   const flip = buildFlipTransform(slot.style);
   const rot = slot.rotation ? `rotate(${slot.rotation}deg)` : "";
@@ -120,13 +127,16 @@ function BindSlot({
     if (isBindable) onSelect();
   };
 
+  // Determine raw src for image/shape (priority: planned bind > staticImage)
+  const rawSrc = (slot.kind === "image" || slot.kind === "shape")
+    ? (planned?.src ?? slot.staticImage)
+    : undefined;
+  const resolvedRaw = useResolvedImageSrc(rawSrc);
+  const usableSrc = resolvedRaw && !resolvedRaw.startsWith("idb://")
+    ? resolvedRaw
+    : (rawSrc && !rawSrc.startsWith("idb://") ? rawSrc : undefined);
+
   if (slot.kind === "shape") {
-    let src = slot.staticImage;
-    if (slot.bindingPath && entity) {
-      const r = resolveImageBinding(slot.bindingPath, entity, assets, src);
-      if (r.src) src = r.src;
-    }
-    const resolvedSrc = useResolvedImageSrc(src);
     const fit = (slot.style?.fit === "stretch" ? "fill" : slot.style?.fit ?? "cover") as React.CSSProperties["objectFit"];
     const filter = buildCssFilter(slot.style);
     const radius = shapeBorderRadius(slot.shapeKind, slot.style?.borderRadius, scale);
@@ -152,17 +162,17 @@ function BindSlot({
         onMouseDown={onClick}
         style={{
           ...baseStyle,
-          background: src ? undefined : gradient ?? slot.style?.fill ?? "#e5e7eb",
+          background: usableSrc ? undefined : gradient ?? slot.style?.fill ?? "#e5e7eb",
           borderRadius: radius,
           clipPath: clip,
-          border: src ? undefined : border,
+          border: usableSrc ? undefined : border,
           overflow: "hidden",
         }}
       >
-        {src ? (
+        {usableSrc ? (
           <>
             <img
-              src={resolvedSrc ?? src}
+              src={usableSrc}
               alt=""
               draggable={false}
               style={{ width: "100%", height: "100%", objectFit: fit, filter, pointerEvents: "none" }}
@@ -177,21 +187,15 @@ function BindSlot({
   }
 
   if (slot.kind === "image") {
-    let src = slot.staticImage;
-    if (slot.bindingPath && entity) {
-      const r = resolveImageBinding(slot.bindingPath, entity, assets, src);
-      if (r.src) src = r.src;
-    }
-    const resolvedImgSrc = useResolvedImageSrc(src);
     const filter = buildCssFilter(slot.style);
     const objectFit = (slot.style?.fit === "stretch" ? "fill" : slot.style?.fit ?? "cover") as React.CSSProperties["objectFit"];
     const crop = slot.crop;
     return (
       <div onMouseDown={onClick} style={{ ...baseStyle, overflow: "hidden", borderRadius: (slot.style?.borderRadius ?? 0) * scale }}>
-        {src ? (
+        {usableSrc ? (
           crop ? (
             <img
-              src={resolvedImgSrc ?? src}
+              src={usableSrc}
               alt=""
               draggable={false}
               style={{
@@ -207,7 +211,7 @@ function BindSlot({
             />
           ) : (
             <img
-              src={resolvedImgSrc ?? src}
+              src={usableSrc}
               alt=""
               draggable={false}
               style={{ width: "100%", height: "100%", objectFit, filter, pointerEvents: "none" }}
@@ -228,6 +232,22 @@ function BindSlot({
             }}
           >
             {hasBinding ? slot.bindingPath : "Block ảnh — click để chọn"}
+          </div>
+        )}
+        {planned?.fallback && (
+          <div
+            style={{
+              position: "absolute",
+              top: 4,
+              left: 4,
+              background: "hsl(var(--destructive) / 0.85)",
+              color: "white",
+              fontSize: 10,
+              padding: "2px 6px",
+              borderRadius: 4,
+            }}
+          >
+            ảnh trùng
           </div>
         )}
       </div>
