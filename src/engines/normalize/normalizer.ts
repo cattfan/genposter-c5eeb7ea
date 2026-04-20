@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid";
 import type { Asset, Entity } from "@/models";
-import { FIELD_ALIASES, normalizeKey, parseBool, parseList, parseNumber } from "./aliases";
+import { FIELD_ALIASES, METADATA_FIELDS, normalizeKey, parseBool, parseList, parseNumber } from "./aliases";
 
 export interface RawRow {
   [key: string]: unknown;
