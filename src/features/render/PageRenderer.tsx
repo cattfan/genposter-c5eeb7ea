@@ -22,6 +22,7 @@ import {
   shapeBorderRadius,
   shapeClipPath,
 } from "@/engines/binding/dataBinding";
+import { buildSlotImagePlan, type PlannedImage, type SlotImagePlan } from "@/engines/binding/imagePlan";
 import { useResolvedImageSrc } from "@/storage/imageSrc";
 
 interface Props {
