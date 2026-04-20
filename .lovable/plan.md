@@ -1,67 +1,75 @@
 
 
-## Vấn đề
-Tab "Pack template (nâng cao)" hiện render slot `staticText` thô ("Tên quán", "Địa chỉ"…) vì:
-- `generatePackJob` không resolve `bindingPath` của text/image slot — chỉ xử lý `sections` cũ + 1 hero cover.
-- `PageRenderer` cho pack KHÔNG nhận `entity` prop nên `resolveTextBinding` không chạy.
-- Tab pack thiếu UI filter sheet, bind, AI suggest như tab entity.
+## Vấn đề & Use case
 
-## Giải pháp — đồng bộ tab Pack với tab Entity
+Bạn cần: 1 page chứa **N "card"** (như ảnh: 4 homestay card dọc), mỗi card gồm nhiều slot (ảnh + tên + địa chỉ + giá). Khi gen, mỗi card auto bind 1 entity khác nhau từ pool đã filter (vd 4 homestay đầu tiên của sheet `Homestay`).
 
-### 1. Mở rộng `generatePackJob` (`src/engines/selection/generate.ts`)
-Thêm input mới:
+Hiện tại app chặn cứng "không cho 2 textbox cùng bind `entity.name`" — đây là rào cản chính. Đồng thời chưa có khái niệm "card lặp" trong page.
+
+## Giải pháp: Group → Card Repeater
+
+Tận dụng `groupId` đã có sẵn trên Slot. Mỗi group = 1 "card mẫu". Gắn flag `isCardTemplate` cho group → khi render page, app tự **clone group N lần xuống dưới**, mỗi clone bind 1 entity khác.
+
+## Plan triển khai
+
+### Bước 1: Bỏ chặn bind trùng (fix nhanh, 1 file)
+
+`src/routes/generate.tsx` + `src/features/generate/PackTabContent.tsx`:
+- Xoá `disabled={isUsed}` ở `<SelectItem>` field text
+- Đổi nhãn `(đã dùng)` → `(đã dùng ở slot khác)` để rõ là gợi ý, không phải lỗi
+- Vẫn giữ logic gợi ý visual (có nhãn) để user biết
+
+→ Sau bước này: 4 textbox cùng bind `entity.name` được, gen ra cùng hiện tên 1 quán (mirror mode).
+
+### Bước 2: Card Group (feature mới — cho use case grid 4 card 4 quán)
+
+**Model (`src/models/index.ts`)**:
 ```ts
-{
-  mode: "one-entity-per-pack" | "one-entity-per-page",
-  entityPool: Entity[],   // đã filter sẵn từ UI
-  bindOverrides: BindOverride[], // override binding per-page (designer/AI)
+interface PageTemplate {
+  // mới:
+  cardGroups?: Array<{
+    groupId: string;
+    repeatCount: number;     // số card sẽ clone (vd 4)
+    gap: number;             // khoảng cách giữa card (px)
+    direction: "vertical" | "horizontal";
+    entitySource?: {
+      sheetName?: string;    // pool entity từ sheet nào
+      filterRules?: FilterRule[];
+    };
+  }>;
 }
 ```
-- **Mode `one-entity-per-pack`**: chọn N entity → với mỗi entity sinh đủ pack (orderedPages.length pages). Mỗi `RenderedPage` lưu `entityId` để renderer biết.
-- **Mode `one-entity-per-page`**: lặp orderedPages, mỗi page lấy 1 entity từ pool theo round-robin (ưu tiên đối tác).
-- Lưu `entityId` vào `RenderedPage` (bổ sung field optional vào model `RenderedPage`).
 
-### 2. `PageRenderer` cho pack
-Trong `generate.tsx` (tab pack), khi map `filteredPages` → truyền thêm prop `entity={entityMap.get(p.entityId)}` để text/image bindings tự resolve (cơ chế đã có sẵn trong renderer).
+**Editor (`EditorPage.tsx`)**:
+- Khi user chọn ≥2 slot cùng groupId → hiện panel "Biến group thành Card Repeater"
+- Input: số lượng card, gap, direction, sheet nguồn
+- Lưu vào `pageTemplate.cardGroups`
 
-### 3. UI tab Pack (`src/routes/generate.tsx` tab `value="pack"`)
-Layout 3 cột giống tab entity:
+**Renderer mới (`src/engines/binding/cardRepeater.ts`)**:
+- Trước render, scan `cardGroups`. Với mỗi group:
+  - Lấy bbox của tất cả slot trong group
+  - Lấy `repeatCount` entity từ pool
+  - Clone slot N-1 lần, mỗi clone offset theo direction × gap, gán `__entityOverride` = entity[i]
+- `PageRenderer` resolve binding theo `__entityOverride` nếu có, fallback entity gốc
 
-**Cột trái — Cấu hình** (copy nguyên từ tab entity):
-- Pack template select
-- Toggle chế độ: "1 entity / nguyên pack" ↔ "Mỗi page 1 entity"
-- Sheet, Mô hình, Phong cách, đối tác, max pages
-- Nút Generate + Debug
+**Generate (`src/engines/selection/generate.ts`)**:
+- Thêm mode `"grid-cards"`: 1 page = 1 batch entity (vd page 1 = entity 1-4, page 2 = entity 5-8…)
+- Hoặc giữ mode hiện tại, để cardRepeater tự ăn pool
 
-**Cột giữa — Canvas bind từng page**:
-- Tab ngang chọn page trong pack (page 1, page 2, page 3…)
-- `BindCanvas` của page đang xem → click slot để bind
-- Nút "AI gợi ý bind cho page này" (dùng `aiSuggestBindings` sẵn có)
-- Nút "AI gợi ý bind cho TẤT CẢ pages" (loop từng page)
-- Bind override lưu per-page vào store mới `usePackBindOverrides` (mở rộng từ `useBindOverrides`).
+### Bước 3: UX hỗ trợ
 
-**Cột phải — Sheet fields & preview**:
-- `SheetFieldsPanel` (đã có) — click field → bind cho slot đang chọn ở page hiện tại
-- Preview entity dropdown để xem trước
+- Trong `BindCanvas` hiện preview các card đã clone (mờ + label "Card 2 of 4: Homestay X")
+- Field panel: khi chọn slot trong card group → show indicator "Block này thuộc Card mẫu, sẽ lặp 4 lần"
 
-### 4. Kết quả render
-Lưới pages giữ nguyên cấu trúc cũ NHƯNG:
-- Mỗi card hiển thị tên entity được bind vào
-- Truyền `entity` prop vào `PageRenderer` ⇒ text/image bindings hiển thị đúng dữ liệu
-- Group theo entity nếu mode `one-entity-per-pack` (vd "Quán ABC: page 1, 2, 3, 4")
-- Export ZIP giữ nguyên, đổi tên file theo slug entity
+## Phạm vi đề xuất
 
-### 5. Files thay đổi
-- `src/models/index.ts` — thêm `entityId?: string` vào `RenderedPage`
-- `src/engines/selection/generate.ts` — extend `GenerateInput` + 2 mode
-- `src/features/generate/jobStore.ts` — không đổi (chỉ lưu job)
-- `src/features/generate/usePackBindOverrides.ts` (mới) — Map<pageTemplateId, BindOverride[]>
-- `src/routes/generate.tsx` — viết lại nội dung TabsContent `value="pack"` (~250 LoC)
+| Phase | Nội dung | Ưu tiên |
+|---|---|---|
+| **1** | Bỏ chặn bind trùng + đổi nhãn | Làm ngay |
+| **2** | Card Group repeater (model + editor + render) | Làm tiếp sau Phase 1 |
+| **3** | UX preview card lặp trong canvas | Polish cuối |
 
-### 6. Thứ tự triển khai
-1. Mở rộng model + `generatePackJob` 2 mode
-2. `usePackBindOverrides` hook
-3. UI tab pack 3 cột + truyền entity vào PageRenderer
-4. Tích hợp AI suggest bind (per-page và bulk)
-5. Test: chọn pack 4 page, mode "1 entity nguyên pack", filter sheet Choi_dem, bind text, generate → xem text "Tên quán" đổi thành tên thật
+**Đề xuất**: Triển khai **Phase 1 ngay** (5 phút, fix lỗi blocking hiện tại) → bạn test xong nếu OK thì tiếp Phase 2 (~30-40 phút, feature mới).
+
+Confirm để mình switch sang default mode và code.
 
