@@ -76,6 +76,8 @@ export interface SlotStyle {
   fontFamily?: string;
   fontSize?: number;
   fontWeight?: number | string;
+  fontStyle?: "normal" | "italic";
+  textDecoration?: "none" | "underline" | "line-through" | "underline line-through";
   color?: string;
   lineHeight?: number;
   letterSpacing?: number;
@@ -84,6 +86,13 @@ export interface SlotStyle {
   maxLines?: number;
   textShadow?: string;
   textStroke?: string;
+  textStrokeColor?: string;
+  textStrokeWidth?: number;
+  // gradient (text & shape fill)
+  gradientFrom?: string;
+  gradientTo?: string;
+  gradientAngle?: number; // deg
+  gradientEnabled?: boolean;
   // image
   fit?: "cover" | "contain" | "stretch";
   borderRadius?: number;
@@ -94,6 +103,10 @@ export interface SlotStyle {
   fill?: string;
   stroke?: string;
   strokeWidth?: number;
+  // border (image & shape)
+  borderColor?: string;
+  borderWidth?: number;
+  borderStyle?: "solid" | "dashed" | "dotted";
   // common
   background?: string;
   padding?: number;
