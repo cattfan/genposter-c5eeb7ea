@@ -5,6 +5,16 @@ import { db, saveBlob, getBlobURL } from "@/storage/db";
 import { nanoid } from "nanoid";
 import { Canvas, NumField } from "@/features/editor/EditorCanvas";
 import { FontPicker } from "@/features/editor/FontPicker";
+import { SlotContextMenu, type SlotMenuActions } from "@/features/editor/SlotContextMenu";
+import {
+  bringForward,
+  bringToFront,
+  inferLayerName,
+  reorderByPanel,
+  sendBackward,
+  sendToBack,
+} from "@/features/editor/layerOps";
+import { getClipboard, hasClipboard, pasteFromClipboard, setClipboard } from "@/features/editor/useClipboard";
 import type { PageTemplate, Slot, Section } from "@/models";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,6 +48,12 @@ import {
   FlipHorizontal,
   FlipVertical,
   Lock,
+  Unlock,
+  Eye,
+  EyeOff,
+  ChevronsUp,
+  ChevronsDown,
+  GripVertical,
   Undo2,
   Redo2,
   Bold,
@@ -53,9 +69,15 @@ export function EditorPage() {
   const tpl = useLiveQuery(() => db.pageTemplates.get(id), [id]);
   const [draft, setDraft] = useState<PageTemplate | null>(null);
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
+  const [renamingSlotId, setRenamingSlotId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(0.4);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
+  const dragLayerIdRef = useRef<string | null>(null);
+  const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
+  // re-render trigger sau khi setClipboard (vì clipboard là module-level)
+  const [, setClipboardTick] = useState(0);
+  const bumpClipboard = () => setClipboardTick((n) => n + 1);
   const canvasScrollRef = useRef<HTMLDivElement>(null);
   // Undo/Redo stacks (lưu snapshot draft trước khi thay đổi)
   const pastRef = useRef<PageTemplate[]>([]);
@@ -124,19 +146,17 @@ export function EditorPage() {
         redo();
         return;
       }
+      // Paste có thể chạy ngay cả khi không có selection
+      if (mod && e.key.toLowerCase() === "v") {
+        e.preventDefault();
+        pasteSlot();
+        return;
+      }
       if (!selectedSlotId) return;
       // Delete
       if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
-        setDraft((prev) => {
-          if (!prev) return prev;
-          pastRef.current.push(JSON.parse(JSON.stringify(prev)));
-          futureRef.current = [];
-          const next = JSON.parse(JSON.stringify(prev)) as PageTemplate;
-          next.slots = next.slots.filter((s) => s.slotId !== selectedSlotId);
-          return next;
-        });
-        setSelectedSlotId(null);
+        deleteSlot(selectedSlotId);
         return;
       }
       // Ctrl+D = duplicate
@@ -145,15 +165,67 @@ export function EditorPage() {
         duplicateSlot(selectedSlotId);
         return;
       }
-      // [ ] = z-index
-      if (e.key === "]") {
+      // Ctrl+C = copy
+      if (mod && e.key.toLowerCase() === "c") {
         e.preventDefault();
-        moveZ(selectedSlotId, 1);
+        copySlot(selectedSlotId);
         return;
       }
-      if (e.key === "[") {
+      // Ctrl+X = cut
+      if (mod && e.key.toLowerCase() === "x") {
         e.preventDefault();
-        moveZ(selectedSlotId, -1);
+        cutSlot(selectedSlotId);
+        return;
+      }
+      // Z-order: Ctrl+Shift+] / Ctrl+] / Ctrl+[ / Ctrl+Shift+[
+      if (mod && e.key === "]") {
+        e.preventDefault();
+        orderSlot(selectedSlotId, e.shiftKey ? "front" : "forward");
+        return;
+      }
+      if (mod && e.key === "[") {
+        e.preventDefault();
+        orderSlot(selectedSlotId, e.shiftKey ? "back" : "backward");
+        return;
+      }
+      if (e.key === "]" && !mod) {
+        e.preventDefault();
+        orderSlot(selectedSlotId, "forward");
+        return;
+      }
+      if (e.key === "[" && !mod) {
+        e.preventDefault();
+        orderSlot(selectedSlotId, "backward");
+        return;
+      }
+      // F2 = rename
+      if (e.key === "F2") {
+        e.preventDefault();
+        setRenamingSlotId(selectedSlotId);
+        setLeftOpen(true);
+        return;
+      }
+      // Ctrl+H = toggle hidden
+      if (mod && e.key.toLowerCase() === "h") {
+        e.preventDefault();
+        toggleHidden(selectedSlotId);
+        return;
+      }
+      // Ctrl+L = toggle lock
+      if (mod && e.key.toLowerCase() === "l") {
+        e.preventDefault();
+        toggleLock(selectedSlotId);
+        return;
+      }
+      // Mũi tên = nudge ±1, Shift+Mũi tên = ±10
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "ArrowUp" || e.key === "ArrowDown") {
+        const cur = draft?.slots.find((s) => s.slotId === selectedSlotId);
+        if (!cur || cur.locked) return;
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+        const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+        updateSlot(selectedSlotId, { x: cur.x + dx, y: cur.y + dy });
         return;
       }
       // R = rotate 15°
@@ -314,11 +386,115 @@ export function EditorPage() {
   };
 
   const moveZ = (slotId: string, dir: 1 | -1) => {
+    orderSlot(slotId, dir > 0 ? "forward" : "backward");
+  };
+
+  // Z-order chuẩn (4 thao tác Figma/Canva)
+  const orderSlot = (slotId: string, mode: "forward" | "backward" | "front" | "back") => {
     updateDraft((d) => {
-      const s = d.slots.find((x) => x.slotId === slotId);
-      if (s) s.zIndex = (s.zIndex ?? 0) + dir;
+      const fn =
+        mode === "forward" ? bringForward
+        : mode === "backward" ? sendBackward
+        : mode === "front" ? bringToFront
+        : sendToBack;
+      d.slots = fn(d.slots, slotId);
     });
   };
+
+  const toggleHidden = (slotId: string) => {
+    const s = draft.slots.find((x) => x.slotId === slotId);
+    if (!s) return;
+    updateSlotStyle(slotId, { hidden: !s.style?.hidden });
+  };
+
+  const toggleLock = (slotId: string) => {
+    const s = draft.slots.find((x) => x.slotId === slotId);
+    if (!s) return;
+    if (s.isUploadedBackground) {
+      toast.error("Ảnh nền upload luôn bị khoá");
+      return;
+    }
+    updateSlot(slotId, { locked: !s.locked });
+  };
+
+  // Clipboard nội bộ
+  const copySlot = (slotId: string) => {
+    const s = draft.slots.find((x) => x.slotId === slotId);
+    if (!s) return;
+    setClipboard(s);
+    bumpClipboard();
+    toast.success("Đã copy layer");
+  };
+  const cutSlot = (slotId: string) => {
+    const s = draft.slots.find((x) => x.slotId === slotId);
+    if (!s) return;
+    if (s.isUploadedBackground) {
+      toast.error("Không thể cắt ảnh nền upload");
+      return;
+    }
+    setClipboard(s);
+    bumpClipboard();
+    deleteSlot(slotId);
+    toast.success("Đã cắt layer");
+  };
+  const pasteSlot = () => {
+    const next = pasteFromClipboard(24);
+    if (!next) {
+      toast.error("Clipboard trống");
+      return;
+    }
+    updateDraft((d) => d.slots.push(next));
+    setSelectedSlotId(next.slotId);
+  };
+
+  // Đổi tên layer
+  const renameSlot = (slotId: string, name: string) => {
+    updateSlot(slotId, { name: name.trim() || undefined });
+  };
+
+  // Drag-reorder layer trong panel (top-first list)
+  const handleLayerDrop = (targetId: string) => {
+    const dragId = dragLayerIdRef.current;
+    dragLayerIdRef.current = null;
+    setDragOverLayerId(null);
+    if (!dragId || dragId === targetId) return;
+    // build new top-first order
+    const sortedTopFirst = draft.slots
+      .filter((s) => !s.isUploadedBackground)
+      .slice()
+      .sort((a, b) => (b.zIndex ?? 0) - (a.zIndex ?? 0))
+      .map((s) => s.slotId);
+    const fromIdx = sortedTopFirst.indexOf(dragId);
+    const toIdx = sortedTopFirst.indexOf(targetId);
+    if (fromIdx === -1 || toIdx === -1) return;
+    const next = sortedTopFirst.slice();
+    next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, dragId);
+    updateDraft((d) => {
+      d.slots = reorderByPanel(d.slots, next);
+    });
+  };
+
+  // Build context menu actions for 1 slot
+  const buildSlotMenuActions = (slotId: string): SlotMenuActions => ({
+    bringToFront: () => orderSlot(slotId, "front"),
+    bringForward: () => orderSlot(slotId, "forward"),
+    sendBackward: () => orderSlot(slotId, "backward"),
+    sendToBack: () => orderSlot(slotId, "back"),
+    duplicate: () => duplicateSlot(slotId),
+    rename: () => {
+      setSelectedSlotId(slotId);
+      setRenamingSlotId(slotId);
+      setLeftOpen(true);
+    },
+    toggleLock: () => toggleLock(slotId),
+    toggleHidden: () => toggleHidden(slotId),
+    remove: () => deleteSlot(slotId),
+    copy: () => copySlot(slotId),
+    cut: () => cutSlot(slotId),
+    paste: () => pasteSlot(),
+    canPaste: hasClipboard(),
+  });
 
   const addSection = () => {
     const sec: Section = {
@@ -431,47 +607,39 @@ export function EditorPage() {
             <div className="text-xs font-semibold text-muted-foreground uppercase mb-2">
               Layers ({draft.slots.length})
             </div>
-            <div className="space-y-1">
+            <div className="space-y-0.5">
               {draft.slots
                 .slice()
                 .sort((a, b) => (b.zIndex ?? 0) - (a.zIndex ?? 0))
-                .map((s) => {
-                  const isSel = s.slotId === selectedSlotId;
-                  return (
-                    <div
-                      key={s.slotId}
-                      className={
-                        "group flex items-center gap-1 px-2 py-1 text-xs rounded " +
-                        (isSel ? "bg-primary text-primary-foreground" : "hover:bg-muted")
-                      }
-                    >
-                      <button
-                        onClick={() => setSelectedSlotId(s.slotId)}
-                        className="flex-1 text-left truncate flex items-center gap-1"
-                      >
-                        {s.isUploadedBackground && <Lock className="size-3 shrink-0 opacity-60" />}
-                        <span className="truncate">
-                          [{s.kind}
-                          {s.kind === "shape" && s.shapeKind ? `:${s.shapeKind}` : ""}]{" "}
-                          {s.staticText?.slice(0, 14) ?? s.slotId.slice(0, 6)}
-                        </span>
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteSlot(s.slotId);
-                        }}
-                        className={
-                          "opacity-0 group-hover:opacity-100 p-0.5 rounded " +
-                          (isSel ? "hover:bg-primary-foreground/20" : "hover:bg-destructive hover:text-destructive-foreground")
-                        }
-                        title="Xoá layer"
-                      >
-                        <Trash2 className="size-3" />
-                      </button>
-                    </div>
-                  );
-                })}
+                .map((s) => (
+                  <LayerRow
+                    key={s.slotId}
+                    slot={s}
+                    selected={s.slotId === selectedSlotId}
+                    renaming={renamingSlotId === s.slotId}
+                    onSelect={() => setSelectedSlotId(s.slotId)}
+                    onStartRename={() => {
+                      setSelectedSlotId(s.slotId);
+                      setRenamingSlotId(s.slotId);
+                    }}
+                    onCommitRename={(name) => {
+                      renameSlot(s.slotId, name);
+                      setRenamingSlotId(null);
+                    }}
+                    onCancelRename={() => setRenamingSlotId(null)}
+                    onToggleHidden={() => toggleHidden(s.slotId)}
+                    onToggleLock={() => toggleLock(s.slotId)}
+                    onDelete={() => deleteSlot(s.slotId)}
+                    menuActions={buildSlotMenuActions(s.slotId)}
+                    dragOver={dragOverLayerId === s.slotId}
+                    onDragStart={() => {
+                      dragLayerIdRef.current = s.slotId;
+                    }}
+                    onDragEnter={() => setDragOverLayerId(s.slotId)}
+                    onDragLeave={() => setDragOverLayerId(null)}
+                    onDrop={() => handleLayerDrop(s.slotId)}
+                  />
+                ))}
               {draft.slots.length === 0 && (
                 <p className="text-xs text-muted-foreground italic">Chưa có layer nào</p>
               )}
@@ -576,6 +744,7 @@ export function EditorPage() {
             onSelect={setSelectedSlotId}
             onUpdateSlot={updateSlot}
             onDeleteSlot={deleteSlot}
+            buildMenuActions={buildSlotMenuActions}
           />
           {draft.slots.length === 0 && (
             <div className="absolute inset-8 pointer-events-none border-2 border-dashed border-muted-foreground/30 rounded-xl grid place-items-center">
@@ -603,19 +772,33 @@ export function EditorPage() {
             )}
             {selectedSlot && (
               <>
-                <div className="flex gap-1">
+                <div className="flex flex-wrap gap-1">
                   {!selectedSlot.isUploadedBackground && (
-                    <Button size="sm" variant="outline" onClick={() => duplicateSlot(selectedSlot.slotId)}>
+                    <Button size="sm" variant="outline" onClick={() => duplicateSlot(selectedSlot.slotId)} title="Nhân bản (Ctrl+D)">
                       <Copy className="size-3 mr-1" /> Copy
                     </Button>
                   )}
-                  <Button size="sm" variant="outline" onClick={() => moveZ(selectedSlot.slotId, 1)}>
-                    <ArrowUp className="size-3" />
+                  <div className="flex border rounded-md overflow-hidden">
+                    <Button size="sm" variant="ghost" className="h-8 px-2 rounded-none" onClick={() => orderSlot(selectedSlot.slotId, "front")} title="Đưa lên trên cùng (Ctrl+Shift+])" disabled={selectedSlot.isUploadedBackground}>
+                      <ChevronsUp className="size-3" />
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-8 px-2 rounded-none border-l" onClick={() => orderSlot(selectedSlot.slotId, "forward")} title="Đưa lên 1 cấp (Ctrl+])" disabled={selectedSlot.isUploadedBackground}>
+                      <ArrowUp className="size-3" />
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-8 px-2 rounded-none border-l" onClick={() => orderSlot(selectedSlot.slotId, "backward")} title="Đưa xuống 1 cấp (Ctrl+[)" disabled={selectedSlot.isUploadedBackground}>
+                      <ArrowDown className="size-3" />
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-8 px-2 rounded-none border-l" onClick={() => orderSlot(selectedSlot.slotId, "back")} title="Đưa xuống dưới cùng (Ctrl+Shift+[)" disabled={selectedSlot.isUploadedBackground}>
+                      <ChevronsDown className="size-3" />
+                    </Button>
+                  </div>
+                  <Button size="sm" variant="outline" onClick={() => toggleHidden(selectedSlot.slotId)} title={selectedSlot.style?.hidden ? "Hiện (Ctrl+H)" : "Ẩn (Ctrl+H)"}>
+                    {selectedSlot.style?.hidden ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => moveZ(selectedSlot.slotId, -1)}>
-                    <ArrowDown className="size-3" />
+                  <Button size="sm" variant="outline" onClick={() => toggleLock(selectedSlot.slotId)} title={selectedSlot.locked ? "Mở khoá (Ctrl+L)" : "Khoá (Ctrl+L)"} disabled={selectedSlot.isUploadedBackground}>
+                    {selectedSlot.locked || selectedSlot.isUploadedBackground ? <Lock className="size-3" /> : <Unlock className="size-3" />}
                   </Button>
-                  <Button size="sm" variant="destructive" onClick={() => deleteSlot(selectedSlot.slotId)}>
+                  <Button size="sm" variant="destructive" onClick={() => deleteSlot(selectedSlot.slotId)} title="Xoá (Delete)" disabled={selectedSlot.isUploadedBackground}>
                     <Trash2 className="size-3" />
                   </Button>
                 </div>
@@ -1222,5 +1405,164 @@ function FilterSlider({
       </Label>
       <Slider value={[value]} min={min} max={max} step={step} onValueChange={(v) => onChange(v[0])} />
     </div>
+  );
+}
+
+// Một dòng trong panel Layers — UX kiểu Figma/Canva: icon kiểu + tên (đổi tên)
+// + toggle eye/lock + drag-reorder + chuột phải mở context menu.
+function LayerRow({
+  slot,
+  selected,
+  renaming,
+  onSelect,
+  onStartRename,
+  onCommitRename,
+  onCancelRename,
+  onToggleHidden,
+  onToggleLock,
+  onDelete,
+  menuActions,
+  dragOver,
+  onDragStart,
+  onDragEnter,
+  onDragLeave,
+  onDrop,
+}: {
+  slot: Slot;
+  selected: boolean;
+  renaming: boolean;
+  onSelect: () => void;
+  onStartRename: () => void;
+  onCommitRename: (name: string) => void;
+  onCancelRename: () => void;
+  onToggleHidden: () => void;
+  onToggleLock: () => void;
+  onDelete: () => void;
+  menuActions: SlotMenuActions;
+  dragOver: boolean;
+  onDragStart: () => void;
+  onDragEnter: () => void;
+  onDragLeave: () => void;
+  onDrop: () => void;
+}) {
+  const isBg = !!slot.isUploadedBackground;
+  const isHidden = !!slot.style?.hidden;
+  const isLocked = !!slot.locked || isBg;
+  const Icon =
+    slot.kind === "text" ? Type
+    : slot.kind === "image" ? ImageIcon
+    : slot.kind === "shape" ? (slot.shapeKind === "circle" ? Circle : slot.shapeKind === "triangle" ? Triangle : Square)
+    : LayersIcon;
+
+  const name = inferLayerName(slot);
+
+  const row = (
+    <div
+      draggable={!isBg && !renaming}
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "move";
+        onDragStart();
+      }}
+      onDragOver={(e) => {
+        if (!isBg) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+        }
+      }}
+      onDragEnter={(e) => {
+        if (!isBg) {
+          e.preventDefault();
+          onDragEnter();
+        }
+      }}
+      onDragLeave={onDragLeave}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDrop();
+      }}
+      className={
+        "group flex items-center gap-1 px-2 py-1 text-xs rounded select-none " +
+        (selected ? "bg-primary text-primary-foreground" : "hover:bg-muted") +
+        (dragOver ? " ring-2 ring-primary/60" : "") +
+        (isHidden ? " opacity-60" : "")
+      }
+    >
+      <GripVertical
+        className={"size-3 shrink-0 " + (isBg ? "opacity-20" : "opacity-40 cursor-grab active:cursor-grabbing")}
+      />
+      <Icon className="size-3 shrink-0 opacity-70" />
+      {renaming ? (
+        <input
+          autoFocus
+          defaultValue={slot.name ?? ""}
+          placeholder={name}
+          onBlur={(e) => onCommitRename(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              onCommitRename((e.target as HTMLInputElement).value);
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              onCancelRename();
+            }
+          }}
+          onClick={(e) => e.stopPropagation()}
+          className="flex-1 h-5 bg-background text-foreground border border-input rounded px-1 text-xs"
+        />
+      ) : (
+        <button
+          onClick={onSelect}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            onStartRename();
+          }}
+          className="flex-1 text-left truncate"
+          title={name + " (double-click để đổi tên)"}
+        >
+          <span className="truncate">{name}</span>
+        </button>
+      )}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleHidden();
+        }}
+        className={"p-0.5 rounded " + (selected ? "hover:bg-primary-foreground/20" : "hover:bg-muted-foreground/20")}
+        title={isHidden ? "Hiện (Ctrl+H)" : "Ẩn (Ctrl+H)"}
+      >
+        {isHidden ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
+      </button>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleLock();
+        }}
+        className={"p-0.5 rounded " + (selected ? "hover:bg-primary-foreground/20" : "hover:bg-muted-foreground/20")}
+        title={isLocked ? "Mở khoá (Ctrl+L)" : "Khoá (Ctrl+L)"}
+        disabled={isBg}
+      >
+        {isLocked ? <Lock className="size-3" /> : <Unlock className="size-3 opacity-50" />}
+      </button>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
+        className={
+          "opacity-0 group-hover:opacity-100 p-0.5 rounded " +
+          (selected ? "hover:bg-primary-foreground/20" : "hover:bg-destructive hover:text-destructive-foreground")
+        }
+        title="Xoá layer (Delete)"
+        disabled={isBg}
+      >
+        <Trash2 className="size-3" />
+      </button>
+    </div>
+  );
+
+  return (
+    <SlotContextMenu slot={slot} actions={menuActions}>
+      {row}
+    </SlotContextMenu>
   );
 }

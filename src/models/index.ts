@@ -126,6 +126,8 @@ export interface SlotStyle {
   shadowBlur?: number;
   shadowX?: number;
   shadowY?: number;
+  // visibility (Designer toolkit)
+  hidden?: boolean;
 }
 
 // Crop ảnh: % so với ảnh gốc (0..1)
@@ -140,6 +142,7 @@ export type OverflowRule = "shrink" | "ellipsis" | "max_lines" | "hard_fail";
 
 export interface Slot {
   slotId: ID;
+  name?: string; // tên hiển thị trong panel Layers (designer đặt thủ công)
   pageId?: ID;
   sectionId?: ID;
   x: number;

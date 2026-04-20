@@ -12,6 +12,7 @@ import {
   shapeClipPath,
 } from "@/engines/binding/dataBinding";
 import { CropOverlay } from "./CropOverlay";
+import { SlotContextMenu, type SlotMenuActions } from "./SlotContextMenu";
 
 export function NumField({
   label,
@@ -42,6 +43,7 @@ export function Canvas({
   onSelect,
   onUpdateSlot,
   onDeleteSlot,
+  buildMenuActions,
 }: {
   template: PageTemplate;
   zoom: number;
@@ -49,6 +51,7 @@ export function Canvas({
   onSelect: (id: string | null) => void;
   onUpdateSlot: (slotId: string, patch: Partial<Slot>) => void;
   onDeleteSlot?: (slotId: string) => void;
+  buildMenuActions?: (slotId: string) => SlotMenuActions;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [cropSlotId, setCropSlotId] = useState<string | null>(null);
@@ -82,6 +85,7 @@ export function Canvas({
             onDelete={() => onDeleteSlot?.(slot.slotId)}
             onStartCrop={() => setCropSlotId(slot.slotId)}
             template={template}
+            menuActions={buildMenuActions?.(slot.slotId)}
           />
         ))}
       {cropSlot && cropSlot.staticImage && (
@@ -123,6 +127,7 @@ function SlotEditor({
   onDelete,
   onStartCrop,
   template,
+  menuActions,
 }: {
   slot: Slot;
   zoom: number;
@@ -132,6 +137,7 @@ function SlotEditor({
   onDelete: () => void;
   onStartCrop: () => void;
   template: PageTemplate;
+  menuActions?: SlotMenuActions;
 }) {
   const startMove = useCallback(
     (e: React.MouseEvent) => {
@@ -200,6 +206,7 @@ function SlotEditor({
   const rot = slot.rotation ? `rotate(${slot.rotation}deg)` : "";
   const transform = (rot + flip).trim() || undefined;
 
+  const isHidden = !!slot.style?.hidden;
   const baseStyle: React.CSSProperties = {
     position: "absolute",
     left: slot.x * zoom,
@@ -210,10 +217,13 @@ function SlotEditor({
     cursor: slot.locked ? "not-allowed" : "move",
     outline: selected
       ? "2px solid hsl(var(--primary))"
-      : "1px dashed rgba(0,0,0,0.15)",
+      : isHidden
+        ? "1px dashed rgba(239,68,68,0.5)"
+        : "1px dashed rgba(0,0,0,0.15)",
     outlineOffset: 0,
     boxSizing: "border-box",
-    opacity: slot.style?.opacity ?? 1,
+    // Khi ẩn: editor render mờ + viền đỏ để designer biết block tồn tại nhưng không xuất hiện trong export.
+    opacity: isHidden ? 0.25 : (slot.style?.opacity ?? 1),
     boxShadow: buildBoxShadow(slot.style, zoom),
   };
 
@@ -378,10 +388,14 @@ function SlotEditor({
     { h: "w", style: { left: -5, top: "50%", marginTop: -5 }, cursor: "ew-resize" },
   ];
 
-  return (
+  const slotEl = (
     <div
       style={baseStyle}
       onMouseDown={startMove}
+      onContextMenu={(e) => {
+        // chọn slot trước khi mở context menu
+        if (!selected) onSelect();
+      }}
       onDoubleClick={(e) => {
         if (slot.kind === "image" && slot.staticImage && !slot.locked) {
           e.stopPropagation();
@@ -449,4 +463,13 @@ function SlotEditor({
       )}
     </div>
   );
+
+  if (menuActions) {
+    return (
+      <SlotContextMenu slot={slot} actions={menuActions}>
+        {slotEl}
+      </SlotContextMenu>
+    );
+  }
+  return slotEl;
 }
