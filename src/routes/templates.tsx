@@ -3,16 +3,23 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/storage/db";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
 import {
-  Plus, Pencil, Copy, Trash2, Sparkles, Loader2, CalendarPlus, Package,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Plus, Pencil, Copy, Trash2, Sparkles, Loader2, CalendarPlus, Package, Layers, X,
 } from "lucide-react";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import { useEffect, useRef, useState } from "react";
 import type { PageTemplate } from "@/models";
 import { PageRenderer } from "@/features/render/PageRenderer";
-import { aiGenerateTemplateFromImageServer } from "@/server/aiTemplate";
+import { aiGenerateTemplateFromImageServer, aiGenerateComboFromImagesServer } from "@/server/aiTemplate";
 import { aiLayoutToTemplate } from "@/features/ai/templateFromImage";
+import { buildComboFromAiResult, persistCombo } from "@/features/ai/comboFromImages";
 import { seedTravelFlexPack, cloneDayPage } from "@/storage/seedFlex";
 
 export const Route = createFileRoute("/templates")({
