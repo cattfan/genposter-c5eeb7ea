@@ -12,11 +12,6 @@ import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  TEXT_BINDING_OPTIONS,
-  IMAGE_BINDING_OPTIONS,
-  slotHasBinding,
-} from "@/engines/binding/dataBinding";
-import {
   Type,
   Image as ImageIcon,
   Square,
@@ -41,8 +36,7 @@ import {
   RotateCcw,
   FlipHorizontal,
   FlipVertical,
-  Link2,
-  Link2Off,
+  Lock,
   Undo2,
   Redo2,
 } from "lucide-react";
