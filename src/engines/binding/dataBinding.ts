@@ -42,6 +42,13 @@ export function resolveTextBinding(
     const v = (entity.metadata?.signatureDish as string | undefined) ?? "";
     return v || (fallback ?? "");
   }
+  // Cột raw từ sheet: entity.metadata.<key> (vd entity.metadata.Loai_dich_vu)
+  if (bindingPath.startsWith("entity.metadata.")) {
+    const key = bindingPath.slice("entity.metadata.".length);
+    const v = entity.metadata?.[key];
+    if (v == null || v === "") return fallback ?? "";
+    return String(v);
+  }
   if (bindingPath.startsWith("entity.")) {
     const key = bindingPath.slice("entity.".length) as keyof Entity;
     const v = entity[key];
