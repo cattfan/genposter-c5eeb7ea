@@ -1,73 +1,77 @@
+
+
 ## Mục tiêu
 
-1. **Editor mạnh như công cụ chỉnh sửa ảnh**: thêm crop ảnh, filters (brightness/contrast/saturation/blur), flip, rotate nhanh, opacity, drop shadow, align/distribute, group, lock/unlock, undo/redo, snap/guideline.
-2. **Đổ dữ liệu theo kiểu "click-to-bind"**: trên editor, người dùng click vào block muốn nhận data → gán "trường data" (vd: `entity.name`, `entity.address`, `asset.image`). Block nào không gán thì giữ nguyên nội dung tĩnh khi generate. Bỏ flow "section" phức tạp cho luồng cơ bản (vẫn giữ song song).
+1. **Bỏ icon emoji màu mè**: thay 🔗 / ⚡ / 📦 / ✕ / ⚠ / 🪧 / 1️⃣ / 📷 / 🟦 ... bằng icon Lucide đơn sắc (`Link2`, `Sparkles`, `Package`, `X`, `AlertTriangle`, `Image`, `Square`, `Circle`, `Triangle`, `Minus`, `MousePointerClick` ...).
+2. **Trang Tạo nội dung phải có canvas tương tác**: hiện canvas template thật như editor; user click vào block → chọn trường data → preview cập nhật. Bind chỉ tạm thời cho lần generate, **không** ghi đè template.
+3. **Bỏ UI bind trong editor** (theo yêu cầu): editor chỉ dùng để chỉnh hình ảnh/layout, không còn dropdown bind.
 
 ## Thay đổi chính
 
-### A. Editor — bổ sung thao tác ảnh chuyên nghiệp
+### A. Trang `/generate` — canvas click-to-bind tạm thời
 
-**File: `src/features/editor/EditorCanvas.tsx`, `EditorPage.tsx`, `src/models/index.ts**`
+**File chỉnh: `src/routes/generate.tsx`** + tạo mới `src/features/generate/BindCanvas.tsx`, `src/features/generate/useBindOverrides.ts`.
 
-- **Mở rộng `SlotStyle**`: thêm `brightness`, `contrast`, `saturate`, `blur`, `hueRotate`, `grayscale`, `flipH`, `flipV`, `shadowColor`, `shadowBlur`, `shadowX`, `shadowY`. Render bằng CSS `filter` + `transform: scale(±1, ±1)`.
-- **Crop ảnh**: thêm field `crop?: { x, y, w, h }` (% so với ảnh gốc). Double-click ảnh → mở mode crop với khung kéo riêng, ESC/Enter để thoát.
-- **Rotate nhanh**: nút 90° trái/phải trong panel phải; thanh kéo rotate khi block được chọn (handle ở phía trên block).
-- **Opacity slider** cho mọi block.
-- **Align tools**: align left/center/right/top/middle/bottom so với canvas (toolbar nổi khi chọn block).
-- **Snap & guideline**: khi kéo block, hiển thị đường gióng đỏ khi cạnh/tâm trùng cạnh/tâm canvas hoặc block khác (ngưỡng ±6px / zoom).
-- **Lock/unlock layer** (icon trong layer list); block lock không kéo/resize được.
-- **Undo/Redo** (`Ctrl+Z`, `Ctrl+Shift+Z`): lưu lịch sử `draft` dạng stack tối đa 50 bước.
-- **Group/ungroup**: chọn nhiều block (Shift+click) → `Ctrl+G` để group; di chuyển/xoá đồng bộ.
+- **Layout 3 cột (tab "Theo entity")**:
+  ```
+  ┌──────────────┬──────────────────────┬──────────────┐
+  │ Cấu hình     │ Canvas tương tác     │ Panel binding│
+  │ - Template   │ (template scale fit) │ (block đang  │
+  │ - Lọc entity │ click block ở đây    │  chọn)       │
+  │ - Preview    │                      │              │
+  │   entity     │                      │              │
+  └──────────────┴──────────────────────┴──────────────┘
+  ```
+- **`BindCanvas`**: render template ở scale ~0.5, mỗi slot là 1 div bắt `onClick`; slot đang chọn có viền primary, slot đã có override-binding có viền dashed. Không cho kéo/resize — chỉ chọn.
+- **Panel binding bên phải**:
+  - Nếu slot là `text`: `Select` các trường `entity.name / address / phone / priceRange / style / openingHours / categoryMain / categorySub` + nút "Xoá liên kết".
+  - Nếu slot là `image`: `Select` `Ảnh chính | Ảnh role: facade / food_closeup / space / portrait / square_thumb / section_image` + nút "Xoá liên kết".
+  - Hiển thị preview giá trị thực tế với entity đang preview.
+- **`useBindOverrides`**: state `Record<slotId, bindingPath>` lưu trong React state (không vào DB). Hàm `applyOverrides(template, overrides)` trả về 1 template ảo có `bindingPath` đã merge để truyền vào `PageRenderer` & generate.
+- **Preview entity**: dropdown "Xem trước với entity" để chọn 1 entity từ `filteredEntities`, canvas + panel preview update theo entity đó.
+- **Generate**: dùng template-ảo (đã merge overrides) → render từng card cho mỗi entity (giữ logic hiện tại).
+- **Empty state mới**: bỏ "1️⃣ 2️⃣ 3️⃣"; dùng card hướng dẫn đơn giản với 3 step rõ ràng kèm icon Lucide (`MousePointerClick`, `Filter`, `Sparkles`).
 
-### B. Click-to-bind data
+### B. Bỏ UI bind trong editor
 
-**File mới: `src/engines/binding/dataBinding.ts**` + sửa `EditorCanvas.tsx`, `PageRenderer.tsx`, `generate.ts`
+**File chỉnh: `src/features/editor/EditorPage.tsx`, `EditorCanvas.tsx`.**
 
-- **Mô hình**: dùng lại field có sẵn `slot.bindingPath`. Không bind = giữ `staticText`/`staticImage`. Có bind = render từ entity.
-- **UI bind trong panel phải**:
-  - Khi chọn block `text`: dropdown "Nguồn dữ liệu" gồm `Cố định | entity.name | entity.address | entity.phone | entity.priceRange | entity.style | entity.openingHours | entity.categoryMain`. Chọn → hiện badge tím "🔗 entity.name" trên block và preview placeholder `{{entity.name}}`.
-  - Khi chọn block `image`: dropdown "Nguồn ảnh" gồm `Cố định (URL/upload) | Ảnh chính của entity | Ảnh role: cover/facade/food_closeup/...`. Lưu vào `slot.bindingPath = "asset.byRole:cover"` và `slot.allowedAssetRoles`.
-  - Nút **"Xoá liên kết"** để quay lại tĩnh.
-- **Visual cue trên canvas**: block đã bind viền tím nét đứt + chip "🔗 field" góc trên trái; block tĩnh giữ outline cũ.
-- **Generate flow mới (`generate.ts`)**:
-  - Mỗi page template + 1 entity (lặp qua danh sách entity active đã filter) → 1 page render.
-  - Khi render block có `bindingPath`, lấy giá trị từ entity tương ứng; block không bind → giữ nguyên `staticText`/`staticImage`.
-  - Nếu page không có block nào bind → render đúng 1 lần (template tĩnh).
-- **PageRenderer**: thêm prop `entity?: Entity` + `entityAssets?: Asset[]`; resolver `resolveSlotValue(slot, entity, assets)` xử lý `entity.<field>` và `asset.byRole:<role>` / `asset.cover`.
-- **Trang `/generate**`:
-  - Bỏ yêu cầu chọn pack phức tạp cho luồng cơ bản: thêm chế độ **"Generate theo entity"** — chọn 1 page template (hoặc pack) + filter entities (category, partner) → preview tất cả page tạo ra.
-  - Mỗi card page hiển thị tên entity tương ứng.
+- Xoá dropdown "Nguồn dữ liệu / Nguồn ảnh" trong panel phải của editor.
+- Xoá viền tím dashed + chip "🔗" trên canvas editor và icon 🔗 trong layer list.
+- `bindingPath` đã có sẵn trong template vẫn được tôn trọng khi render generate (làm override mặc định), nhưng editor không tạo mới được.
+- Giữ nguyên các tính năng hình ảnh: filter, crop, flip, rotate, undo/redo.
 
-### C. Tinh chỉnh nhỏ
+### C. Quét sạch icon emoji → Lucide đơn sắc
 
-- Layer list hiển thị icon 🔗 nếu block có `bindingPath`.
-- Lưu template không xoá `bindingPath`.
-- Hotkey: `R` = rotate 15°, `[`/`]` = z-index, `Ctrl+D` = duplicate (trừ ảnh nền).
+| Vị trí cũ | Mới |
+|---|---|
+| `🔗 entity.name` chip | `<Link2 className="size-3" />` + text |
+| `⚡ Generate theo entity` | `<Zap className="size-4" />` |
+| `📦 Pack template` / Export | `<Package />` |
+| `✕ Xoá` button trên slot | `<X />` |
+| `⚠` cảnh báo | `<AlertTriangle />` |
+| `📷` placeholder ảnh | `<ImageIcon />` |
+| `🪧 / 🟦 / ⚪ / 🔺 / ➖` shape buttons | `<Image>` `<Square>` `<Circle>` `<Triangle>` `<Minus>` |
+| `1️⃣ 2️⃣ 3️⃣` step | bullet số đơn sắc + icon hành động |
 
-## Sơ đồ luồng đổ dữ liệu
-
-```text
-[Editor]
-  Block text "Tên quán" ──click──▶ Dropdown chọn entity.name ──▶ slot.bindingPath="entity.name"
-  Block image hero ─────click──▶ Dropdown chọn asset role:cover ──▶ slot.bindingPath="asset.byRole:cover"
-  Block "Liên hệ" (tĩnh) ──────────────────────────────────▶ giữ nguyên staticText
-
-[Generate]
-  entities (đã filter) ──▶ for each entity:
-                            renderPage(template, entity, assets[entity])
-                            ▼
-                          Slot có bindingPath → resolve(entity)
-                          Slot không bind   → giữ static
-```
+Quét cả `EditorPage.tsx`, `EditorCanvas.tsx`, `generate.tsx`, `PageRenderer.tsx`, `routes/templates.tsx`, `routes/data.tsx`.
 
 ## Files dự kiến chỉnh / tạo
 
-- Chỉnh: `src/models/index.ts`, `src/features/editor/EditorPage.tsx`, `src/features/editor/EditorCanvas.tsx`, `src/features/render/PageRenderer.tsx`, `src/engines/selection/generate.ts`, `src/routes/generate.tsx`.
-- Tạo: `src/engines/binding/dataBinding.ts` (resolver), `src/features/editor/CropOverlay.tsx`, `src/features/editor/useHistory.ts`.
+- **Chỉnh**: `src/routes/generate.tsx`, `src/features/editor/EditorPage.tsx`, `src/features/editor/EditorCanvas.tsx`, `src/features/render/PageRenderer.tsx`, `src/routes/templates.tsx` (nếu có emoji), `src/routes/data.tsx` (nếu có emoji).
+- **Tạo**: `src/features/generate/BindCanvas.tsx`, `src/features/generate/useBindOverrides.ts`.
 
-## Phạm vi ưu tiên (đề xuất chia 2 đợt)
+## Sơ đồ luồng mới
 
-- **Đợt 1 (làm trước)**: filters/opacity/rotate-nhanh/flip + crop cơ bản + undo-redo + click-to-bind (text + image) + generate theo entity.
-- **Đợt 2 (sau)**: snap/guideline, group/ungroup, align toolbar, lock layer, hotkey nâng cao.
+```text
+[Editor]   chỉ chỉnh hình/layout, không bind
+   │
+   ▼ lưu template
+[Tạo nội dung]
+   ├─ chọn template + lọc entity
+   ├─ canvas tương tác: click block → panel chọn trường data
+   │     (overrides trong RAM, KHÔNG lưu lại template)
+   ├─ chọn 1 entity để preview real-time
+   └─ Generate → for each entity: render(template + overrides, entity)
+```
 
-Xác nhận để mình bắt đầu Đợt 1 nhé.
