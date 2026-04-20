@@ -210,6 +210,78 @@ function GeneratePage() {
     return set;
   }, [effectiveTpl, selectedSlot]);
 
+  // Tập cột data có sẵn từ entity (top-level + metadata) — feed cho AI bind suggest.
+  const dataColumns = useMemo(() => {
+    const set = new Set<string>();
+    (entities ?? []).slice(0, 50).forEach((e) => {
+      ["name", "address", "phone", "priceRange", "style", "openingHours", "categoryMain", "categorySub"].forEach((k) => {
+        const v = (e as unknown as Record<string, unknown>)[k];
+        if (v != null && v !== "") set.add(k);
+      });
+      if (e.metadata) Object.keys(e.metadata).forEach((k) => set.add("metadata." + k));
+    });
+    return Array.from(set);
+  }, [entities]);
+
+  const runAiSuggest = async () => {
+    if (!effectiveTpl) return toast.error("Chưa chọn template");
+    const slotsForAi = effectiveTpl.slots
+      .filter((s) => s.kind === "text" || s.kind === "image" || s.kind === "shape")
+      .map((s) => ({
+        slotId: s.slotId,
+        kind: s.kind,
+        placeholder: s.staticText,
+        staticText: s.staticText,
+      }));
+    if (slotsForAi.length === 0) return toast.error("Template không có slot bindable");
+    setSuggestBusy(true);
+    try {
+      const out = await aiSuggestBindingsServer({
+        data: { slots: slotsForAi, columns: dataColumns },
+      });
+      if (!out.ok) return toast.error(out.error);
+      setSuggestions(out.suggestions);
+      setSuggestOpen(true);
+    } catch (e) {
+      toast.error("AI lỗi: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setSuggestBusy(false);
+    }
+  };
+
+  const applyAiSuggestions = (selected: BindSuggestion[]) => {
+    selected.forEach((s) => setBinding(s.slotId, s.suggestedBindingPath));
+    toast.success(`Đã áp dụng ${selected.length} liên kết`);
+  };
+
+  const runAiCaption = async () => {
+    if (!selectedSlot || selectedSlot.kind !== "text") return;
+    if (!previewEntity) return toast.error("Chọn entity preview trước");
+    setCaptionBusy(true);
+    try {
+      const out = await aiCaptionFromEntityServer({
+        data: { entity: previewEntity as unknown as Record<string, unknown>, style: "instagram" },
+      });
+      if (!out.ok) return toast.error(out.error);
+      setBinding(selectedSlot.slotId, undefined);
+      if (effectiveTpl) {
+        const tpl = await db.pageTemplates.get(effectiveTpl.pageTemplateId);
+        if (tpl) {
+          tpl.slots = tpl.slots.map((s) =>
+            s.slotId === selectedSlot.slotId ? { ...s, staticText: out.caption } : s,
+          );
+          tpl.updatedAt = Date.now();
+          await db.pageTemplates.put(tpl);
+        }
+      }
+      toast.success("Đã sinh caption");
+    } catch (e) {
+      toast.error("AI lỗi: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setCaptionBusy(false);
+    }
+  };
+
   const generateByEntity = () => {
     if (!effectiveTpl) return toast.error("Chưa chọn template");
     if (!hasAnyBinding) {
