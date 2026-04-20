@@ -234,6 +234,7 @@ export interface PageTemplate {
 export interface PackTemplate {
   packTemplateId: ID;
   name: string;
+  description?: string;
   goal?: string;
   tone?: string;
   cta?: string;
