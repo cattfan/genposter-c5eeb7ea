@@ -678,6 +678,12 @@ export function EditorPage() {
                       value={selectedSlot.staticText ?? ""}
                       onChange={(e) => updateSlot(selectedSlot.slotId, { staticText: e.target.value })}
                     />
+
+                    <FontPicker
+                      value={selectedSlot.style?.fontFamily}
+                      onChange={(v) => updateSlotStyle(selectedSlot.slotId, { fontFamily: v })}
+                    />
+
                     <div className="grid grid-cols-2 gap-2">
                       <NumField
                         label="Font size"
@@ -727,6 +733,164 @@ export function EditorPage() {
                           </SelectContent>
                         </Select>
                       </div>
+                    </div>
+
+                    {/* Style toggles: B / I / U / S */}
+                    <div className="flex gap-1">
+                      <Button
+                        size="sm"
+                        variant={Number(selectedSlot.style?.fontWeight ?? 500) >= 700 ? "default" : "outline"}
+                        className="flex-1"
+                        onClick={() => updateSlotStyle(selectedSlot.slotId, {
+                          fontWeight: Number(selectedSlot.style?.fontWeight ?? 500) >= 700 ? 400 : 700,
+                        })}
+                        title="Bold"
+                      ><Bold className="size-3" /></Button>
+                      <Button
+                        size="sm"
+                        variant={selectedSlot.style?.fontStyle === "italic" ? "default" : "outline"}
+                        className="flex-1"
+                        onClick={() => updateSlotStyle(selectedSlot.slotId, {
+                          fontStyle: selectedSlot.style?.fontStyle === "italic" ? "normal" : "italic",
+                        })}
+                        title="Italic"
+                      ><Italic className="size-3" /></Button>
+                      <Button
+                        size="sm"
+                        variant={(selectedSlot.style?.textDecoration ?? "none").includes("underline") ? "default" : "outline"}
+                        className="flex-1"
+                        onClick={() => {
+                          const cur = selectedSlot.style?.textDecoration ?? "none";
+                          const has = cur.includes("underline");
+                          const hasStrike = cur.includes("line-through");
+                          const next = (has ? (hasStrike ? "line-through" : "none") : (hasStrike ? "underline line-through" : "underline")) as any;
+                          updateSlotStyle(selectedSlot.slotId, { textDecoration: next });
+                        }}
+                        title="Underline"
+                      ><Underline className="size-3" /></Button>
+                      <Button
+                        size="sm"
+                        variant={(selectedSlot.style?.textDecoration ?? "none").includes("line-through") ? "default" : "outline"}
+                        className="flex-1"
+                        onClick={() => {
+                          const cur = selectedSlot.style?.textDecoration ?? "none";
+                          const has = cur.includes("line-through");
+                          const hasU = cur.includes("underline");
+                          const next = (has ? (hasU ? "underline" : "none") : (hasU ? "underline line-through" : "line-through")) as any;
+                          updateSlotStyle(selectedSlot.slotId, { textDecoration: next });
+                        }}
+                        title="Strikethrough"
+                      ><Strikethrough className="size-3" /></Button>
+                    </div>
+
+                    {/* Spacing */}
+                    <div>
+                      <Label className="text-xs flex justify-between">
+                        <span>Line height</span>
+                        <span className="text-muted-foreground">{(selectedSlot.style?.lineHeight ?? 1.2).toFixed(2)}</span>
+                      </Label>
+                      <Slider
+                        value={[(selectedSlot.style?.lineHeight ?? 1.2) * 100]}
+                        min={80} max={300} step={5}
+                        onValueChange={(v) => updateSlotStyle(selectedSlot.slotId, { lineHeight: v[0] / 100 })}
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs flex justify-between">
+                        <span>Letter spacing (px)</span>
+                        <span className="text-muted-foreground">{selectedSlot.style?.letterSpacing ?? 0}</span>
+                      </Label>
+                      <Slider
+                        value={[selectedSlot.style?.letterSpacing ?? 0]}
+                        min={-5} max={20} step={0.5}
+                        onValueChange={(v) => updateSlotStyle(selectedSlot.slotId, { letterSpacing: v[0] })}
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Max lines (0 = không giới hạn)</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={selectedSlot.style?.maxLines ?? 0}
+                        onChange={(e) => updateSlotStyle(selectedSlot.slotId, { maxLines: Number(e.target.value) || 0 })}
+                        className="h-8"
+                      />
+                    </div>
+
+                    {/* Text stroke */}
+                    <div className="border-t pt-2 space-y-2">
+                      <Label className="text-xs uppercase text-muted-foreground">Viền chữ (stroke)</Label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <Label className="text-xs">Color</Label>
+                          <Input
+                            type="color"
+                            value={selectedSlot.style?.textStrokeColor ?? "#000000"}
+                            onChange={(e) => updateSlotStyle(selectedSlot.slotId, { textStrokeColor: e.target.value })}
+                            className="h-8 p-1"
+                          />
+                        </div>
+                        <NumField
+                          label="Width (px)"
+                          value={selectedSlot.style?.textStrokeWidth ?? 0}
+                          onChange={(v) => updateSlotStyle(selectedSlot.slotId, { textStrokeWidth: v })}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Gradient text */}
+                    <div className="border-t pt-2 space-y-2">
+                      <Label className="text-xs uppercase text-muted-foreground flex items-center justify-between">
+                        <span className="flex items-center gap-1"><Sparkles className="size-3" /> Gradient text</span>
+                        <Button
+                          size="sm"
+                          variant={selectedSlot.style?.gradientEnabled ? "default" : "outline"}
+                          className="h-6 px-2 text-[10px]"
+                          onClick={() => updateSlotStyle(selectedSlot.slotId, {
+                            gradientEnabled: !selectedSlot.style?.gradientEnabled,
+                            gradientFrom: selectedSlot.style?.gradientFrom ?? "#f97316",
+                            gradientTo: selectedSlot.style?.gradientTo ?? "#db2777",
+                            gradientAngle: selectedSlot.style?.gradientAngle ?? 90,
+                          })}
+                        >
+                          {selectedSlot.style?.gradientEnabled ? "ON" : "OFF"}
+                        </Button>
+                      </Label>
+                      {selectedSlot.style?.gradientEnabled && (
+                        <>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <Label className="text-xs">From</Label>
+                              <Input
+                                type="color"
+                                value={selectedSlot.style?.gradientFrom ?? "#f97316"}
+                                onChange={(e) => updateSlotStyle(selectedSlot.slotId, { gradientFrom: e.target.value })}
+                                className="h-8 p-1"
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-xs">To</Label>
+                              <Input
+                                type="color"
+                                value={selectedSlot.style?.gradientTo ?? "#db2777"}
+                                onChange={(e) => updateSlotStyle(selectedSlot.slotId, { gradientTo: e.target.value })}
+                                className="h-8 p-1"
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <Label className="text-xs flex justify-between">
+                              <span>Angle (°)</span>
+                              <span className="text-muted-foreground">{selectedSlot.style?.gradientAngle ?? 90}</span>
+                            </Label>
+                            <Slider
+                              value={[selectedSlot.style?.gradientAngle ?? 90]}
+                              min={0} max={360} step={5}
+                              onValueChange={(v) => updateSlotStyle(selectedSlot.slotId, { gradientAngle: v[0] })}
+                            />
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 )}
