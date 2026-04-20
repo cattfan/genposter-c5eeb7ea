@@ -33,7 +33,21 @@ export interface GenerateInput {
 }
 
 export function generatePackJob(input: GenerateInput): GenerationJob {
-  const { pack, pageTemplates, entities, assets, overrides = [] } = input;
+  const {
+    pack,
+    pageTemplates,
+    entities,
+    assets,
+    overrides = [],
+    mode = "section",
+    entityPool = [],
+    bindOverrides = {},
+  } = input;
+
+  // === Branch: bind theo entity (không section selection) ===
+  if (mode === "one-entity-per-pack" || mode === "one-entity-per-page") {
+    return generateEntityBindJob(pack, pageTemplates, entityPool, mode, bindOverrides);
+  }
 
   const ctx: ScoreContext = {
     pageEntitiesUsed: new Set(),
