@@ -24,6 +24,7 @@ import {
 } from "@/engines/binding/dataBinding";
 import { buildSlotImagePlan, type PlannedImage, type SlotImagePlan } from "@/engines/binding/imagePlan";
 import { useResolvedImageSrc } from "@/storage/imageSrc";
+import { expandPageWithCardGroups } from "@/engines/binding/cardRepeater";
 
 interface Props {
   template: PageTemplate;
@@ -35,6 +36,8 @@ interface Props {
   innerRef?: React.Ref<HTMLDivElement>;
   // Chế độ generate-theo-entity: 1 entity ăn vào tất cả block có bindingPath
   entity?: Entity;
+  /** Pool entity dùng cho Card Repeater (template.cardGroups). Mặc định = [entity]. */
+  entityPool?: Entity[];
 }
 
 export function PageRenderer({
@@ -46,6 +49,7 @@ export function PageRenderer({
   debug = false,
   innerRef,
   entity,
+  entityPool,
 }: Props) {
   const entityMap = useMemo(() => new Map(entities.map((e) => [e.entityId, e])), [entities]);
   const assetMap = useMemo(() => new Map(assets.map((a) => [a.assetId, a])), [assets]);
@@ -81,6 +85,12 @@ export function PageRenderer({
     [template, entity, assets],
   );
 
+  // Card Repeater: expand cardGroups thành slot clone (mỗi clone có entity riêng).
+  const expanded = useMemo(() => {
+    const pool = entityPool && entityPool.length > 0 ? entityPool : entity ? [entity] : [];
+    return expandPageWithCardGroups(template, pool);
+  }, [template, entityPool, entity]);
+
   return (
     <div
       ref={innerRef}
@@ -98,26 +108,32 @@ export function PageRenderer({
         fontFamily: "'Be Vietnam Pro', system-ui, sans-serif",
       }}
     >
-      {template.slots
+      {expanded.slots
         .slice()
         .filter((s) => !s.style?.hidden)
         .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
-        .map((slot) => (
-          <SlotRenderer
-            key={slot.slotId}
-            slot={slot}
-            scale={scale}
-            template={template}
-            entityMap={entityMap}
-            assetMap={assetMap}
-            assets={assets}
-            entity={entity}
-            sectionItemsMap={sectionItemsMap}
-            slotOverride={slotEntityOverride.get(slot.slotId)}
-            planned={imagePlan.get(slot.slotId)}
-            debug={debug}
-          />
-        ))}
+        .map((slot) => {
+          const cardEnt = slot.__cardEntityId ? entityMap.get(slot.__cardEntityId) : undefined;
+          const effectiveEntity = cardEnt ?? entity;
+          // imagePlan key theo slotId gốc (originalSlotId)
+          const plannedHere = imagePlan.get(slot.originalSlotId ?? slot.slotId);
+          return (
+            <SlotRenderer
+              key={slot.slotId}
+              slot={slot}
+              scale={scale}
+              template={template}
+              entityMap={entityMap}
+              assetMap={assetMap}
+              assets={assets}
+              entity={effectiveEntity}
+              sectionItemsMap={sectionItemsMap}
+              slotOverride={slotEntityOverride.get(slot.originalSlotId ?? slot.slotId)}
+              planned={cardEnt ? undefined : plannedHere}
+              debug={debug}
+            />
+          );
+        })}
     </div>
   );
 }

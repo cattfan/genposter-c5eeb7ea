@@ -6,6 +6,8 @@ import { nanoid } from "nanoid";
 import { Canvas, NumField } from "@/features/editor/EditorCanvas";
 import { FontPicker } from "@/features/editor/FontPicker";
 import { SlotContextMenu, type SlotMenuActions } from "@/features/editor/SlotContextMenu";
+import { CardRepeaterPanel } from "@/features/editor/CardRepeaterPanel";
+import type { CardGroupConfig } from "@/models";
 import {
   bringForward,
   bringToFront,
@@ -930,6 +932,13 @@ export function EditorPage() {
             )}
             {selectedSlot && (
               <>
+                {selectedSlot.groupId && (
+                  <CardRepeaterPanel
+                    groupId={selectedSlot.groupId}
+                    template={draft}
+                    onChange={(next: CardGroupConfig[] | undefined) => updateDraft((d) => { d.cardGroups = next; })}
+                  />
+                )}
                 <div className="flex flex-wrap gap-1">
                   {!selectedSlot.isUploadedBackground && (
                     <Button size="sm" variant="outline" onClick={() => duplicateSlot(selectedSlot.slotId)} title="Nhân bản (Ctrl+D)">
