@@ -377,6 +377,7 @@ function BindSlot({
             ảnh trùng
           </div>
         )}
+        {selected && cardBadge && <CardBadge label={cardBadge} />}
       </div>
     );
   }
@@ -395,6 +396,7 @@ function BindSlot({
         }}
       >
         {text}
+        {selected && cardBadge && <CardBadge label={cardBadge} />}
       </div>
     );
   }
