@@ -14,7 +14,6 @@ import {
   PanelLeftOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import { seedDemo, isSeeded } from "@/storage/seed";
 import { toast } from "sonner";
 
@@ -129,7 +128,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </nav>
 
         <div className={cn("border-t border-sidebar-border", collapsed ? "p-2" : "p-3")}>
-          {collapsed ? (
+          {collapsed && (
             <button
               onClick={() => setCollapsed(false)}
               className="w-full p-2 rounded hover:bg-sidebar-accent/60 grid place-items-center"
@@ -137,19 +136,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             >
               <PanelLeftOpen className="size-4" />
             </button>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full"
-              onClick={async () => {
-                await seedDemo(true);
-                toast.success("Đã reset & nạp lại demo");
-                window.location.reload();
-              }}
-            >
-              Nạp lại demo
-            </Button>
           )}
         </div>
       </aside>

@@ -9,7 +9,6 @@ import {
 import { useEffect, useState } from "react";
 import { getSettings, saveSettings } from "@/storage/settings";
 import { clearAll } from "@/storage/db";
-import { seedDemo } from "@/storage/seed";
 import type { AiProviderConfig, AiProviderPreset, AppSettings } from "@/models";
 import { toast } from "sonner";
 import { AI_PRESETS, defaultAiConfig, testAiConfig } from "@/features/ai/aiClient";
@@ -207,15 +206,6 @@ function SettingsPage() {
           <CardTitle>Dữ liệu local</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          <Button
-            variant="outline"
-            onClick={async () => {
-              await seedDemo(true);
-              toast.success("Đã nạp lại demo");
-            }}
-          >
-            Nạp lại demo
-          </Button>
           <Button
             variant="destructive"
             onClick={async () => {

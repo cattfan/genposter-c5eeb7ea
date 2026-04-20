@@ -10,7 +10,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Plus, Pencil, Copy, Trash2, Sparkles, Loader2, CalendarPlus, Package, Layers, X,
+  Plus, Pencil, Copy, Trash2, Sparkles, Loader2, CalendarPlus, Layers, X,
 } from "lucide-react";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
@@ -20,7 +20,7 @@ import { PageRenderer } from "@/features/render/PageRenderer";
 import { aiGenerateTemplateFromImage, aiGenerateComboFromImages } from "@/features/ai/aiFeatures";
 import { aiLayoutToTemplate } from "@/features/ai/templateFromImage";
 import { buildComboFromAiResult, persistCombo } from "@/features/ai/comboFromImages";
-import { seedTravelFlexPack, cloneDayPage } from "@/storage/seedFlex";
+import { cloneDayPage } from "@/storage/seedFlex";
 
 export const Route = createFileRoute("/templates")({
   component: TemplatesPage,
@@ -98,15 +98,6 @@ function TemplatesPage() {
       toast.error("AI lỗi: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setAiBusy(false);
-    }
-  };
-
-  const loadFlexPack = async () => {
-    try {
-      const r = await seedTravelFlexPack();
-      toast.success(`Đã nạp pack 4N3Đ (${r.pageIds.length} page)`);
-    } catch (e) {
-      toast.error("Lỗi nạp pack: " + (e instanceof Error ? e.message : String(e)));
     }
   };
 
@@ -225,9 +216,6 @@ function TemplatesPage() {
           <p className="text-muted-foreground mt-1">Mỗi page template là 1 layout có thể ghép vào pack.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <Button variant="outline" onClick={loadFlexPack}>
-            <Package className="size-4 mr-2" /> Nạp pack 4N3Đ
-          </Button>
           <Button variant="outline" onClick={onPickAiImage} disabled={aiBusy}>
             {aiBusy ? <Loader2 className="size-4 mr-2 animate-spin" /> : <Sparkles className="size-4 mr-2" />}
             AI dựng từ ảnh
@@ -304,7 +292,7 @@ function TemplatesPage() {
       {tpls && tpls.length === 0 && (
         <Card>
           <CardContent className="p-10 text-center text-muted-foreground">
-            Chưa có template nào. Bấm "Tạo mới" hoặc nạp lại demo từ thanh bên.
+            Chưa có template nào. Bấm "Tạo mới" hoặc dùng AI để dựng từ ảnh.
           </CardContent>
         </Card>
       )}
