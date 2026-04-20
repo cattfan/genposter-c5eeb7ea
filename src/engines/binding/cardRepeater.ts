@@ -79,13 +79,84 @@ function bboxOfGroup(slots: Slot[], groupId: string): { x: number; y: number; w:
 }
 
 /**
+ * Cluster các slot CÓ bindingPath theo vị trí (Y nếu vertical, X nếu horizontal).
+ * Mỗi cluster sẽ ăn 1 entity riêng.
+ *
+ * Ưu tiên groupId nếu đã có; nếu không, dùng heuristic gap.
+ */
+function autoClusterSlots(
+  slots: Slot[],
+  excludeGroupIds: Set<string>,
+): Array<{ key: string; slots: Slot[] }> {
+  const bindable = slots.filter((s) => {
+    if (!s.bindingPath) return false;
+    if (!s.bindingPath.startsWith("entity.") && !s.bindingPath.startsWith("asset.")) return false;
+    if (s.groupId && excludeGroupIds.has(s.groupId)) return false;
+    return true;
+  });
+  if (bindable.length === 0) return [];
+
+  // Bước 1: nhóm theo groupId nếu có
+  const byGroup = new Map<string, Slot[]>();
+  const noGroup: Slot[] = [];
+  for (const s of bindable) {
+    if (s.groupId) {
+      const arr = byGroup.get(s.groupId) ?? [];
+      arr.push(s);
+      byGroup.set(s.groupId, arr);
+    } else {
+      noGroup.push(s);
+    }
+  }
+
+  // Bước 2: với slot không group, tự cluster theo gap dọc (Y)
+  // Heuristic: sort theo Y, gap > medianHeight * 0.6 = ranh giới row mới
+  if (noGroup.length > 0) {
+    const sorted = noGroup.slice().sort((a, b) => a.y - b.y || a.x - b.x);
+    const heights = sorted.map((s) => s.height).sort((a, b) => a - b);
+    const medianH = heights[Math.floor(heights.length / 2)] ?? 80;
+    const gapThreshold = medianH * 0.6;
+
+    let currentRow: Slot[] = [];
+    let currentBottom = -Infinity;
+    let rowIdx = 0;
+    for (const s of sorted) {
+      if (currentRow.length === 0 || s.y - currentBottom < gapThreshold) {
+        currentRow.push(s);
+        currentBottom = Math.max(currentBottom, s.y + s.height);
+      } else {
+        if (currentRow.length > 0) {
+          byGroup.set(`__autorow_${rowIdx++}`, currentRow);
+        }
+        currentRow = [s];
+        currentBottom = s.y + s.height;
+      }
+    }
+    if (currentRow.length > 0) {
+      byGroup.set(`__autorow_${rowIdx++}`, currentRow);
+    }
+  }
+
+  // Bước 3: sort cluster theo Y trên→dưới rồi X trái→phải
+  const clusters = Array.from(byGroup.entries()).map(([key, ss]) => ({
+    key,
+    slots: ss,
+    minY: Math.min(...ss.map((s) => s.y)),
+    minX: Math.min(...ss.map((s) => s.x)),
+  }));
+  clusters.sort((a, b) => a.minY - b.minY || a.minX - b.minX);
+
+  return clusters.map((c) => ({ key: c.key, slots: c.slots }));
+}
+
+/**
  * Expand 1 PageTemplate theo cardGroups + auto group-binding.
  *
  * Quy tắc:
  * - cardGroups cấu hình rõ ràng: clone N card, mỗi card ăn 1 entity kế tiếp trong pool.
- * - group thường (có groupId, chưa bật cardGroups): nếu có bind entity/asset thì cả group sẽ ăn 1 entity riêng,
- *   lần lượt theo thứ tự trên xuống / trái sang phải. Điều này sửa case user vẽ tay 4 card riêng nhưng muốn 4 quán khác nhau.
- * - slot không thuộc group nào giữ nguyên, fallback dùng entity của page như cũ.
+ * - Slot có bindingPath nhưng KHÔNG nằm trong cardGroups: tự cluster theo groupId hoặc theo vị trí Y.
+ *   Mỗi cluster ăn 1 entity riêng (sửa case "cả page chỉ hiện 1 quán").
+ * - slot không bind / không bind entity-asset → giữ nguyên, dùng entity của page.
  */
 export function expandPageWithCardGroups(
   template: PageTemplate,
@@ -105,7 +176,39 @@ export function expandPageWithCardGroups(
 
   const configuredGroupIds = new Set(cardGroups.map((g) => g.groupId));
   let cursor = 0;
+  const expanded: ExpandedSlot[] = [];
+  const consumedSlotIds = new Set<string>();
 
+  // 1) Auto-cluster: slot có bindingPath chưa thuộc cardGroups → mỗi cluster ăn 1 entity
+  if (entityPool.length > 0) {
+    const clusters = autoClusterSlots(template.slots, configuredGroupIds);
+    for (const cluster of clusters) {
+      const ent = entityPool[cursor % entityPool.length];
+      const cardEntities = ent ? [ent] : [];
+      for (const s of cluster.slots) {
+        consumedSlotIds.add(s.slotId);
+        const cloned: ExpandedSlot = {
+          ...s,
+          originalSlotId: s.slotId,
+          cardIndex: 0,
+          cardGroupId: cluster.key,
+          __cardEntityId: ent?.entityId,
+        };
+        expanded.push(cloned);
+        if (ent) entityBySlotId.set(s.slotId, ent);
+      }
+      cardsByGroup.set(cluster.key, cardEntities);
+      cursor += 1;
+    }
+  }
+
+  // 2) Slot không bị consumed và không thuộc cardGroups → giữ nguyên
+  const untouched: ExpandedSlot[] = template.slots
+    .filter((s) => !consumedSlotIds.has(s.slotId) && (!s.groupId || !configuredGroupIds.has(s.groupId)))
+    .map((s) => ({ ...s, originalSlotId: s.slotId, cardIndex: 0 }));
+  expanded.push(...untouched);
+
+  // 3) cardGroups (Card Repeater rõ ràng): clone N card
   const sortedCardGroups = cardGroups
     .slice()
     .sort((a, b) => {
@@ -115,59 +218,6 @@ export function expandPageWithCardGroups(
       return boxA.y - boxB.y || boxA.x - boxB.x;
     });
 
-  const expanded: ExpandedSlot[] = [];
-
-  // 1) Group thường chưa bật card repeater: mỗi group ăn 1 entity riêng
-  const autoGroupIds = Array.from(
-    new Set(
-      template.slots
-        .filter((s) => s.groupId && !configuredGroupIds.has(s.groupId))
-        .map((s) => s.groupId as string),
-    ),
-  )
-    .filter((groupId) => {
-      const groupSlots = template.slots.filter((s) => s.groupId === groupId);
-      return groupSlots.some(
-        (s) => !!s.bindingPath && (s.bindingPath.startsWith("entity.") || s.bindingPath.startsWith("asset.")),
-      );
-    })
-    .sort((a, b) => {
-      const boxA = bboxOfGroup(template.slots, a);
-      const boxB = bboxOfGroup(template.slots, b);
-      if (!boxA || !boxB) return 0;
-      return boxA.y - boxB.y || boxA.x - boxB.x;
-    });
-
-  const autoGroupIdSet = new Set(autoGroupIds);
-
-  for (const groupId of autoGroupIds) {
-    const ent = entityPool.length > 0 ? entityPool[cursor % entityPool.length] : undefined;
-    const groupSlots = template.slots.filter((s) => s.groupId === groupId);
-    const cardEntities = ent ? [ent] : [];
-
-    for (const s of groupSlots) {
-      const cloned: ExpandedSlot = {
-        ...s,
-        originalSlotId: s.slotId,
-        cardIndex: 0,
-        cardGroupId: groupId,
-        __cardEntityId: ent?.entityId,
-      };
-      expanded.push(cloned);
-      if (ent) entityBySlotId.set(s.slotId, ent);
-    }
-
-    cardsByGroup.set(groupId, cardEntities);
-    cursor += 1;
-  }
-
-  // 2) Slot ngoài mọi group hoặc group không bind entity/asset giữ nguyên
-  const untouched: ExpandedSlot[] = template.slots
-    .filter((s) => !s.groupId || (!configuredGroupIds.has(s.groupId) && !autoGroupIdSet.has(s.groupId)))
-    .map((s) => ({ ...s, originalSlotId: s.slotId, cardIndex: 0 }));
-  expanded.push(...untouched);
-
-  // 3) Group có Card Repeater cấu hình: clone N card, consume entity tuần tự
   for (const cfg of sortedCardGroups) {
     const bbox = bboxOfGroup(template.slots, cfg.groupId);
     if (!bbox) continue;
