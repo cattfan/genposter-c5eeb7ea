@@ -243,7 +243,23 @@ export const aiSuggestBindingsServer = createServerFn({ method: "POST" })
     });
     if (!result.ok) return { ok: false as const, error: result.error };
     if (!result.toolArgs) return { ok: false as const, error: "AI không trả suggestions" };
-    return { ok: true as const, ...(result.toolArgs as { suggestions: unknown[] }) };
+    const parsed = result.toolArgs as {
+      suggestions?: Array<{
+        slotId?: string;
+        suggestedBindingPath?: string;
+        confidence?: number;
+        reason?: string;
+      }>;
+    };
+    const suggestions = (parsed.suggestions ?? [])
+      .filter((s) => s && typeof s.slotId === "string" && typeof s.suggestedBindingPath === "string")
+      .map((s) => ({
+        slotId: String(s.slotId),
+        suggestedBindingPath: String(s.suggestedBindingPath),
+        confidence: typeof s.confidence === "number" ? s.confidence : 0.5,
+        reason: typeof s.reason === "string" ? s.reason : "",
+      }));
+    return { ok: true as const, suggestions };
   });
 
 // ============================================================
