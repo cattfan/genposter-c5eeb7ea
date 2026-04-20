@@ -34,6 +34,7 @@ import {
   AlertTriangle,
   Image as ImageIcon,
   Type,
+  Star,
 } from "lucide-react";
 import type { Entity, Slot } from "@/models";
 import {
@@ -103,8 +104,12 @@ function GeneratePage() {
 
   // === Chế độ "Generate theo entity" ===
   const [tplId, setTplId] = useState<string | undefined>(undefined);
-  const [filterCategory, setFilterCategory] = useState<string>("");
+  const [selectedSheet, setSelectedSheet] = useState<string>("__all__");
+  const [filterMoHinh, setFilterMoHinh] = useState<string>("__all__");
+  const [filterPhongCach, setFilterPhongCach] = useState<string>("__all__");
+  const [prioritizePartner, setPrioritizePartner] = useState(true);
   const [onlyPartner, setOnlyPartner] = useState(false);
+  const [maxPages, setMaxPages] = useState<number>(50);
   const [entityPages, setEntityPages] = useState<
     Array<{ entityId: string; selected: boolean }>
   >([]);
@@ -116,17 +121,51 @@ function GeneratePage() {
   const selectedTpl = tpls?.find((t) => t.pageTemplateId === tplId);
   const effectiveTpl = useEffectiveTemplate(selectedTpl, bindOverrides);
 
+  // Distinct sheets / mô hình / phong cách
+  const sheetOptions = useMemo(() => {
+    const set = new Set<string>();
+    entities?.forEach((e) => e.sheetName && set.add(e.sheetName));
+    return Array.from(set).sort();
+  }, [entities]);
+  const moHinhOptions = useMemo(() => {
+    const set = new Set<string>();
+    entities?.forEach((e) => {
+      if (e.status !== "active") return;
+      if (selectedSheet !== "__all__" && e.sheetName !== selectedSheet) return;
+      if (e.categoryMain) set.add(e.categoryMain);
+    });
+    return Array.from(set).sort();
+  }, [entities, selectedSheet]);
+  const phongCachOptions = useMemo(() => {
+    const set = new Set<string>();
+    entities?.forEach((e) => {
+      if (e.status !== "active") return;
+      if (selectedSheet !== "__all__" && e.sheetName !== selectedSheet) return;
+      if (e.categorySub) set.add(e.categorySub);
+    });
+    return Array.from(set).sort();
+  }, [entities, selectedSheet]);
+
   const filteredEntities: Entity[] = useMemo(() => {
     if (!entities) return [];
-    return entities.filter((e) => {
+    const list = entities.filter((e) => {
       if (e.status !== "active") return false;
+      if (selectedSheet !== "__all__" && e.sheetName !== selectedSheet) return false;
+      if (filterMoHinh !== "__all__" && e.categoryMain !== filterMoHinh) return false;
+      if (filterPhongCach !== "__all__" && e.categorySub !== filterPhongCach) return false;
       if (onlyPartner && !e.partnerFlag) return false;
-      if (filterCategory && !((e.categoryMain ?? "") + "/" + (e.categorySub ?? ""))
-        .toLowerCase()
-        .includes(filterCategory.toLowerCase())) return false;
       return true;
     });
-  }, [entities, onlyPartner, filterCategory]);
+    list.sort((a, b) => {
+      if (prioritizePartner) {
+        if (!!b.partnerFlag !== !!a.partnerFlag) return b.partnerFlag ? 1 : -1;
+        if ((b.partnerPriority ?? 0) !== (a.partnerPriority ?? 0))
+          return (b.partnerPriority ?? 0) - (a.partnerPriority ?? 0);
+      }
+      return a.name.localeCompare(b.name, "vi");
+    });
+    return list.slice(0, Math.max(1, maxPages));
+  }, [entities, selectedSheet, filterMoHinh, filterPhongCach, onlyPartner, prioritizePartner, maxPages]);
 
   // Reset chọn slot & preview entity khi đổi template
   useEffect(() => {
@@ -217,17 +256,58 @@ function GeneratePage() {
                   </Select>
                 </div>
                 <div>
-                  <Label className="text-xs">Lọc category</Label>
-                  <Input
-                    value={filterCategory}
-                    onChange={(e) => setFilterCategory(e.target.value)}
-                    placeholder="vd: cafe, quan_an"
-                  />
+                  <Label className="text-xs">Nguồn dữ liệu (sheet)</Label>
+                  <Select value={selectedSheet} onValueChange={(v) => { setSelectedSheet(v); setFilterMoHinh("__all__"); setFilterPhongCach("__all__"); }}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">Tất cả</SelectItem>
+                      {sheetOptions.map((s) => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
+                <div>
+                  <Label className="text-xs">Lọc Mô hình (Mo_hinh)</Label>
+                  <Select value={filterMoHinh} onValueChange={setFilterMoHinh}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">Tất cả</SelectItem>
+                      {moHinhOptions.map((s) => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">Lọc Phong cách (Phong_cach)</Label>
+                  <Select value={filterPhongCach} onValueChange={setFilterPhongCach}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">Tất cả</SelectItem>
+                      {phongCachOptions.map((s) => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox checked={prioritizePartner} onCheckedChange={(v) => setPrioritizePartner(!!v)} />
+                  Ưu tiên đối tác (xếp lên đầu)
+                </label>
                 <label className="flex items-center gap-2 text-sm">
                   <Checkbox checked={onlyPartner} onCheckedChange={(v) => setOnlyPartner(!!v)} />
                   Chỉ entity đối tác
                 </label>
+                <div>
+                  <Label className="text-xs">Số trang tối đa</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={maxPages}
+                    onChange={(e) => setMaxPages(Number(e.target.value) || 1)}
+                  />
+                </div>
                 <div className="border-t pt-3 space-y-2 text-xs text-muted-foreground">
                   <div className="flex justify-between">
                     <span>Entity phù hợp</span>
@@ -246,7 +326,7 @@ function GeneratePage() {
                       <SelectContent>
                         {filteredEntities.map((e) => (
                           <SelectItem key={e.entityId} value={e.entityId}>
-                            {e.name}
+                            {e.partnerFlag ? "★ " : ""}{e.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -419,7 +499,7 @@ function GeneratePage() {
                             </div>
                           </div>
                         </div>
-                        {ent?.partnerFlag && <Badge>Đối tác</Badge>}
+                        {ent?.partnerFlag && <Badge className="gap-1"><Star className="size-3" /> Đối tác</Badge>}
                       </div>
                     </CardHeader>
                     <CardContent className="p-3 pt-0 space-y-2">

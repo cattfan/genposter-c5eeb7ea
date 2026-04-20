@@ -31,7 +31,15 @@ function DataPage() {
   const [parsed, setParsed] = useState<ParsedTable | null>(null);
   const [mapping, setMapping] = useState<FieldMapping>({});
   const [sheetUrl, setSheetUrl] = useState("");
+  const [sheetName, setSheetName] = useState("");
   const [busy, setBusy] = useState(false);
+
+  const guessSheetName = (raw: string) => {
+    // Lấy gid hoặc tên file để gợi ý
+    const gid = raw.match(/[?#&]gid=(\d+)/)?.[1];
+    if (gid) return `Sheet_${gid}`;
+    return "";
+  };
 
   const onFile = async (file: File) => {
     try {
@@ -39,6 +47,7 @@ function DataPage() {
       const t = file.name.endsWith(".json") ? await parseJsonFile(file) : await parseCsvFile(file);
       setParsed(t);
       setMapping(autoMap(t.headers));
+      if (!sheetName) setSheetName(file.name.replace(/\.(csv|json)$/i, ""));
       toast.success(`Đã đọc ${t.rows.length} dòng`);
     } catch (e) {
       toast.error("Lỗi parse file: " + (e as Error).message);
@@ -53,6 +62,7 @@ function DataPage() {
       const t = await fetchSheetCsv(sheetUrl);
       setParsed(t);
       setMapping(autoMap(t.headers));
+      if (!sheetName) setSheetName(guessSheetName(sheetUrl) || "Quan_an");
       toast.success(`Đã tải ${t.rows.length} dòng từ Google Sheets`);
     } catch (e) {
       toast.error((e as Error).message);
@@ -63,12 +73,21 @@ function DataPage() {
 
   const importNow = async () => {
     if (!parsed) return;
-    const { entities: ents, assets: asts, warnings } = normalizeRows(parsed.rows, mapping);
+    const finalSheet = sheetName.trim() || "default";
+    const { entities: ents, assets: asts, warnings } = normalizeRows(parsed.rows, mapping, finalSheet);
+    // Dedupe theo (name + sheetName): xoá entity cũ cùng sheet+name trước khi put
     await db.transaction("rw", [db.entities, db.assets], async () => {
+      const existing = await db.entities.where("sheetName").equals(finalSheet).toArray();
+      const newKeys = new Set(ents.map((e) => e.name.toLowerCase()));
+      const toDelete = existing.filter((e) => newKeys.has(e.name.toLowerCase())).map((e) => e.entityId);
+      if (toDelete.length) {
+        await db.entities.bulkDelete(toDelete);
+        await db.assets.where("entityId").anyOf(toDelete).delete();
+      }
       await db.entities.bulkPut(ents);
       await db.assets.bulkPut(asts);
     });
-    toast.success(`Đã import ${ents.length} entity, ${asts.length} asset. ${warnings.length} cảnh báo.`);
+    toast.success(`Đã import ${ents.length} entity vào sheet "${finalSheet}". ${warnings.length} cảnh báo.`);
     setParsed(null);
   };
 
@@ -92,6 +111,17 @@ function DataPage() {
           <Card>
             <CardHeader><CardTitle>1. Chọn nguồn</CardTitle></CardHeader>
             <CardContent className="space-y-3">
+              <div>
+                <Label>Tên sheet (để gom nhóm dữ liệu, vd: Quan_an, Cafe)</Label>
+                <Input
+                  value={sheetName}
+                  onChange={(e) => setSheetName(e.target.value)}
+                  placeholder="Quan_an"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Mỗi tab dữ liệu nên có 1 tên sheet riêng. Trang Tạo nội dung sẽ cho lọc theo tên này.
+                </p>
+              </div>
               <div className="flex gap-2">
                 <Button onClick={() => fileRef.current?.click()} disabled={busy}>Upload CSV / JSON</Button>
                 <input
@@ -154,20 +184,22 @@ function DataPage() {
                 <thead className="bg-muted">
                   <tr>
                     <th className="text-left p-2">Tên</th>
-                    <th className="text-left p-2">Category</th>
-                    <th className="text-left p-2">Address</th>
-                    <th className="text-left p-2">Price</th>
-                    <th className="text-left p-2">Partner</th>
+                    <th className="text-left p-2">Sheet</th>
+                    <th className="text-left p-2">Mô hình</th>
+                    <th className="text-left p-2">Phong cách</th>
+                    <th className="text-left p-2">Địa chỉ</th>
+                    <th className="text-left p-2">Đối tác</th>
                   </tr>
                 </thead>
                 <tbody>
                   {entities?.map((e) => (
                     <tr key={e.entityId} className="border-t">
                       <td className="p-2 font-medium">{e.name}</td>
+                      <td className="p-2 text-xs"><Badge variant="outline">{e.sheetName ?? "—"}</Badge></td>
                       <td className="p-2">{e.categoryMain}</td>
+                      <td className="p-2 text-xs">{e.categorySub}</td>
                       <td className="p-2 text-xs text-muted-foreground">{e.address}</td>
-                      <td className="p-2 text-xs">{e.priceRange}</td>
-                      <td className="p-2">{e.partnerFlag && <Badge variant="default">P {e.partnerPriority}</Badge>}</td>
+                      <td className="p-2">{e.partnerFlag && <Badge variant="default">Đối tác</Badge>}</td>
                     </tr>
                   ))}
                 </tbody>

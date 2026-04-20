@@ -30,7 +30,7 @@ export function standardFieldOptions(): string[] {
   return ["__ignore__", ...Object.keys(FIELD_ALIASES)];
 }
 
-export function normalizeRows(rows: RawRow[], mapping: FieldMapping): NormalizeResult {
+export function normalizeRows(rows: RawRow[], mapping: FieldMapping, sheetName?: string): NormalizeResult {
   const entities: Entity[] = [];
   const assets: Asset[] = [];
   const warnings: string[] = [];
@@ -67,6 +67,10 @@ export function normalizeRows(rows: RawRow[], mapping: FieldMapping): NormalizeR
       seoKeywords: parseList(std.seoKeywords),
       status: "active",
       sourceRowId: String(idx),
+      sheetName: sheetName?.trim() || undefined,
+      metadata: std.signatureDish
+        ? { signatureDish: String(std.signatureDish).trim() }
+        : undefined,
     };
     entities.push(entity);
 

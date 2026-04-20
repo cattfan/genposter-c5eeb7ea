@@ -15,8 +15,9 @@ export const TEXT_BINDING_OPTIONS: BindingFieldOption[] = [
   { value: "entity.priceRange", label: "Giá (entity.priceRange)", group: "Entity" },
   { value: "entity.style", label: "Phong cách (entity.style)", group: "Entity" },
   { value: "entity.openingHours", label: "Giờ mở cửa (entity.openingHours)", group: "Entity" },
-  { value: "entity.categoryMain", label: "Danh mục chính (entity.categoryMain)", group: "Entity" },
-  { value: "entity.categorySub", label: "Danh mục phụ (entity.categorySub)", group: "Entity" },
+  { value: "entity.categoryMain", label: "Mô hình / Bữa ăn (Mo_hinh)", group: "Entity" },
+  { value: "entity.categorySub", label: "Phong cách (Phong_cach)", group: "Entity" },
+  { value: "entity.signatureDish", label: "Món ăn nổi bật (Mon_an_noi_bat)", group: "Entity" },
 ];
 
 export const IMAGE_BINDING_OPTIONS: BindingFieldOption[] = [
@@ -37,6 +38,10 @@ export function resolveTextBinding(
 ): string {
   if (!bindingPath) return fallback ?? "";
   if (!entity) return `{{${bindingPath}}}`;
+  if (bindingPath === "entity.signatureDish") {
+    const v = (entity.metadata?.signatureDish as string | undefined) ?? "";
+    return v || (fallback ?? "");
+  }
   if (bindingPath.startsWith("entity.")) {
     const key = bindingPath.slice("entity.".length) as keyof Entity;
     const v = entity[key];

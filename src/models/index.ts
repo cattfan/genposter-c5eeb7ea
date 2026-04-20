@@ -22,6 +22,7 @@ export interface Entity {
   seoKeywords: string[];
   status: EntityStatus;
   sourceRowId?: string;
+  sheetName?: string;
   metadata?: Record<string, unknown>;
 }
 

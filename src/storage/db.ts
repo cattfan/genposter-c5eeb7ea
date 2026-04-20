@@ -35,6 +35,9 @@ class CPGDatabase extends Dexie {
       blobs: "blobKey, createdAt",
       settings: "id",
     });
+    this.version(2).stores({
+      entities: "entityId, name, categoryMain, partnerFlag, status, sheetName",
+    });
   }
 }
 
