@@ -930,6 +930,13 @@ export function EditorPage() {
             )}
             {selectedSlot && (
               <>
+                {selectedSlot.groupId && (
+                  <CardRepeaterPanel
+                    groupId={selectedSlot.groupId}
+                    template={draft}
+                    onChange={(next) => updateDraft((d) => { d.cardGroups = next; })}
+                  />
+                )}
                 <div className="flex flex-wrap gap-1">
                   {!selectedSlot.isUploadedBackground && (
                     <Button size="sm" variant="outline" onClick={() => duplicateSlot(selectedSlot.slotId)} title="Nhân bản (Ctrl+D)">
