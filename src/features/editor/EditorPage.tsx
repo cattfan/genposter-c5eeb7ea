@@ -343,7 +343,7 @@ export function EditorPage() {
       width: w,
       height: h,
       zIndex: 0,
-      staticImage: url,
+      staticImage: persistentSrc,
       style: { fit: "cover", borderRadius: 0 },
       isUploadedBackground: true,
     };
