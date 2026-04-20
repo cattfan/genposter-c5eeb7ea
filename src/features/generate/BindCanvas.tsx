@@ -13,6 +13,7 @@ import {
   shapeBorderRadius,
   shapeClipPath,
 } from "@/engines/binding/dataBinding";
+import { useResolvedImageSrc } from "@/storage/imageSrc";
 
 export function BindCanvas({
   template,
@@ -30,6 +31,7 @@ export function BindCanvas({
   assets: Asset[];
 }) {
   const { width, height, background, backgroundImage } = template.canvas;
+  const resolvedBg = useResolvedImageSrc(backgroundImage);
 
   return (
     <div
@@ -41,7 +43,7 @@ export function BindCanvas({
         height: height * scale,
         position: "relative",
         background: background ?? "transparent",
-        backgroundImage: backgroundImage ? `url(${backgroundImage})` : undefined,
+        backgroundImage: resolvedBg ? `url(${resolvedBg})` : undefined,
         backgroundSize: "cover",
         backgroundPosition: "center",
         overflow: "hidden",
