@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
   AlignCenter,
@@ -84,9 +84,206 @@ import { useDesignEditor } from "./designStore";
 
 type WorkspaceMode = EditorMode;
 type AssetPanelItem = AssetItem | HeroiconAsset;
+type DesignTool = "select" | "pan" | "crop";
 const EMPTY_ASSETS: AssetItem[] = [];
 const EMPTY_BRAND_KITS: BrandKit[] = [];
 const EMPTY_FONT_ASSETS: FontAsset[] = [];
+
+function rectsIntersect(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number },
+) {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
+function getCanvasPoint(
+  canvas: HTMLElement | null,
+  scale: number,
+  clientX: number,
+  clientY: number,
+  panX = 0,
+  panY = 0,
+) {
+  const rect = canvas?.getBoundingClientRect();
+  return {
+    x: (clientX - (rect?.left ?? 0) - panX) / scale,
+    y: (clientY - (rect?.top ?? 0) - panY) / scale,
+  };
+}
+
+function normalizeMarqueeRect(
+  start: { x: number; y: number },
+  current: { x: number; y: number },
+) {
+  const x = Math.min(start.x, current.x);
+  const y = Math.min(start.y, current.y);
+  return {
+    x,
+    y,
+    width: Math.abs(current.x - start.x),
+    height: Math.abs(current.y - start.y),
+  };
+}
+
+function snapRotation(rotation: number, event: MouseEvent) {
+  if (!event.shiftKey) return rotation;
+  return Math.round(rotation / 15) * 15;
+}
+
+function applyResizeModifiers(
+  origin: { x: number; y: number; width: number; height: number },
+  handle: string,
+  dx: number,
+  dy: number,
+  keepAspect: boolean,
+  fromCenter: boolean,
+) {
+  let nextX = origin.x;
+  let nextY = origin.y;
+  let nextWidth = origin.width;
+  let nextHeight = origin.height;
+  const aspectRatio = origin.width / Math.max(origin.height, 1);
+
+  if (handle.includes("e")) nextWidth = Math.max(20, origin.width + dx);
+  if (handle.includes("s")) nextHeight = Math.max(20, origin.height + dy);
+  if (handle.includes("w")) {
+    nextWidth = Math.max(20, origin.width - dx);
+    nextX = origin.x + (origin.width - nextWidth);
+  }
+  if (handle.includes("n")) {
+    nextHeight = Math.max(20, origin.height - dy);
+    nextY = origin.y + (origin.height - nextHeight);
+  }
+
+  if (keepAspect && !handle.includes("n") && !handle.includes("s")) {
+    nextHeight = Math.max(20, nextWidth / aspectRatio);
+  } else if (keepAspect && !handle.includes("e") && !handle.includes("w")) {
+    nextWidth = Math.max(20, nextHeight * aspectRatio);
+  } else if (keepAspect) {
+    const widthDrivenHeight = Math.max(20, nextWidth / aspectRatio);
+    const heightDrivenWidth = Math.max(20, nextHeight * aspectRatio);
+    if (Math.abs(widthDrivenHeight - nextHeight) <= Math.abs(heightDrivenWidth - nextWidth)) {
+      nextHeight = widthDrivenHeight;
+    } else {
+      nextWidth = heightDrivenWidth;
+    }
+  }
+
+  if (handle.includes("w") && keepAspect) {
+    nextX = origin.x + (origin.width - nextWidth);
+  }
+  if (handle.includes("n") && keepAspect) {
+    nextY = origin.y + (origin.height - nextHeight);
+  }
+
+  if (fromCenter) {
+    nextX = origin.x - (nextWidth - origin.width) / 2;
+    nextY = origin.y - (nextHeight - origin.height) / 2;
+  }
+
+  return {
+    x: nextX,
+    y: nextY,
+    width: nextWidth,
+    height: nextHeight,
+  };
+}
+
+function getSelectedElementsByIds(elements: DesignElement[], selectedIds: string[]) {
+  return selectedIds
+    .map((id) => elements.find((element) => element.elementId === id))
+    .filter((element): element is DesignElement => !!element);
+}
+
+function getMarqueeSelection(
+  elements: DesignElement[],
+  marquee: { x: number; y: number; width: number; height: number },
+) {
+  return elements
+    .filter((element) => !element.hidden && !element.locked)
+    .filter((element) =>
+      rectsIntersect(marquee, {
+        x: element.x,
+        y: element.y,
+        width: element.width,
+        height: element.height,
+      }),
+    )
+    .map((element) => element.elementId);
+}
+
+function toggleSelectionIds(existing: string[], additions: string[]) {
+  const next = new Set(existing);
+  for (const id of additions) {
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+  }
+  return Array.from(next);
+}
+
+function mergeSelectionIds(existing: string[], additions: string[]) {
+  return Array.from(new Set([...existing, ...additions]));
+}
+
+function getSelectionFromMarquee(
+  existing: string[],
+  additions: string[],
+  additive: boolean,
+  toggle: boolean,
+) {
+  if (toggle) return toggleSelectionIds(existing, additions);
+  if (additive) return mergeSelectionIds(existing, additions);
+  return additions;
+}
+
+function formatZoom(zoom: number) {
+  return `${Math.round(zoom * 100)}%`;
+}
+
+function getNextZoom(current: number, direction: 1 | -1) {
+  const factor = direction > 0 ? 1.1 : 1 / 1.1;
+  return Math.min(3, Math.max(0.1, current * factor));
+}
+
+function zoomAtPoint(params: {
+  currentZoom: number;
+  nextZoom: number;
+  panX: number;
+  panY: number;
+  pointX: number;
+  pointY: number;
+}) {
+  const contentX = (params.pointX - params.panX) / params.currentZoom;
+  const contentY = (params.pointY - params.panY) / params.currentZoom;
+  return {
+    panX: params.pointX - contentX * params.nextZoom,
+    panY: params.pointY - contentY * params.nextZoom,
+  };
+}
+
+function isEditableTarget(target: EventTarget | null) {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
+}
+
+function isPanToolActive(tool: DesignTool, spacePressed: boolean) {
+  return tool === "pan" || spacePressed;
+}
+
+function getToolCursor(tool: DesignTool, spacePressed: boolean) {
+  return isPanToolActive(tool, spacePressed) ? "grab" : "default";
+}
+
+function getCanvasCursor(elementLocked: boolean, tool: DesignTool, spacePressed: boolean) {
+  if (isPanToolActive(tool, spacePressed)) return "grab";
+  return elementLocked ? "default" : "move";
+}
+
+function zoomByStep(editor: ReturnType<typeof useDesignEditor>, zoom: number, direction: 1 | -1) {
+  editor.setZoom(getNextZoom(zoom, direction));
+}
 
 const RESIZE_HANDLES = [
   { key: "nw", cursor: "nwse-resize", style: { left: -8, top: -8 } },
@@ -448,6 +645,18 @@ export function DesignWorkspace({
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [editingTextValue, setEditingTextValue] = useState("");
   const [snapTargetIds, setSnapTargetIds] = useState<string[]>([]);
+  const [tool, setTool] = useState<DesignTool>("select");
+  const [spacePressed, setSpacePressed] = useState(false);
+  const [marqueeRect, setMarqueeRect] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const stageWrapRef = useRef<HTMLDivElement | null>(null);
+  const [isPanning, setIsPanning] = useState(false);
+  const [panCursor, setPanCursor] = useState<"grab" | "grabbing">("grab");
+  const [viewportDrag, setViewportDrag] = useState<{ startX: number; startY: number } | null>(null);
   const assetLibraryQuery = useLiveQuery(
     () => db.assetLibrary.orderBy("updatedAt").reverse().toArray(),
     [],
@@ -863,47 +1072,102 @@ export function DesignWorkspace({
   };
 
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      const tag = (event.target as HTMLElement)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || (event.target as HTMLElement)?.isContentEditable)
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === " ") {
+        if (isEditableTarget(event.target)) return;
+        event.preventDefault();
+        setSpacePressed(true);
         return;
+      }
+
+      if (isEditableTarget(event.target)) return;
+
       const mod = event.ctrlKey || event.metaKey;
-      if (mod && event.key.toLowerCase() === "z" && !event.shiftKey) {
+      const lower = event.key.toLowerCase();
+
+      if (lower === "v" && !mod) {
+        event.preventDefault();
+        setTool("select");
+        return;
+      }
+      if (lower === "h" && !mod) {
+        event.preventDefault();
+        setTool("pan");
+        return;
+      }
+      if (lower === "t" && !mod) {
+        event.preventDefault();
+        insertText();
+        return;
+      }
+      if (lower === "r" && !mod) {
+        event.preventDefault();
+        insertShape("rectangle");
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (editingTextId) {
+          cancelInlineTextEdit();
+          return;
+        }
+        editor.setSelection([]);
+        setMarqueeRect(null);
+        return;
+      }
+      if (mod && lower === "a") {
+        event.preventDefault();
+        const selectableIds = editor.activeElements
+          .filter((element) => !element.hidden)
+          .map((element) => element.elementId);
+        editor.setSelection(selectableIds, selectableIds.at(-1) ?? null);
+        return;
+      }
+      if (mod && lower === "z" && !event.shiftKey) {
         event.preventDefault();
         editor.undo();
         return;
       }
-      if (
-        mod &&
-        ((event.key.toLowerCase() === "z" && event.shiftKey) || event.key.toLowerCase() === "y")
-      ) {
+      if (mod && ((lower === "z" && event.shiftKey) || lower === "y")) {
         event.preventDefault();
         editor.redo();
         return;
       }
-      if (mod && event.key.toLowerCase() === "c") {
+      if (mod && lower === "c") {
         event.preventDefault();
         editor.copySelection();
         return;
       }
-      if (mod && event.key.toLowerCase() === "v") {
+      if (mod && lower === "v") {
         event.preventDefault();
         editor.pasteClipboard();
         return;
       }
-      if (mod && event.key.toLowerCase() === "d") {
+      if (mod && lower === "d") {
         event.preventDefault();
         editor.duplicateSelection();
         return;
       }
-      if (mod && event.key.toLowerCase() === "g" && event.shiftKey) {
+      if (mod && lower === "g" && event.shiftKey) {
         event.preventDefault();
         editor.ungroupSelection();
         return;
       }
-      if (mod && event.key.toLowerCase() === "g") {
+      if (mod && lower === "g") {
         event.preventDefault();
         editor.groupSelection();
+        return;
+      }
+      if (mod && event.key === "]") {
+        event.preventDefault();
+        if (event.altKey) editor.orderSelection("front");
+        else editor.orderSelection("forward");
+        return;
+      }
+      if (mod && event.key === "[") {
+        event.preventDefault();
+        if (event.altKey) editor.orderSelection("back");
+        else editor.orderSelection("backward");
         return;
       }
       if ((event.key === "Delete" || event.key === "Backspace") && selected.length > 0) {
@@ -935,9 +1199,150 @@ export function DesignWorkspace({
         }));
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [editor, selected]);
+
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.key === " ") {
+        setSpacePressed(false);
+        setIsPanning(false);
+        setPanCursor("grab");
+        setViewportDrag(null);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, [
+    editor,
+    selected,
+    editingTextId,
+    cancelInlineTextEdit,
+    insertShape,
+    insertText,
+  ]);
+
+  useEffect(() => {
+    if (!spacePressed) return;
+    setPanCursor("grab");
+  }, [spacePressed]);
+
+  useEffect(() => {
+    if (!stageWrapRef.current) return;
+    stageWrapRef.current.style.cursor = isPanning ? "grabbing" : getToolCursor(tool, spacePressed);
+  }, [tool, spacePressed, isPanning]);
+
+  const handleZoomStep = (direction: 1 | -1) => {
+    zoomByStep(editor, zoom, direction);
+  };
+
+  const handleCanvasWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    if (!event.ctrlKey && !event.metaKey) return;
+    event.preventDefault();
+    const currentZoom = zoom;
+    const nextZoom = getNextZoom(currentZoom, event.deltaY < 0 ? 1 : -1);
+    const wrapRect = stageWrapRef.current?.getBoundingClientRect();
+    const pointX = event.clientX - (wrapRect?.left ?? 0);
+    const pointY = event.clientY - (wrapRect?.top ?? 0);
+    const nextPan = zoomAtPoint({
+      currentZoom,
+      nextZoom,
+      panX: editor.state.viewport.panX,
+      panY: editor.state.viewport.panY,
+      pointX,
+      pointY,
+    });
+    editor.setPan(nextPan.panX, nextPan.panY);
+    editor.setZoom(nextZoom);
+  };
+
+  const beginPan = (clientX: number, clientY: number) => {
+    setIsPanning(true);
+    setPanCursor("grabbing");
+    setViewportDrag({ startX: clientX, startY: clientY });
+  };
+
+  const updatePan = (clientX: number, clientY: number) => {
+    setViewportDrag((prev) => {
+      if (!prev) return prev;
+      editor.setPan(
+        editor.state.viewport.panX + (clientX - prev.startX),
+        editor.state.viewport.panY + (clientY - prev.startY),
+      );
+      return { startX: clientX, startY: clientY };
+    });
+  };
+
+  const endPan = () => {
+    setIsPanning(false);
+    setPanCursor("grab");
+    setViewportDrag(null);
+  };
+
+  const handleStageBackgroundMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const canvas = event.currentTarget;
+    if (isPanToolActive(tool, spacePressed)) {
+      beginPan(event.clientX, event.clientY);
+      const onMouseMove = (moveEvent: MouseEvent) => updatePan(moveEvent.clientX, moveEvent.clientY);
+      const onMouseUp = () => {
+        window.removeEventListener("mousemove", onMouseMove);
+        window.removeEventListener("mouseup", onMouseUp);
+        endPan();
+      };
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("mouseup", onMouseUp);
+      return;
+    }
+
+    if (event.target !== event.currentTarget) return;
+    onSelect(null, false);
+    const additive = event.shiftKey;
+    const toggle = event.ctrlKey || event.metaKey;
+    const start = getCanvasPoint(
+      canvas,
+      scale,
+      event.clientX,
+      event.clientY,
+      editor.state.viewport.panX,
+      editor.state.viewport.panY,
+    );
+    setMarqueeRect({ x: start.x, y: start.y, width: 0, height: 0 });
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const point = getCanvasPoint(
+        canvas,
+        scale,
+        moveEvent.clientX,
+        moveEvent.clientY,
+        editor.state.viewport.panX,
+        editor.state.viewport.panY,
+      );
+      const rect = normalizeMarqueeRect(start, point);
+      setMarqueeRect(rect);
+      const nextIds = getSelectionFromMarquee(
+        editor.state.selection.ids,
+        getMarqueeSelection(editor.activeElements, rect),
+        additive,
+        toggle,
+      );
+      editor.setSelection(nextIds, nextIds.at(-1) ?? null);
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      setMarqueeRect(null);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  };
+
+  const selectedBounds = getSelectionBounds(selected);
+  const stageCursor = isPanning ? panCursor : getToolCursor(tool, spacePressed);
 
   const renderElementContextMenu = (element: DesignElement) => {
     const hasSelection = selected.length > 0;
@@ -1104,12 +1509,20 @@ export function DesignWorkspace({
           className="h-9 max-w-sm"
         />
         <div className="flex items-center gap-1 rounded-lg border px-1 py-1">
-          <Button size="icon" variant="ghost" onClick={() => editor.setZoom(zoom / 1.1)}>
+          <Button size="icon" variant="ghost" onClick={() => handleZoomStep(-1)}>
             <ZoomOut className="size-4" />
           </Button>
-          <div className="w-16 text-center text-sm">{Math.round(zoom * 100)}%</div>
-          <Button size="icon" variant="ghost" onClick={() => editor.setZoom(zoom * 1.1)}>
+          <div className="w-16 text-center text-sm">{formatZoom(zoom)}</div>
+          <Button size="icon" variant="ghost" onClick={() => handleZoomStep(1)}>
             <ZoomIn className="size-4" />
+          </Button>
+        </div>
+        <div className="flex items-center gap-1 rounded-lg border px-1 py-1">
+          <Button size="sm" variant={tool === "select" ? "default" : "ghost"} onClick={() => setTool("select")}>
+            Select
+          </Button>
+          <Button size="sm" variant={tool === "pan" ? "default" : "ghost"} onClick={() => setTool("pan")}>
+            Pan
           </Button>
         </div>
         <Button
@@ -1119,6 +1532,36 @@ export function DesignWorkspace({
         >
           Khung an toàn
         </Button>
+        <Button
+          size="sm"
+          variant={editor.state.documentSettings.showGrid ? "default" : "outline"}
+          onClick={() =>
+            editor.updateDocumentSettings({
+              showGrid: !editor.state.documentSettings.showGrid,
+            })
+          }
+        >
+          Grid
+        </Button>
+        <Button
+          size="sm"
+          variant={editor.state.documentSettings.showGuides ? "default" : "outline"}
+          onClick={() =>
+            editor.updateDocumentSettings({
+              showGuides: !editor.state.documentSettings.showGuides,
+            })
+          }
+        >
+          Guides
+        </Button>
+        <Button
+          size="sm"
+          variant={spacePressed ? "default" : "outline"}
+          onClick={() => setSpacePressed((value) => !value)}
+        >
+          Hand (Space)
+        </Button>
+        <div className="text-xs text-muted-foreground">Pan: {Math.round(editor.state.viewport.panX)}, {Math.round(editor.state.viewport.panY)}</div>
         <div className="flex items-center gap-1 rounded-lg border px-1 py-1">
           <Button size="icon" variant="ghost" onClick={() => editor.alignSelection("left")}>
             <AlignStartHorizontal className="size-4" />
@@ -1436,17 +1879,29 @@ export function DesignWorkspace({
           <div />
         )}
 
-        <div className="min-h-0 overflow-auto bg-muted/30 p-6">
-          <div className="flex min-h-full items-start justify-center">
+        <div ref={stageWrapRef} className="min-h-0 overflow-auto bg-muted/30 p-6" onWheel={handleCanvasWheel}>
+          <div
+            className="flex min-h-full items-start justify-center"
+            style={{
+              transform: `translate(${editor.state.viewport.panX}px, ${editor.state.viewport.panY}px)`,
+              transformOrigin: "top left",
+              cursor: stageCursor,
+            }}
+          >
             <DesignStage
               page={activePage}
               elements={editor.activeElements}
               scale={zoom}
+              tool={tool}
+              spacePressed={spacePressed}
+              marqueeRect={marqueeRect}
               selectedIds={editor.state.selection.ids}
               primaryId={editor.state.selection.primaryId}
               snapLines={editor.state.viewport.snapLines}
               snapTargetIds={snapTargetIds}
               showSafeZone={editor.state.documentSettings.showSafeZone}
+              showGrid={editor.state.documentSettings.showGrid}
+              showGuides={editor.state.documentSettings.showGuides}
               renderCanvasContextMenu={renderCanvasContextMenu}
               renderElementContextMenu={renderElementContextMenu}
               editingTextId={editingTextId}
@@ -1455,6 +1910,7 @@ export function DesignWorkspace({
               onStartTextEdit={startInlineTextEdit}
               onCommitTextEdit={commitInlineTextEdit}
               onCancelTextEdit={cancelInlineTextEdit}
+              onStageMouseDown={handleStageBackgroundMouseDown}
               onSelect={(elementId, additive) => {
                 if (!elementId) {
                   editor.setSelection([]);
@@ -2064,11 +2520,16 @@ function DesignStage({
   page,
   elements,
   scale,
+  tool,
+  spacePressed,
+  marqueeRect,
   selectedIds,
   primaryId,
   snapLines,
   snapTargetIds,
   showSafeZone,
+  showGrid,
+  showGuides,
   renderCanvasContextMenu,
   renderElementContextMenu,
   editingTextId,
@@ -2077,6 +2538,7 @@ function DesignStage({
   onStartTextEdit,
   onCommitTextEdit,
   onCancelTextEdit,
+  onStageMouseDown,
   onSelect,
   onMove,
   onMoveCommit,
@@ -2086,11 +2548,16 @@ function DesignStage({
   page: DesignPage;
   elements: DesignElement[];
   scale: number;
+  tool: DesignTool;
+  spacePressed: boolean;
+  marqueeRect: { x: number; y: number; width: number; height: number } | null;
   selectedIds: string[];
   primaryId: string | null;
   snapLines: Array<{ axis: "x" | "y"; value: number }>;
   snapTargetIds: string[];
   showSafeZone: boolean;
+  showGrid: boolean;
+  showGuides: boolean;
   renderCanvasContextMenu: () => React.ReactNode;
   renderElementContextMenu: (element: DesignElement) => React.ReactNode;
   editingTextId: string | null;
@@ -2099,6 +2566,7 @@ function DesignStage({
   onStartTextEdit: (elementId: string) => void;
   onCommitTextEdit: () => void;
   onCancelTextEdit: () => void;
+  onStageMouseDown: (event: React.MouseEvent<HTMLDivElement>) => void;
   onSelect: (elementId: string | null, additive: boolean) => void;
   onMove: (payload: {
     elementId: string;
@@ -2116,6 +2584,16 @@ function DesignStage({
   }) => void;
   onResizeCommit: () => void;
 }) {
+  const toolIsPan = isPanToolActive(tool, spacePressed);
+  const guideColor = "rgba(56,189,248,0.9)";
+  const gridSize = 40 * scale;
+  const gridBackground = showGrid
+    ? {
+        backgroundImage:
+          "linear-gradient(to right, rgba(148,163,184,0.16) 1px, transparent 1px), linear-gradient(to bottom, rgba(148,163,184,0.16) 1px, transparent 1px)",
+        backgroundSize: `${gridSize}px ${gridSize}px`,
+      }
+    : undefined;
   const bounds = getSelectionBounds(
     selectedIds
       .map((id) => elements.find((element) => element.elementId === id))
@@ -2129,11 +2607,79 @@ function DesignStage({
           <div
             className="relative overflow-hidden border border-border bg-background"
             data-design-canvas
-            style={{ width: page.width * scale, height: page.height * scale }}
-            onMouseDown={(event) => {
-              if (event.target === event.currentTarget) onSelect(null, false);
-            }}
+            style={{ width: page.width * scale, height: page.height * scale, ...gridBackground }}
+            onMouseDown={onStageMouseDown}
           >
+            {showGuides
+              ? page.guides?.map((guide) => (
+                  <div
+                    key={guide.guideId}
+                    className="pointer-events-none absolute"
+                    style={{
+                      left: guide.axis === "x" ? guide.value * scale : 0,
+                      top: guide.axis === "y" ? guide.value * scale : 0,
+                      width: guide.axis === "x" ? 1 : "100%",
+                      height: guide.axis === "y" ? 1 : "100%",
+                      background: guideColor,
+                      opacity: 0.9,
+                    }}
+                  />
+                ))
+              : null}
+            {marqueeRect ? (
+              <div
+                className="pointer-events-none absolute border border-primary/80 bg-primary/10"
+                style={{
+                  left: marqueeRect.x * scale,
+                  top: marqueeRect.y * scale,
+                  width: marqueeRect.width * scale,
+                  height: marqueeRect.height * scale,
+                }}
+              />
+            ) : null}
+            {toolIsPan ? (
+              <div className="pointer-events-none absolute right-3 top-3 rounded bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow">
+                Pan mode
+              </div>
+            ) : null}
+            <div className="pointer-events-none absolute left-3 top-3 rounded bg-background/90 px-2 py-1 text-[11px] text-muted-foreground shadow">
+              Select: V · Pan: H / Space · Zoom: Ctrl/Cmd + Wheel
+            </div>
+            <div className="pointer-events-none absolute left-0 top-0 h-6 w-full border-b bg-background/80 text-[10px] text-muted-foreground">
+              <div className="relative h-full w-full">
+                {showGuides &&
+                  page.guides?.map((guide) =>
+                    guide.axis === "x" ? (
+                      <div
+                        key={`ruler-x-${guide.guideId}`}
+                        className="absolute top-0 h-full w-px"
+                        style={{ left: guide.value * scale, background: guideColor }}
+                      />
+                    ) : null,
+                  )}
+              </div>
+            </div>
+            <div className="pointer-events-none absolute left-0 top-0 h-full w-6 border-r bg-background/80 text-[10px] text-muted-foreground">
+              <div className="relative h-full w-full">
+                {showGuides &&
+                  page.guides?.map((guide) =>
+                    guide.axis === "y" ? (
+                      <div
+                        key={`ruler-y-${guide.guideId}`}
+                        className="absolute left-0 h-px w-full"
+                        style={{ top: guide.value * scale, background: guideColor }}
+                      />
+                    ) : null,
+                  )}
+              </div>
+            </div>
+            <div className="pointer-events-none absolute left-0 top-0 grid h-full w-full" style={{ gridTemplateColumns: "24px 1fr", gridTemplateRows: "24px 1fr" }}>
+              <div className="border-b border-r bg-background/85" />
+              <div />
+              <div />
+              <div />
+            </div>
+            <div className="absolute left-6 top-6" style={{ width: page.width * scale - 24, height: page.height * scale - 24 }}>
             <div className="pointer-events-none absolute inset-0">
               <DesignRenderer
                 page={page}
@@ -2199,7 +2745,7 @@ function DesignStage({
                       onStartTextEdit(element.elementId);
                     }}
                     onMouseDown={(event) => {
-                      if (isEditingText) return;
+                      if (isEditingText || toolIsPan) return;
                       event.stopPropagation();
                       const additive = event.shiftKey || event.ctrlKey || event.metaKey;
                       onSelect(element.elementId, additive);
@@ -2207,12 +2753,7 @@ function DesignStage({
                       const canvas = (event.currentTarget as HTMLElement).closest(
                         "[data-design-canvas]",
                       ) as HTMLElement | null;
-                      const rect = canvas?.getBoundingClientRect();
-                      const toCanvasPoint = (clientX: number, clientY: number) => ({
-                        x: (clientX - (rect?.left ?? 0)) / scale,
-                        y: (clientY - (rect?.top ?? 0)) / scale,
-                      });
-                      const startPoint = toCanvasPoint(event.clientX, event.clientY);
+                      const startPoint = getCanvasPoint(canvas, scale, event.clientX, event.clientY, 0, 0);
                       const baseIds = selectedIds.includes(element.elementId)
                         ? selectedIds
                         : [element.elementId];
@@ -2233,13 +2774,21 @@ function DesignStage({
                       const pointerOffsetX = startPoint.x - element.x;
                       const pointerOffsetY = startPoint.y - element.y;
                       const onMouseMove = (moveEvent: MouseEvent) => {
-                        const point = toCanvasPoint(moveEvent.clientX, moveEvent.clientY);
+                        const point = getCanvasPoint(canvas, scale, moveEvent.clientX, moveEvent.clientY, 0, 0);
+                        let nextPrimaryX = point.x - pointerOffsetX;
+                        let nextPrimaryY = point.y - pointerOffsetY;
+                        if (moveEvent.shiftKey) {
+                          const deltaX = nextPrimaryX - originById[element.elementId].x;
+                          const deltaY = nextPrimaryY - originById[element.elementId].y;
+                          if (Math.abs(deltaX) >= Math.abs(deltaY)) nextPrimaryY = originById[element.elementId].y;
+                          else nextPrimaryX = originById[element.elementId].x;
+                        }
                         onMove({
                           elementId: element.elementId,
                           moveIds: Array.from(moveIds),
                           originById,
-                          nextPrimaryX: point.x - pointerOffsetX,
-                          nextPrimaryY: point.y - pointerOffsetY,
+                          nextPrimaryX,
+                          nextPrimaryY,
                         });
                       };
                       const onMouseUp = () => {
@@ -2319,25 +2868,20 @@ function DesignStage({
                             const canvas = (event.currentTarget as HTMLElement).closest(
                               "[data-design-canvas]",
                             ) as HTMLElement | null;
-                            const rect = canvas?.getBoundingClientRect();
-                            const toCanvasPoint = (clientX: number, clientY: number) => ({
-                              x: (clientX - (rect?.left ?? 0)) / scale,
-                              y: (clientY - (rect?.top ?? 0)) / scale,
-                            });
                             const centerX = element.x + element.width / 2;
                             const centerY = element.y + element.height / 2;
-                            const startPoint = toCanvasPoint(event.clientX, event.clientY);
+                            const startPoint = getCanvasPoint(canvas, scale, event.clientX, event.clientY, 0, 0);
                             const startAngle = Math.atan2(
                               startPoint.y - centerY,
                               startPoint.x - centerX,
                             );
                             const originRotation = element.rotation ?? 0;
                             const onMouseMove = (moveEvent: MouseEvent) => {
-                              const point = toCanvasPoint(moveEvent.clientX, moveEvent.clientY);
+                              const point = getCanvasPoint(canvas, scale, moveEvent.clientX, moveEvent.clientY, 0, 0);
                               const currentAngle = Math.atan2(point.y - centerY, point.x - centerX);
                               const deltaDeg = ((currentAngle - startAngle) * 180) / Math.PI;
                               onResize(element.elementId, {
-                                rotation: Math.round(originRotation + deltaDeg),
+                                rotation: snapRotation(Math.round(originRotation + deltaDeg), moveEvent),
                               });
                             };
                             const onMouseUp = () => {
@@ -2384,31 +2928,23 @@ function DesignStage({
                               const onMouseMove = (moveEvent: MouseEvent) => {
                                 const dx = (moveEvent.clientX - startX) / scale;
                                 const dy = (moveEvent.clientY - startY) / scale;
-                                let nextX = origin.x;
-                                let nextY = origin.y;
-                                let nextWidth = origin.width;
-                                let nextHeight = origin.height;
-                                if (handle.key.includes("e"))
-                                  nextWidth = Math.max(20, origin.width + dx);
-                                if (handle.key.includes("s"))
-                                  nextHeight = Math.max(20, origin.height + dy);
-                                if (handle.key.includes("w")) {
-                                  nextWidth = Math.max(20, origin.width - dx);
-                                  nextX = origin.x + (origin.width - nextWidth);
-                                }
-                                if (handle.key.includes("n")) {
-                                  nextHeight = Math.max(20, origin.height - dy);
-                                  nextY = origin.y + (origin.height - nextHeight);
-                                }
+                                const draft = applyResizeModifiers(
+                                  origin,
+                                  handle.key,
+                                  dx,
+                                  dy,
+                                  moveEvent.shiftKey,
+                                  moveEvent.altKey,
+                                );
                                 const snapped = snapResize(
                                   page,
                                   element.elementId,
                                   handle.key,
                                   {
-                                    x: nextX,
-                                    y: nextY,
-                                    width: nextWidth,
-                                    height: nextHeight,
+                                    x: draft.x,
+                                    y: draft.y,
+                                    width: draft.width,
+                                    height: draft.height,
                                   },
                                   elements.filter((entry) => entry.elementId !== element.elementId),
                                   scale,
@@ -2471,6 +3007,7 @@ function DesignStage({
                 }}
               />
             ) : null}
+            </div>
           </div>
         </ContextMenuTrigger>
         {renderCanvasContextMenu()}
