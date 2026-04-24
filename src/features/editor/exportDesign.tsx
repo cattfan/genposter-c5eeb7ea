@@ -1,4 +1,3 @@
-import { createRoot } from "react-dom/client";
 import { PDFDocument } from "pdf-lib";
 import { toJpeg, toPng, toSvg } from "html-to-image";
 import type { DesignDocument, DesignElement, DesignPage } from "@/models";
@@ -6,6 +5,7 @@ import { DesignRenderer } from "./DesignRenderer";
 import { downloadJSON } from "@/features/render/exportPng";
 import { saveBlob } from "@/features/render/saveBlob";
 import { getEmbeddedFontsCss } from "@/features/render/fontEmbedCss";
+import { renderReactNodeOffDom } from "@/features/render/renderPageOffDom";
 
 function slugify(input: string): string {
   return input
@@ -15,54 +15,8 @@ function slugify(input: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-function nextFrame(): Promise<void> {
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
-}
-
-async function waitForNodeToSettle(node: HTMLElement) {
-  await nextFrame();
-  await nextFrame();
-  await (document as Document & { fonts?: FontFaceSet }).fonts?.ready;
-
-  const images = Array.from(node.querySelectorAll("img"));
-  await Promise.all(
-    images.map(
-      (image) =>
-        new Promise<void>((resolve) => {
-          if (image.complete) {
-            resolve();
-            return;
-          }
-          image.onload = () => resolve();
-          image.onerror = () => resolve();
-        }),
-    ),
-  );
-}
-
 async function renderPageNode(page: DesignPage, elements: DesignElement[]) {
-  const mount = document.createElement("div");
-  mount.style.position = "fixed";
-  mount.style.left = "-20000px";
-  mount.style.top = "0";
-  document.body.appendChild(mount);
-  const root = createRoot(mount);
-  root.render(<DesignRenderer page={page} elements={elements} />);
-  await nextFrame();
-  const node = mount.firstElementChild as HTMLElement | null;
-  if (!node) {
-    root.unmount();
-    mount.remove();
-    throw new Error("Không render được design page");
-  }
-  await waitForNodeToSettle(node);
-  return {
-    node,
-    cleanup: () => {
-      root.unmount();
-      mount.remove();
-    },
-  };
+  return await renderReactNodeOffDom(<DesignRenderer page={page} elements={elements} />);
 }
 
 function pageElements(document: DesignDocument, pageId: string) {

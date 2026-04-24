@@ -18,7 +18,15 @@ import {
   Loader2,
   Filter,
 } from "lucide-react";
-import type { Asset, Entity, GenerationJob, PackTemplate, PageTemplate, Slot } from "@/models";
+import type {
+  Asset,
+  Entity,
+  GenerationJob,
+  PackTemplate,
+  PageTemplate,
+  RenderedPage,
+  Slot,
+} from "@/models";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -55,7 +63,9 @@ import { buildEntityBindingTargets } from "@/engines/binding/cardRepeater";
 import {
   usePackBindOverrides,
 } from "@/features/generate/usePackBindOverrides";
-import { nodeToPngBlob, downloadPng, downloadZip } from "@/features/render/exportPng";
+import { nodeToPngBlob, downloadZip } from "@/features/render/exportPng";
+import { saveBlob } from "@/features/render/saveBlob";
+import { renderReactNodeOffDom } from "@/features/render/renderPageOffDom";
 import { db } from "@/storage/db";
 import { getLastActiveSheet, setLastActiveSheet } from "@/storage/lastSheet";
 import { buildBundleGroups } from "@/lib/packDisplay";
@@ -547,6 +557,29 @@ export function PackTabContent({
       .filter((group) => group.pages.length > 0);
   }, [currentJob, jobPack, tpls, entities, filter, filteredPages]);
 
+  const renderPackPageOffDom = async (page: RenderedPage) => {
+    const tpl = tpls.find((t) => t.pageTemplateId === page.pageTemplateId);
+    if (!tpl) throw new Error(`Không tìm thấy template cho page ${page.pageIndex}`);
+    const eff =
+      page.workingTemplate ??
+      resolvePageWorkingTemplate(tpl, page.bindOverrides ?? packOv[tpl.pageTemplateId]);
+    if (!eff) throw new Error(`Không resolve được template cho page ${page.pageIndex}`);
+    const ent = page.entityId
+      ? entities.find((entity) => entity.entityId === page.entityId)
+      : undefined;
+    return await renderReactNodeOffDom(
+      <PageRenderer
+        template={eff}
+        page={page}
+        entities={entities}
+        assets={assets}
+        entity={ent}
+        entityPool={buildOrderedEntityPool(page.entityId)}
+        scale={1}
+      />,
+    );
+  };
+
   const exportZip = async () => {
     if (!currentJob) return;
     const sel = currentJob.pages.filter((p) => p.selected);
@@ -554,10 +587,13 @@ export function PackTabContent({
     toast.info(`Đang export ${sel.length} page...`);
     const files: Array<{ name: string; blob: Blob }> = [];
     for (const p of sel) {
-      const node = packRefs.current.get(p.pageIndex);
-      if (!node) continue;
-      const blob = await nodeToPngBlob(node, 2);
-      files.push({ name: p.pageFile, blob });
+      const { node, cleanup } = await renderPackPageOffDom(p);
+      try {
+        const blob = await nodeToPngBlob(node, 2);
+        files.push({ name: p.pageFile, blob });
+      } finally {
+        cleanup();
+      }
     }
     await downloadZip(files, `${currentJob.packTemplateName}.zip`);
     await db.jobs.put({ ...currentJob, status: "exported" });
@@ -1136,10 +1172,13 @@ export function PackTabContent({
                     onClick={async () => {
                       const files: Array<{ name: string; blob: Blob }> = [];
                       for (const meta of bundle.pages) {
-                        const node = packRefs.current.get(meta.page.pageIndex);
-                        if (!node) continue;
-                        const blob = await nodeToPngBlob(node, 2);
-                        files.push({ name: meta.page.pageFile, blob });
+                        const { node, cleanup } = await renderPackPageOffDom(meta.page);
+                        try {
+                          const blob = await nodeToPngBlob(node, 2);
+                          files.push({ name: meta.page.pageFile, blob });
+                        } finally {
+                          cleanup();
+                        }
                       }
                       if (jobPack && currentJob) {
                         const bundleJob = {
@@ -1241,9 +1280,13 @@ export function PackTabContent({
                               size="sm"
                               className="w-full"
                               onClick={async () => {
-                                const node = packRefs.current.get(page.pageIndex);
-                                if (!node) return;
-                                await downloadPng(node, page.pageFile, 2);
+                                const { node, cleanup } = await renderPackPageOffDom(page);
+                                try {
+                                  const blob = await nodeToPngBlob(node, 2);
+                                  saveBlob(blob, page.pageFile);
+                                } finally {
+                                  cleanup();
+                                }
                               }}
                             >
                               <Download className="size-3 mr-1" /> Export PNG

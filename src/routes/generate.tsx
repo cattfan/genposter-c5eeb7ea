@@ -20,7 +20,9 @@ import { toast } from "sonner";
 import { generatePackJob } from "@/engines/selection/generate";
 import { useJobStore } from "@/features/generate/jobStore";
 import { PageRenderer } from "@/features/render/PageRenderer";
-import { nodeToPngBlob, downloadPng, downloadZip } from "@/features/render/exportPng";
+import { nodeToPngBlob, downloadZip } from "@/features/render/exportPng";
+import { saveBlob } from "@/features/render/saveBlob";
+import { renderReactNodeOffDom } from "@/features/render/renderPageOffDom";
 import {
   Sparkles,
   Download,
@@ -500,6 +502,23 @@ function GeneratePage() {
     toast.success(`Đã tạo ${filteredEntities.length} trang`);
   };
 
+  const renderEntityPageOffDom = async (p: EntityPreviewPage) => {
+    const ent = entities?.find((e) => e.entityId === p.entityId);
+    const tpl = p.workingTemplate ?? p.baseTemplate ?? entityPreviewTemplate;
+    if (!tpl) throw new Error("Không xác định được template");
+    return await renderReactNodeOffDom(
+      <PageRenderer
+        template={tpl}
+        entities={entities ?? []}
+        assets={assets ?? []}
+        entity={ent}
+        entityPool={buildOrderedEntityPool(p.entityId)}
+        slotItems={p.items}
+        scale={1}
+      />,
+    );
+  };
+
   const exportEntityZip = async () => {
     if (!entityPreviewTemplate) return;
     const sel = entityPages.filter((p) => p.selected);
@@ -507,15 +526,18 @@ function GeneratePage() {
     toast.info(`Đang export ${sel.length} trang...`);
     const files: Array<{ name: string; blob: Blob }> = [];
     for (const p of sel) {
-      const node = entityRefs.current.get(p.entityId);
-      if (!node) continue;
       const ent = entities?.find((e) => e.entityId === p.entityId);
       const slug = (ent?.name ?? p.entityId)
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .slice(0, 40);
-      const blob = await nodeToPngBlob(node, 2);
-      files.push({ name: `${slug || p.entityId}.png`, blob });
+      const { node, cleanup } = await renderEntityPageOffDom(p);
+      try {
+        const blob = await nodeToPngBlob(node, 2);
+        files.push({ name: `${slug || p.entityId}.png`, blob });
+      } finally {
+        cleanup();
+      }
     }
     await downloadZip(files, `${entityPreviewTemplate.name}-entities.zip`);
     toast.success("Đã export ZIP");
@@ -1046,13 +1068,17 @@ function GeneratePage() {
                         size="sm"
                         className="w-full"
                         onClick={async () => {
-                          const node = entityRefs.current.get(p.entityId);
-                          if (!node) return;
                           const slug = (ent?.name ?? p.entityId)
                             .toLowerCase()
                             .replace(/[^a-z0-9]+/g, "-")
                             .slice(0, 40);
-                          await downloadPng(node, `${slug || p.entityId}.png`, 2);
+                          const { node, cleanup } = await renderEntityPageOffDom(p);
+                          try {
+                            const blob = await nodeToPngBlob(node, 2);
+                            saveBlob(blob, `${slug || p.entityId}.png`);
+                          } finally {
+                            cleanup();
+                          }
                         }}
                       >
                         <Download className="size-3 mr-1" /> Export PNG
