@@ -16,6 +16,8 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BulkImageUpload } from "@/features/data/BulkImageUpload";
+import { PageContainer, PageHeader } from "@/components/PageHeader";
+import { Database } from "lucide-react";
 import {
   fetchSheetCsv,
   parseDataFile,
@@ -211,8 +213,12 @@ function DataPage() {
   };
 
   return (
-    <div className="p-8 max-w-6xl">
-      <h1 className="text-3xl font-bold mb-6">Dữ liệu</h1>
+    <PageContainer>
+      <PageHeader
+        icon={<Database className="size-5" />}
+        title="Dữ liệu"
+        description="Import CSV / JSON / Excel, quản lý entity và asset theo từng sheet."
+      />
 
       <Tabs defaultValue="import">
         <TabsList>
@@ -435,6 +441,6 @@ function DataPage() {
           </div>
         </TabsContent>
       </Tabs>
-    </div>
+    </PageContainer>
   );
 }

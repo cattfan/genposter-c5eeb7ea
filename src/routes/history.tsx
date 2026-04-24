@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useJobStore } from "@/features/generate/jobStore";
 import { toast } from "sonner";
+import { History } from "lucide-react";
+import { PageContainer, PageHeader } from "@/components/PageHeader";
 
 export const Route = createFileRoute("/history")({
   component: HistoryPage,
@@ -16,26 +18,36 @@ function HistoryPage() {
   const { setJob } = useJobStore();
 
   return (
-    <div className="p-8 max-w-5xl">
-      <h1 className="text-3xl font-bold mb-6">Lịch sử Job</h1>
+    <PageContainer className="max-w-5xl">
+      <PageHeader
+        icon={<History className="size-5" />}
+        title="Lịch sử Job"
+        description="Các lần export gần đây. Có thể mở lại để tiếp tục chỉnh sửa."
+      />
       {jobs && jobs.length === 0 && (
-        <Card><CardContent className="p-10 text-center text-muted-foreground">
-          Chưa có job nào. Job được lưu khi bạn export.
-        </CardContent></Card>
+        <Card className="border-dashed">
+          <CardContent className="flex flex-col items-center gap-3 p-10 text-center text-muted-foreground">
+            <span className="grid size-12 place-items-center rounded-full bg-accent text-primary">
+              <History className="size-5" />
+            </span>
+            Chưa có job nào. Job được lưu khi bạn export.
+          </CardContent>
+        </Card>
       )}
       <div className="space-y-2">
         {jobs?.map((j) => (
-          <Card key={j.jobId}>
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="flex-1">
-                <div className="font-semibold">{j.packTemplateName}</div>
+          <Card key={j.jobId} className="border-border/70 transition-shadow hover:shadow-sm">
+            <CardContent className="flex flex-wrap items-center gap-3 p-4">
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-semibold">{j.packTemplateName}</div>
                 <div className="text-xs text-muted-foreground">
-                  {new Date(j.createdAt).toLocaleString("vi-VN")} ·{" "}
-                  {j.pages.length} page · {j.pages.filter((p) => p.selected).length} chọn ·{" "}
-                  {j.pages.flatMap((p) => p.items).filter((i) => i.partnerFlag).length} lần đối tác xuất hiện
+                  {new Date(j.createdAt).toLocaleString("vi-VN")} · {j.pages.length} page ·{" "}
+                  {j.pages.filter((p) => p.selected).length} chọn ·{" "}
+                  {j.pages.flatMap((p) => p.items).filter((i) => i.partnerFlag).length} lần đối tác
+                  xuất hiện
                 </div>
               </div>
-              <Badge>{j.status}</Badge>
+              <Badge variant="secondary">{j.status}</Badge>
               <Button
                 size="sm"
                 variant="outline"
@@ -60,6 +72,6 @@ function HistoryPage() {
           </Card>
         ))}
       </div>
-    </div>
+    </PageContainer>
   );
 }

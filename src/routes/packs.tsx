@@ -7,8 +7,9 @@ import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import type { PackTemplate } from "@/models";
 import { useEffect, useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Package, Plus, Trash2 } from "lucide-react";
 import { PackBuilder } from "@/features/packs/PackBuilder";
+import { PageContainer, PageHeader } from "@/components/PageHeader";
 
 export const Route = createFileRoute("/packs")({
   component: PacksPage,
@@ -67,40 +68,45 @@ function PacksPage() {
   };
 
   return (
-    <div className="p-8 max-w-7xl">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-3xl font-bold">Pack Templates</h1>
-          <p className="text-muted-foreground mt-1">Ghép nhiều page template thành 1 combo.</p>
-        </div>
-        <Button onClick={createNew}>
-          <Plus className="size-4 mr-2" /> Tạo pack mới
-        </Button>
-      </div>
+    <PageContainer>
+      <PageHeader
+        icon={<Package className="size-5" />}
+        title="Pack Templates"
+        description="Ghép nhiều page template thành 1 combo."
+        actions={
+          <Button onClick={createNew}>
+            <Plus className="size-4 mr-2" /> Tạo pack mới
+          </Button>
+        }
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6">
         <div>
-          <h2 className="font-semibold mb-3">Danh sách</h2>
+          <h2 className="font-semibold mb-3 text-sm uppercase tracking-wide text-muted-foreground">
+            Danh sách
+          </h2>
           <div className="space-y-2">
             {packs?.length === 0 && (
-              <Card>
+              <Card className="border-dashed">
                 <CardContent className="p-4 text-sm text-muted-foreground">
-                  Chưa có pack. Tạo mới hoặc dùng "AI dựng combo" ở /templates.
+                  Chưa có pack. Tạo mới hoặc dùng &quot;AI dựng combo&quot; ở /templates.
                 </CardContent>
               </Card>
             )}
             {packs?.map((p) => (
               <Card
                 key={p.packTemplateId}
-                className={`cursor-pointer hover:border-primary ${
-                  editing?.packTemplateId === p.packTemplateId ? "border-primary" : ""
+                className={`cursor-pointer border-border/70 transition-all hover:-translate-y-0.5 hover:border-primary/60 hover:shadow-sm ${
+                  editing?.packTemplateId === p.packTemplateId ? "border-primary bg-accent/40" : ""
                 }`}
                 onClick={() => setEditing({ ...p })}
               >
                 <CardContent className="p-4 flex items-center justify-between">
                   <div className="min-w-0">
                     <div className="font-semibold truncate">{p.name}</div>
-                    <div className="text-xs text-muted-foreground">{p.orderedPages.length} page</div>
+                    <div className="text-xs text-muted-foreground">
+                      {p.orderedPages.length} page
+                    </div>
                   </div>
                   <Button
                     variant="ghost"
@@ -124,8 +130,11 @@ function PacksPage() {
 
         <div>
           {!editing && (
-            <Card>
-              <CardContent className="p-6 text-sm text-muted-foreground">
+            <Card className="border-dashed">
+              <CardContent className="flex flex-col items-center gap-3 p-10 text-center text-sm text-muted-foreground">
+                <span className="grid size-12 place-items-center rounded-full bg-accent text-primary">
+                  <Package className="size-5" />
+                </span>
                 Chọn 1 pack để sửa hoặc tạo mới.
               </CardContent>
             </Card>
@@ -141,6 +150,6 @@ function PacksPage() {
           )}
         </div>
       </div>
-    </div>
+    </PageContainer>
   );
 }

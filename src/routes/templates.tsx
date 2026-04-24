@@ -16,10 +16,22 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Plus, Pencil, Copy, Trash2, Sparkles, Loader2, CalendarPlus, Layers, X,
+  Plus,
+  Pencil,
+  Copy,
+  Trash2,
+  Sparkles,
+  Loader2,
+  CalendarPlus,
+  Layers,
+  X,
 } from "lucide-react";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
@@ -36,6 +48,7 @@ import { aiLayoutToTemplate } from "@/features/ai/templateFromImage";
 import { buildComboFromAiResult, persistCombo } from "@/features/ai/comboFromImages";
 import { cloneDayPage } from "@/storage/seedFlex";
 import type { Asset, Entity, RenderedItem } from "@/models";
+import { PageContainer, PageHeader } from "@/components/PageHeader";
 
 export const Route = createFileRoute("/templates")({
   component: TemplatesPage,
@@ -262,7 +275,7 @@ function TemplatesPage() {
   };
 
   return (
-    <div className="p-8 max-w-6xl">
+    <PageContainer>
       <input ref={fileRef} type="file" accept="image/*" hidden onChange={onAiImageChange} />
       <input
         ref={comboFileRef}
@@ -272,24 +285,29 @@ function TemplatesPage() {
         hidden
         onChange={onComboFilesChange}
       />
-      <div className="flex items-center justify-between mb-6 gap-2 flex-wrap">
-        <div>
-          <h1 className="text-3xl font-bold">Page Templates</h1>
-          <p className="text-muted-foreground mt-1">Mỗi page template là 1 layout có thể ghép vào pack.</p>
-        </div>
-        <div className="flex gap-2 flex-wrap">
-          <Button variant="outline" onClick={onPickAiImage} disabled={aiBusy}>
-            {aiBusy ? <Loader2 className="size-4 mr-2 animate-spin" /> : <Sparkles className="size-4 mr-2" />}
-            AI dựng từ ảnh
-          </Button>
-          <Button variant="outline" onClick={onPickComboImages} disabled={aiBusy}>
-            <Layers className="size-4 mr-2" /> AI dựng combo
-          </Button>
-          <Button onClick={createNew}>
-            <Plus className="size-4 mr-2" /> Tạo mới
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        icon={<Layers className="size-5" />}
+        title="Page Templates"
+        description="Mỗi page template là 1 layout có thể ghép vào pack."
+        actions={
+          <>
+            <Button variant="outline" onClick={onPickAiImage} disabled={aiBusy}>
+              {aiBusy ? (
+                <Loader2 className="size-4 mr-2 animate-spin" />
+              ) : (
+                <Sparkles className="size-4 mr-2" />
+              )}
+              AI dựng từ ảnh
+            </Button>
+            <Button variant="outline" onClick={onPickComboImages} disabled={aiBusy}>
+              <Layers className="size-4 mr-2" /> AI dựng combo
+            </Button>
+            <Button onClick={createNew}>
+              <Plus className="size-4 mr-2" /> Tạo mới
+            </Button>
+          </>
+        }
+      />
 
       <Dialog open={singleOpen} onOpenChange={(o) => !aiBusy && setSingleOpen(o)}>
         <DialogContent className="max-w-2xl">
@@ -300,7 +318,11 @@ function TemplatesPage() {
             {singlePreview && (
               <div className="overflow-hidden rounded-lg border bg-muted">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={singlePreview} alt={singleFileName} className="max-h-[420px] w-full object-contain" />
+                <img
+                  src={singlePreview}
+                  alt={singleFileName}
+                  className="max-h-[420px] w-full object-contain"
+                />
               </div>
             )}
 
@@ -351,7 +373,8 @@ function TemplatesPage() {
               <div className="space-y-1">
                 <div className="text-sm font-medium">Ưu tiên số dòng thật</div>
                 <div className="text-xs text-muted-foreground">
-                  Nếu ảnh mẫu nhìn thấy nhiều dòng item riêng biệt, AI sẽ cố giữ từng dòng thay vì gom thành block lớn.
+                  Nếu ảnh mẫu nhìn thấy nhiều dòng item riêng biệt, AI sẽ cố giữ từng dòng thay vì
+                  gom thành block lớn.
                 </div>
               </div>
             </label>
@@ -422,7 +445,8 @@ function TemplatesPage() {
               <div className="space-y-1">
                 <div className="text-sm font-medium">Ưu tiên số dòng thật</div>
                 <div className="text-xs text-muted-foreground">
-                  Khi bộ ảnh là poster bullet-list, AI sẽ giữ line-level rõ hơn để draft không bị rơi về item-group generic.
+                  Khi bộ ảnh là poster bullet-list, AI sẽ giữ line-level rõ hơn để draft không bị
+                  rơi về item-group generic.
                 </div>
               </div>
             </label>
@@ -430,7 +454,10 @@ function TemplatesPage() {
               <Label>Ảnh đã chọn</Label>
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-2 max-h-[300px] overflow-y-auto">
                 {comboPreviews.map((src, idx) => (
-                  <div key={idx} className="relative group aspect-[4/5] rounded overflow-hidden border bg-muted">
+                  <div
+                    key={idx}
+                    className="relative group aspect-[4/5] rounded overflow-hidden border bg-muted"
+                  >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={src} alt={`page-${idx + 1}`} className="w-full h-full object-cover" />
                     <div className="absolute top-1 left-1 text-[10px] bg-black/60 text-white rounded px-1">
@@ -541,7 +568,7 @@ function TemplatesPage() {
           </Card>
         ))}
       </div>
-    </div>
+    </PageContainer>
   );
 }
 
@@ -568,7 +595,11 @@ function TemplatePreview({ tpl }: { tpl: PageTemplate }) {
   const previewData = useState(() => buildTemplatePreviewData(tpl))[0];
 
   return (
-    <div ref={ref} className="absolute inset-0 overflow-hidden" style={{ background: tpl.canvas.background ?? "#fff" }}>
+    <div
+      ref={ref}
+      className="absolute inset-0 overflow-hidden"
+      style={{ background: tpl.canvas.background ?? "#fff" }}
+    >
       <LayoutGuides width={tpl.canvas.width} height={tpl.canvas.height} scale={scale} />
       {isEmpty ? (
         <div className="w-full h-full flex items-center justify-center text-muted-foreground text-xs uppercase tracking-wider">

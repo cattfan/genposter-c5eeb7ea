@@ -51,6 +51,8 @@ import {
   draftReadinessText,
   runReversePackAnalysis,
 } from "@/engines/analysis/reversePackAnalyzer";
+import { PageContainer, PageHeader } from "@/components/PageHeader";
+import { Search } from "lucide-react";
 
 export const Route = createFileRoute("/analysis")({
   component: AnalysisPage,
@@ -161,9 +163,7 @@ function pickRequirementHighlights(
   });
 
   return uniqueBy(
-    filtered
-      .slice()
-      .sort((a, b) => requirementPriority(b) - requirementPriority(a)),
+    filtered.slice().sort((a, b) => requirementPriority(b) - requirementPriority(a)),
     (item) => item.label,
   ).slice(0, limit);
 }
@@ -188,7 +188,10 @@ function pickSheetReasonHighlights(report: CompatibilityReport, limit = 3): stri
   return [];
 }
 
-function compactRequirementItems(requirements: InferredDataRequirement[], limit = 3): CompactItem[] {
+function compactRequirementItems(
+  requirements: InferredDataRequirement[],
+  limit = 3,
+): CompactItem[] {
   return pickRequirementHighlights(requirements, { limit, excludeManual: true }).map((item) => ({
     key: item.requirementId,
     label: item.label,
@@ -401,9 +404,7 @@ function AnalysisPage() {
       setCurrentRecord(record);
       toast.success("Đã phân tích xong bộ ảnh.");
     } catch (error) {
-      toast.error(
-        "Phân tích lỗi: " + (error instanceof Error ? error.message : String(error)),
-      );
+      toast.error("Phân tích lỗi: " + (error instanceof Error ? error.message : String(error)));
     } finally {
       setBusy(false);
       setProgressText("");
@@ -439,7 +440,9 @@ function AnalysisPage() {
 
   const toggleDraftSelection = (pageTemplateId: string, checked: boolean) => {
     setSelectedDraftIds((prev) =>
-      checked ? [...new Set([...prev, pageTemplateId])] : prev.filter((id) => id !== pageTemplateId),
+      checked
+        ? [...new Set([...prev, pageTemplateId])]
+        : prev.filter((id) => id !== pageTemplateId),
     );
   };
 
@@ -456,10 +459,7 @@ function AnalysisPage() {
   );
 
   const quickNeedItems = useMemo(
-    () =>
-      currentRecord
-        ? compactRequirementItems(currentRecord.pack.dataBlueprint ?? [], 5)
-        : [],
+    () => (currentRecord ? compactRequirementItems(currentRecord.pack.dataBlueprint ?? [], 5) : []),
     [currentRecord],
   );
 
@@ -469,16 +469,13 @@ function AnalysisPage() {
   );
 
   const quickManualItems = useMemo(
-    () =>
-      currentRecord
-        ? compactManualItems(currentRecord.pack.dataBlueprint ?? [], 5)
-        : [],
+    () => (currentRecord ? compactManualItems(currentRecord.pack.dataBlueprint ?? [], 5) : []),
     [currentRecord],
   );
   const isDraftOnly = currentRecord?.mode === "draft_only";
 
   return (
-    <div className="max-w-7xl space-y-6 p-8">
+    <PageContainer className="space-y-6">
       <input
         ref={fileRef}
         type="file"
@@ -491,38 +488,37 @@ function AnalysisPage() {
         }}
       />
 
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold">Phân tích bộ ảnh</h1>
-          <p className="mt-1 text-muted-foreground">
-            Quăng một hoặc nhiều ảnh mẫu vào để AI phân tích cấu trúc, dữ liệu cần có và khả năng tái tạo.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={pickFiles} disabled={busy}>
-            <Layers className="mr-2 size-4" />
-            Chọn ảnh
-          </Button>
-          <Select value={mode} onValueChange={(value) => setMode(value as AnalysisMode)}>
-            <SelectTrigger className="w-64">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="quick">Phân tích nhanh</SelectItem>
-              <SelectItem value="deep_draft">Phân tích sâu + tạo draft</SelectItem>
-              <SelectItem value="draft_only">Chỉ tạo draft giống mẫu</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button onClick={runAnalysis} disabled={busy || images.length === 0}>
-            {busy ? (
-              <Loader2 className="mr-2 size-4 animate-spin" />
-            ) : (
-              <Sparkles className="mr-2 size-4" />
-            )}
-            Phân tích
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        icon={<Search className="size-5" />}
+        title="Phân tích bộ ảnh"
+        description="Quăng một hoặc nhiều ảnh mẫu vào để AI phân tích cấu trúc, dữ liệu cần có và khả năng tái tạo."
+        actions={
+          <>
+            <Button variant="outline" onClick={pickFiles} disabled={busy}>
+              <Layers className="mr-2 size-4" />
+              Chọn ảnh
+            </Button>
+            <Select value={mode} onValueChange={(value) => setMode(value as AnalysisMode)}>
+              <SelectTrigger className="w-64">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="quick">Phân tích nhanh</SelectItem>
+                <SelectItem value="deep_draft">Phân tích sâu + tạo draft</SelectItem>
+                <SelectItem value="draft_only">Chỉ tạo draft giống mẫu</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button onClick={runAnalysis} disabled={busy || images.length === 0}>
+              {busy ? (
+                <Loader2 className="mr-2 size-4 animate-spin" />
+              ) : (
+                <Sparkles className="mr-2 size-4" />
+              )}
+              Phân tích
+            </Button>
+          </>
+        }
+      />
 
       <Card>
         <CardHeader>
@@ -602,8 +598,7 @@ function AnalysisPage() {
                   <b>Tổng số ảnh:</b> {currentRecord.pack.imageCount}
                 </div>
                 <div>
-                  <b>Mức độ tương thích:</b>{" "}
-                  {currentRecord.pack.compatibility.score}/100 ·{" "}
+                  <b>Mức độ tương thích:</b> {currentRecord.pack.compatibility.score}/100 ·{" "}
                   {compatibilityLabelText(currentRecord.pack.compatibility.label)}
                 </div>
                 {currentRecord.pack.compatibility.bestMatchSheet && (
@@ -690,231 +685,237 @@ function AnalysisPage() {
               </CardHeader>
               <CardContent className="space-y-5">
                 {currentRecord.pack.pages.map((page, index) => {
-                const fieldGaps = gapItemsByCategory(page.compatibility, "field");
-                const assetGaps = gapItemsByCategory(page.compatibility, "asset");
-                const structuralGaps = gapItemsByCategory(page.compatibility, "structure");
-                const reasonHighlights = pickSheetReasonHighlights(page.compatibility, 3);
-                const requirementHighlights = compactRequirementItems(page.requiredFields, 3);
-                const pageGapHighlights = compactGapItems(page.compatibility, 3);
-                const manualHighlights = compactManualItems(page.requiredFields, 2);
+                  const fieldGaps = gapItemsByCategory(page.compatibility, "field");
+                  const assetGaps = gapItemsByCategory(page.compatibility, "asset");
+                  const structuralGaps = gapItemsByCategory(page.compatibility, "structure");
+                  const reasonHighlights = pickSheetReasonHighlights(page.compatibility, 3);
+                  const requirementHighlights = compactRequirementItems(page.requiredFields, 3);
+                  const pageGapHighlights = compactGapItems(page.compatibility, 3);
+                  const manualHighlights = compactManualItems(page.requiredFields, 2);
 
-                return (
-                  <div key={page.pageIndex} className="space-y-4 rounded-xl border p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="space-y-2">
-                        <div className="font-semibold">
-                          Ảnh {index + 1} · {page.suggestedName}
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          {truncate(page.summary, 180)}
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Badge variant="outline">{page.pageType}</Badge>
-                        <Badge variant="secondary">
-                          {page.compatibility.score}/100 ·{" "}
-                          {compatibilityLabelText(page.compatibility.label)}
-                        </Badge>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-                      <div className="space-y-2 rounded-lg border bg-muted/10 p-3">
-                        <div className="text-sm font-medium">Sheet phù hợp nhất</div>
-                        <div className="text-sm font-semibold">
-                          {page.compatibility.bestMatchSheet ?? "Chưa xác định"}
-                        </div>
-                        {reasonHighlights.length > 0 ? (
-                          <ul className="space-y-2 text-xs text-muted-foreground">
-                            {reasonHighlights.map((reason) => (
-                              <li key={reason}>• {reason}</li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <div className="text-xs text-muted-foreground">
-                            {page.compatibility.reasonSummary ?? "Chưa có nhận định chi tiết."}
+                  return (
+                    <div key={page.pageIndex} className="space-y-4 rounded-xl border p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="space-y-2">
+                          <div className="font-semibold">
+                            Ảnh {index + 1} · {page.suggestedName}
                           </div>
-                        )}
-                      </div>
-
-                      <CompactList
-                        title="Cần chuẩn bị"
-                        items={requirementHighlights}
-                        emptyText="Không có requirement nổi bật."
-                      />
-
-                      <CompactList
-                        title="Thiếu đáng chú ý"
-                        items={pageGapHighlights}
-                        emptyText="Không có thiếu hụt đáng chú ý."
-                      />
-                    </div>
-
-                    {manualHighlights.length > 0 && (
-                      <div className="rounded-lg border bg-muted/10 p-3">
-                        <div className="text-sm font-medium">Có thể nhập tay</div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {manualHighlights.map((item) => (
-                            <Badge key={item.key} variant="secondary">
-                              {item.label}
-                            </Badge>
-                          ))}
+                          <div className="text-sm text-muted-foreground">
+                            {truncate(page.summary, 180)}
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Badge variant="outline">{page.pageType}</Badge>
+                          <Badge variant="secondary">
+                            {page.compatibility.score}/100 ·{" "}
+                            {compatibilityLabelText(page.compatibility.label)}
+                          </Badge>
                         </div>
                       </div>
-                    )}
 
-                    <Accordion type="single" collapsible>
-                      <AccordionItem value={`page-detail-${page.pageIndex}`}>
-                        <AccordionTrigger>Xem chi tiết</AccordionTrigger>
-                        <AccordionContent className="space-y-4">
-                          <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-                            <div className="space-y-2 xl:col-span-1">
-                              <div className="text-sm font-medium">Sheet phù hợp nhất</div>
-                              <div className="rounded-lg border bg-muted/10 p-3 text-sm">
-                                <div className="font-semibold">
-                                  {page.compatibility.bestMatchSheet ?? "Chưa xác định"}
-                                </div>
-                                <div className="mt-1 text-muted-foreground">
-                                  {page.compatibility.reasonSummary ?? "Chưa có nhận định chi tiết."}
-                                </div>
-                              </div>
-                              <div className="grid grid-cols-3 gap-2 text-xs">
-                                <div className="rounded-lg border bg-muted/10 p-2">
-                                  <div className="font-medium">Field</div>
-                                  <div className="mt-1 text-muted-foreground">
-                                    {fieldGaps.have.length +
-                                      fieldGaps.mappable.length +
-                                      fieldGaps.missing_required.length +
-                                      fieldGaps.missing_optional.length +
-                                      fieldGaps.risk.length}{" "}
-                                    mục
-                                  </div>
-                                </div>
-                                <div className="rounded-lg border bg-muted/10 p-2">
-                                  <div className="font-medium">Asset</div>
-                                  <div className="mt-1 text-muted-foreground">
-                                    {assetGaps.have.length +
-                                      assetGaps.mappable.length +
-                                      assetGaps.missing_required.length +
-                                      assetGaps.missing_optional.length +
-                                      assetGaps.risk.length}{" "}
-                                    mục
-                                  </div>
-                                </div>
-                                <div className="rounded-lg border bg-muted/10 p-2">
-                                  <div className="font-medium">Cấu trúc</div>
-                                  <div className="mt-1 text-muted-foreground">
-                                    {structuralGaps.have.length +
-                                      structuralGaps.mappable.length +
-                                      structuralGaps.missing_required.length +
-                                      structuralGaps.missing_optional.length +
-                                      structuralGaps.risk.length}{" "}
-                                    mục
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="space-y-2 xl:col-span-2">
-                              <div className="text-sm font-medium">Top 3 sheet phù hợp</div>
-                              <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-                                {page.compatibility.sheets.slice(0, 3).map((sheet) => (
-                                  <div key={sheet.sheetName} className="rounded-lg border p-3 text-sm">
-                                    <div className="flex items-center justify-between gap-2">
-                                      <div className="font-semibold">{sheet.sheetName}</div>
-                                      <Badge variant="outline">
-                                        {sheet.score}/100 · {compatibilityLabelText(sheet.label)}
-                                      </Badge>
-                                    </div>
-                                    <div className="mt-2 text-xs text-muted-foreground">
-                                      {sheet.reasonSummary || "Chưa có reason summary."}
-                                    </div>
-                                    {sheet.reasons && sheet.reasons.length > 0 && (
-                                      <ul className="mt-2 space-y-1 text-xs">
-                                        {sheet.reasons.slice(0, 3).map((reason) => (
-                                          <li key={reason}>• {reason}</li>
-                                        ))}
-                                      </ul>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
+                      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+                        <div className="space-y-2 rounded-lg border bg-muted/10 p-3">
+                          <div className="text-sm font-medium">Sheet phù hợp nhất</div>
+                          <div className="text-sm font-semibold">
+                            {page.compatibility.bestMatchSheet ?? "Chưa xác định"}
                           </div>
-
-                          <div className="space-y-2">
-                            <div className="text-sm font-medium">Field cần có</div>
-                            <div className="rounded-lg border bg-muted/10 p-3">
-                              <div className="flex flex-wrap gap-2">
-                                {page.requiredFields.map((field) => (
-                                  <div
-                                    key={field.requirementId}
-                                    className="rounded-lg border bg-background px-3 py-2 text-xs"
-                                  >
-                                    <div className="font-medium">{field.label}</div>
-                                    <div className="mt-1 flex flex-wrap gap-1">
-                                      <Badge variant="outline">
-                                        {KIND_LABELS[field.kind ?? "data_field"] ?? field.kind}
-                                      </Badge>
-                                      <Badge variant={field.required ? "default" : "secondary"}>
-                                        {field.required ? "Bắt buộc" : "Tuỳ chọn"}
-                                      </Badge>
-                                    </div>
-                                    {(field.bindCandidate || field.notes || field.minRecords) && (
-                                      <div className="mt-1 text-muted-foreground">
-                                        {field.bindCandidate ? <div>Bind: {field.bindCandidate}</div> : null}
-                                        {field.minRecords ? (
-                                          <div>Cần khoảng {field.minRecords} record</div>
-                                        ) : null}
-                                        {field.notes ? <div>{field.notes}</div> : null}
-                                      </div>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="space-y-2">
-                            <div className="text-sm font-medium">Gợi ý dữ liệu còn thiếu</div>
-                            <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-                              {(Object.keys(GAP_LABELS) as GapLevel[]).map((level) => (
-                                <div key={level}>
-                                  {gapColumn(GAP_LABELS[level], page.compatibility.groups[level])}
-                                </div>
+                          {reasonHighlights.length > 0 ? (
+                            <ul className="space-y-2 text-xs text-muted-foreground">
+                              {reasonHighlights.map((reason) => (
+                                <li key={reason}>• {reason}</li>
                               ))}
+                            </ul>
+                          ) : (
+                            <div className="text-xs text-muted-foreground">
+                              {page.compatibility.reasonSummary ?? "Chưa có nhận định chi tiết."}
                             </div>
-                          </div>
+                          )}
+                        </div>
 
-                          <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
-                            {gapColumn("Field-level gaps", [
-                              ...fieldGaps.have,
-                              ...fieldGaps.mappable,
-                              ...fieldGaps.missing_required,
-                              ...fieldGaps.missing_optional,
-                              ...fieldGaps.risk,
-                            ])}
-                            {gapColumn("Asset gaps", [
-                              ...assetGaps.have,
-                              ...assetGaps.mappable,
-                              ...assetGaps.missing_required,
-                              ...assetGaps.missing_optional,
-                              ...assetGaps.risk,
-                            ])}
-                            {gapColumn("Structural gaps", [
-                              ...structuralGaps.have,
-                              ...structuralGaps.mappable,
-                              ...structuralGaps.missing_required,
-                              ...structuralGaps.missing_optional,
-                              ...structuralGaps.risk,
-                            ])}
+                        <CompactList
+                          title="Cần chuẩn bị"
+                          items={requirementHighlights}
+                          emptyText="Không có requirement nổi bật."
+                        />
+
+                        <CompactList
+                          title="Thiếu đáng chú ý"
+                          items={pageGapHighlights}
+                          emptyText="Không có thiếu hụt đáng chú ý."
+                        />
+                      </div>
+
+                      {manualHighlights.length > 0 && (
+                        <div className="rounded-lg border bg-muted/10 p-3">
+                          <div className="text-sm font-medium">Có thể nhập tay</div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {manualHighlights.map((item) => (
+                              <Badge key={item.key} variant="secondary">
+                                {item.label}
+                              </Badge>
+                            ))}
                           </div>
-                        </AccordionContent>
-                      </AccordionItem>
-                    </Accordion>
-                  </div>
-                );
-              })}
+                        </div>
+                      )}
+
+                      <Accordion type="single" collapsible>
+                        <AccordionItem value={`page-detail-${page.pageIndex}`}>
+                          <AccordionTrigger>Xem chi tiết</AccordionTrigger>
+                          <AccordionContent className="space-y-4">
+                            <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+                              <div className="space-y-2 xl:col-span-1">
+                                <div className="text-sm font-medium">Sheet phù hợp nhất</div>
+                                <div className="rounded-lg border bg-muted/10 p-3 text-sm">
+                                  <div className="font-semibold">
+                                    {page.compatibility.bestMatchSheet ?? "Chưa xác định"}
+                                  </div>
+                                  <div className="mt-1 text-muted-foreground">
+                                    {page.compatibility.reasonSummary ??
+                                      "Chưa có nhận định chi tiết."}
+                                  </div>
+                                </div>
+                                <div className="grid grid-cols-3 gap-2 text-xs">
+                                  <div className="rounded-lg border bg-muted/10 p-2">
+                                    <div className="font-medium">Field</div>
+                                    <div className="mt-1 text-muted-foreground">
+                                      {fieldGaps.have.length +
+                                        fieldGaps.mappable.length +
+                                        fieldGaps.missing_required.length +
+                                        fieldGaps.missing_optional.length +
+                                        fieldGaps.risk.length}{" "}
+                                      mục
+                                    </div>
+                                  </div>
+                                  <div className="rounded-lg border bg-muted/10 p-2">
+                                    <div className="font-medium">Asset</div>
+                                    <div className="mt-1 text-muted-foreground">
+                                      {assetGaps.have.length +
+                                        assetGaps.mappable.length +
+                                        assetGaps.missing_required.length +
+                                        assetGaps.missing_optional.length +
+                                        assetGaps.risk.length}{" "}
+                                      mục
+                                    </div>
+                                  </div>
+                                  <div className="rounded-lg border bg-muted/10 p-2">
+                                    <div className="font-medium">Cấu trúc</div>
+                                    <div className="mt-1 text-muted-foreground">
+                                      {structuralGaps.have.length +
+                                        structuralGaps.mappable.length +
+                                        structuralGaps.missing_required.length +
+                                        structuralGaps.missing_optional.length +
+                                        structuralGaps.risk.length}{" "}
+                                      mục
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="space-y-2 xl:col-span-2">
+                                <div className="text-sm font-medium">Top 3 sheet phù hợp</div>
+                                <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+                                  {page.compatibility.sheets.slice(0, 3).map((sheet) => (
+                                    <div
+                                      key={sheet.sheetName}
+                                      className="rounded-lg border p-3 text-sm"
+                                    >
+                                      <div className="flex items-center justify-between gap-2">
+                                        <div className="font-semibold">{sheet.sheetName}</div>
+                                        <Badge variant="outline">
+                                          {sheet.score}/100 · {compatibilityLabelText(sheet.label)}
+                                        </Badge>
+                                      </div>
+                                      <div className="mt-2 text-xs text-muted-foreground">
+                                        {sheet.reasonSummary || "Chưa có reason summary."}
+                                      </div>
+                                      {sheet.reasons && sheet.reasons.length > 0 && (
+                                        <ul className="mt-2 space-y-1 text-xs">
+                                          {sheet.reasons.slice(0, 3).map((reason) => (
+                                            <li key={reason}>• {reason}</li>
+                                          ))}
+                                        </ul>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              <div className="text-sm font-medium">Field cần có</div>
+                              <div className="rounded-lg border bg-muted/10 p-3">
+                                <div className="flex flex-wrap gap-2">
+                                  {page.requiredFields.map((field) => (
+                                    <div
+                                      key={field.requirementId}
+                                      className="rounded-lg border bg-background px-3 py-2 text-xs"
+                                    >
+                                      <div className="font-medium">{field.label}</div>
+                                      <div className="mt-1 flex flex-wrap gap-1">
+                                        <Badge variant="outline">
+                                          {KIND_LABELS[field.kind ?? "data_field"] ?? field.kind}
+                                        </Badge>
+                                        <Badge variant={field.required ? "default" : "secondary"}>
+                                          {field.required ? "Bắt buộc" : "Tuỳ chọn"}
+                                        </Badge>
+                                      </div>
+                                      {(field.bindCandidate || field.notes || field.minRecords) && (
+                                        <div className="mt-1 text-muted-foreground">
+                                          {field.bindCandidate ? (
+                                            <div>Bind: {field.bindCandidate}</div>
+                                          ) : null}
+                                          {field.minRecords ? (
+                                            <div>Cần khoảng {field.minRecords} record</div>
+                                          ) : null}
+                                          {field.notes ? <div>{field.notes}</div> : null}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              <div className="text-sm font-medium">Gợi ý dữ liệu còn thiếu</div>
+                              <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+                                {(Object.keys(GAP_LABELS) as GapLevel[]).map((level) => (
+                                  <div key={level}>
+                                    {gapColumn(GAP_LABELS[level], page.compatibility.groups[level])}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
+                              {gapColumn("Field-level gaps", [
+                                ...fieldGaps.have,
+                                ...fieldGaps.mappable,
+                                ...fieldGaps.missing_required,
+                                ...fieldGaps.missing_optional,
+                                ...fieldGaps.risk,
+                              ])}
+                              {gapColumn("Asset gaps", [
+                                ...assetGaps.have,
+                                ...assetGaps.mappable,
+                                ...assetGaps.missing_required,
+                                ...assetGaps.missing_optional,
+                                ...assetGaps.risk,
+                              ])}
+                              {gapColumn("Structural gaps", [
+                                ...structuralGaps.have,
+                                ...structuralGaps.mappable,
+                                ...structuralGaps.missing_required,
+                                ...structuralGaps.missing_optional,
+                                ...structuralGaps.risk,
+                              ])}
+                            </div>
+                          </AccordionContent>
+                        </AccordionItem>
+                      </Accordion>
+                    </div>
+                  );
+                })}
               </CardContent>
             </Card>
           )}
@@ -946,7 +947,8 @@ function AnalysisPage() {
                       size="sm"
                       onClick={() =>
                         setSelectedDraftIds(
-                          currentRecord.draft?.pageTemplates.map((item) => item.pageTemplateId) ?? [],
+                          currentRecord.draft?.pageTemplates.map((item) => item.pageTemplateId) ??
+                            [],
                         )
                       }
                     >
@@ -955,7 +957,11 @@ function AnalysisPage() {
                     <Button variant="outline" size="sm" onClick={() => setSelectedDraftIds([])}>
                       Bỏ chọn
                     </Button>
-                    <Button size="sm" onClick={saveSelectedDrafts} disabled={selectedDraftIds.length === 0}>
+                    <Button
+                      size="sm"
+                      onClick={saveSelectedDrafts}
+                      disabled={selectedDraftIds.length === 0}
+                    >
                       <Save className="mr-2 size-4" />
                       Lưu mẫu đã chọn
                     </Button>
@@ -989,9 +995,7 @@ function AnalysisPage() {
                                 aria-label={`Chọn mẫu ${draftPage.pageName}`}
                               />
                               <div className="space-y-1">
-                                <div className="font-medium">
-                                  {draftPage.pageName}
-                                </div>
+                                <div className="font-medium">{draftPage.pageName}</div>
                                 <div className="text-xs text-muted-foreground">
                                   {draftPage.pageType}
                                 </div>
@@ -1009,9 +1013,7 @@ function AnalysisPage() {
                             <Badge variant="outline">
                               {draftPage.estimatedItemCount || 0} item ước lượng
                             </Badge>
-                            <Badge variant="outline">
-                              {draftPage.autoBindingCount} auto-bind
-                            </Badge>
+                            <Badge variant="outline">{draftPage.autoBindingCount} auto-bind</Badge>
                           </div>
 
                           {draftPage.warnings.length > 0 && (
@@ -1071,7 +1073,8 @@ function AnalysisPage() {
                 <div>
                   <div className="font-medium">{analysis.title}</div>
                   <div className="text-xs text-muted-foreground">
-                    {new Date(analysis.createdAt).toLocaleString("vi-VN")} · {modeLabel(analysis.mode)}
+                    {new Date(analysis.createdAt).toLocaleString("vi-VN")} ·{" "}
+                    {modeLabel(analysis.mode)}
                   </div>
                 </div>
                 <div className="flex gap-2">
@@ -1102,7 +1105,7 @@ function AnalysisPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </PageContainer>
   );
 }
 

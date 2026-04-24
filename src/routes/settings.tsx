@@ -4,7 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { useEffect, useState } from "react";
 import { getSettings, saveSettings } from "@/storage/settings";
@@ -12,7 +16,8 @@ import { clearAll } from "@/storage/db";
 import type { AiProviderConfig, AiProviderPreset, AppSettings } from "@/models";
 import { toast } from "sonner";
 import { AI_PRESETS, defaultAiConfig, testAiConfig } from "@/features/ai/aiClient";
-import { Loader2, CheckCircle2, XCircle } from "lucide-react";
+import { Loader2, CheckCircle2, XCircle, Settings as SettingsIcon } from "lucide-react";
+import { PageContainer, PageHeader } from "@/components/PageHeader";
 
 export const Route = createFileRoute("/settings")({
   component: SettingsPage,
@@ -53,7 +58,10 @@ function SettingsPage() {
     try {
       const r = await testAiConfig(ai);
       if (r.ok) {
-        setTestResult({ ok: true, msg: `Provider OK. Trả về: "${(r.content ?? "").slice(0, 40)}"` });
+        setTestResult({
+          ok: true,
+          msg: `Provider OK. Trả về: "${(r.content ?? "").slice(0, 40)}"`,
+        });
       } else {
         setTestResult({ ok: false, msg: r.error });
       }
@@ -63,8 +71,12 @@ function SettingsPage() {
   };
 
   return (
-    <div className="p-8 max-w-3xl space-y-6">
-      <h1 className="text-3xl font-bold">Cài đặt</h1>
+    <PageContainer className="max-w-3xl space-y-6">
+      <PageHeader
+        icon={<SettingsIcon className="size-5" />}
+        title="Cài đặt"
+        description="Cấu hình AI provider và quản lý dữ liệu local."
+      />
 
       <Card>
         <CardHeader>
@@ -72,9 +84,9 @@ function SettingsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Tất cả tính năng AI (dựng template từ ảnh, gợi ý bind, caption, combo) sẽ gọi qua endpoint
-            OpenAI-compatible này. Request gửi <strong>trực tiếp từ browser</strong> nên hỗ trợ cả
-            URL local (vd <code>http://localhost:20128/v1</code>).
+            Tất cả tính năng AI (dựng template từ ảnh, gợi ý bind, caption, combo) sẽ gọi qua
+            endpoint OpenAI-compatible này. Request gửi <strong>trực tiếp từ browser</strong> nên hỗ
+            trợ cả URL local (vd <code>http://localhost:20128/v1</code>).
           </p>
 
           <div>
@@ -137,11 +149,7 @@ function SettingsPage() {
 
           <div className="flex items-center gap-3">
             <Button variant="outline" onClick={onTest} disabled={testing}>
-              {testing ? (
-                <Loader2 className="size-4 mr-2 animate-spin" />
-              ) : (
-                "Test kết nối"
-              )}
+              {testing ? <Loader2 className="size-4 mr-2 animate-spin" /> : "Test kết nối"}
             </Button>
             {testResult && (
               <span
@@ -149,7 +157,11 @@ function SettingsPage() {
                   testResult.ok ? "text-green-600" : "text-destructive"
                 }`}
               >
-                {testResult.ok ? <CheckCircle2 className="size-4" /> : <XCircle className="size-4" />}
+                {testResult.ok ? (
+                  <CheckCircle2 className="size-4" />
+                ) : (
+                  <XCircle className="size-4" />
+                )}
                 <span className="truncate">{testResult.msg}</span>
               </span>
             )}
@@ -229,6 +241,6 @@ function SettingsPage() {
       >
         Lưu cài đặt
       </Button>
-    </div>
+    </PageContainer>
   );
 }

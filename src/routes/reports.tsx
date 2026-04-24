@@ -25,8 +25,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Copy } from "lucide-react";
+import { Copy, FileText } from "lucide-react";
 import { PageRenderer } from "@/features/render/PageRenderer";
+import { PageContainer, PageHeader } from "@/components/PageHeader";
 
 export const Route = createFileRoute("/reports")({
   component: ReportsPage,
@@ -49,28 +50,31 @@ function ReportsPage() {
 
   if (!currentJob) {
     return (
-      <div className="p-8">
-        <h1 className="text-3xl font-bold mb-4">Báo cáo & Caption</h1>
-        <Card>
-          <CardContent className="p-10 text-center text-muted-foreground">
-            Chưa có job. Mở "Tạo nội dung" và generate trước.
+      <PageContainer>
+        <PageHeader icon={<FileText className="size-5" />} title="Báo cáo & Caption" />
+        <Card className="border-dashed">
+          <CardContent className="flex flex-col items-center gap-3 p-10 text-center text-muted-foreground">
+            <span className="grid size-12 place-items-center rounded-full bg-accent text-primary">
+              <FileText className="size-5" />
+            </span>
+            Chưa có job. Mở &quot;Tạo nội dung&quot; và generate trước.
           </CardContent>
         </Card>
-      </div>
+      </PageContainer>
     );
   }
 
   const pack = packs.find((p) => p.packTemplateId === currentJob.packTemplateId);
   if (!pack) {
     return (
-      <div className="p-8">
-        <h1 className="text-3xl font-bold mb-4">Báo cáo & Caption</h1>
-        <Card>
+      <PageContainer>
+        <PageHeader icon={<FileText className="size-5" />} title="Báo cáo & Caption" />
+        <Card className="border-dashed">
           <CardContent className="p-10 text-center text-muted-foreground">
             Không tìm thấy pack template cho job hiện tại.
           </CardContent>
         </Card>
-      </div>
+      </PageContainer>
     );
   }
 
@@ -89,8 +93,12 @@ function ReportsPage() {
   const previewProofs = buildPartnerProofEntries(currentJob, pack, entities, tpls, false);
 
   return (
-    <div className="p-8 max-w-6xl space-y-6">
-      <h1 className="text-3xl font-bold">Báo cáo & Caption</h1>
+    <PageContainer className="space-y-6">
+      <PageHeader
+        icon={<FileText className="size-5" />}
+        title="Báo cáo & Caption"
+        description={`Job: ${currentJob.packTemplateName}`}
+      />
 
       <Tabs defaultValue="partners">
         <TabsList>
@@ -226,7 +234,7 @@ function ReportsPage() {
           </div>
         </TabsContent>
       </Tabs>
-    </div>
+    </PageContainer>
   );
 }
 

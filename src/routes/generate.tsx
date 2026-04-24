@@ -58,9 +58,8 @@ import {
   buildEntityAllocationOrder,
 } from "@/engines/selection/entityBindAllocator";
 import { buildEntityBindingTargets } from "@/engines/binding/cardRepeater";
-import {
-  createWorkingTemplate,
-} from "@/features/generate/templateState";
+import { PageContainer, PageHeader } from "@/components/PageHeader";
+import { createWorkingTemplate } from "@/features/generate/templateState";
 
 export const Route = createFileRoute("/generate")({
   component: GeneratePage,
@@ -543,13 +542,15 @@ function GeneratePage() {
   const editingEntityPage = entityPages.find((page) => page.entityId === editingEntityPageId);
   const editingEntityBaseTemplate = editingEntityPage?.baseTemplate ?? entityPreviewTemplate;
   const editingEntityTemplate =
-    editingEntityPage?.workingTemplate ??
-    editingEntityPage?.baseTemplate ??
-    entityPreviewTemplate;
+    editingEntityPage?.workingTemplate ?? editingEntityPage?.baseTemplate ?? entityPreviewTemplate;
 
   return (
-    <div className="p-8 max-w-[1600px]">
-      <h1 className="text-3xl font-bold mb-6">Tạo nội dung</h1>
+    <PageContainer className="max-w-[1600px]">
+      <PageHeader
+        icon={<Sparkles className="size-5" />}
+        title="Tạo nội dung"
+        description="Sinh nhanh theo entity hoặc dùng pack template nâng cao."
+      />
 
       <Tabs defaultValue="entity" className="mb-6">
         <TabsList>
@@ -1150,6 +1151,6 @@ function GeneratePage() {
           />
         </TabsContent>
       </Tabs>
-    </div>
+    </PageContainer>
   );
 }

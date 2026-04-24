@@ -1,7 +1,7 @@
 import { createFileRoute, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useEffect, useRef, useState } from "react";
-import { Copy, Pencil, Plus, Trash2 } from "lucide-react";
+import { Copy, Palette, Pencil, Plus, Trash2 } from "lucide-react";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { db } from "@/storage/db";
 import { createBlankDesignDocument } from "@/features/editor/designDocument";
 import { DesignRenderer } from "@/features/editor/DesignRenderer";
+import { PageContainer, PageHeader } from "@/components/PageHeader";
 
 export const Route = createFileRoute("/designs")({
   component: DesignsPage,
@@ -34,33 +35,41 @@ function DesignsPage() {
   };
 
   return (
-    <div className="p-8 max-w-7xl">
-      <div className="mb-6 flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-bold">Designs</h1>
-          <p className="mt-1 text-muted-foreground">
-            Workspace đa trang kiểu Canva cho poster, social post và design tĩnh.
-          </p>
-        </div>
-        <Button onClick={createNew}>
-          <Plus className="mr-2 size-4" />
-          Tạo design
-        </Button>
-      </div>
+    <PageContainer>
+      <PageHeader
+        icon={<Palette className="size-5" />}
+        title="Designs"
+        description="Workspace đa trang kiểu Canva cho poster, social post và design tĩnh."
+        actions={
+          <Button onClick={createNew}>
+            <Plus className="mr-2 size-4" />
+            Tạo design
+          </Button>
+        }
+      />
 
       {docs && docs.length === 0 ? (
-        <Card>
-          <CardContent className="p-10 text-center text-muted-foreground">
-            Chưa có design nào. Bấm "Tạo design" để bắt đầu.
+        <Card className="border-dashed">
+          <CardContent className="flex flex-col items-center gap-3 p-10 text-center text-muted-foreground">
+            <span className="grid size-12 place-items-center rounded-full bg-accent text-primary">
+              <Palette className="size-5" />
+            </span>
+            <p>Chưa có design nào. Bấm &quot;Tạo design&quot; để bắt đầu.</p>
+            <Button onClick={createNew} size="sm">
+              <Plus className="mr-2 size-4" /> Tạo design
+            </Button>
           </CardContent>
         </Card>
       ) : null}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         {docs?.map((doc) => (
-          <Card key={doc.designDocumentId} className="overflow-hidden">
+          <Card
+            key={doc.designDocumentId}
+            className="group overflow-hidden border-border/70 transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-md"
+          >
             <button
-              className="relative block w-full bg-muted/40 text-left transition hover:opacity-90"
+              className="relative block w-full bg-muted/40 text-left transition hover:opacity-95"
               style={{
                 aspectRatio: `${doc.pages[0]?.width ?? 1080} / ${doc.pages[0]?.height ?? 1350}`,
               }}
@@ -118,7 +127,7 @@ function DesignsPage() {
           </Card>
         ))}
       </div>
-    </div>
+    </PageContainer>
   );
 }
 
