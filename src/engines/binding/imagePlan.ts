@@ -11,6 +11,8 @@ export interface PlannedImage {
 
 export type SlotImagePlan = Map<string, PlannedImage>;
 
+type ImagePlanSlot = Slot & { originalSlotId?: string };
+
 function stableHash(input: string): number {
   let hash = 0;
   for (let index = 0; index < input.length; index += 1) {
@@ -38,14 +40,21 @@ function pickStableRandom(pool: Asset[], seed: string): Asset | undefined {
   return ordered[stableHash(seed) % ordered.length];
 }
 
+function findLockedAsset(pool: Asset[], src: string | undefined): Asset | undefined {
+  if (!src) return undefined;
+  return pool.find((asset) => asset.sourceValue === src || asset.assetId === src);
+}
+
 function buildImagePlanForSlots(
-  slots: Slot[],
-  resolveEntity: (slot: Slot) => Entity | undefined,
+  slots: ImagePlanSlot[],
+  resolveEntity: (slot: ImagePlanSlot) => Entity | undefined,
   assets: Asset[],
+  seedNamespace = "",
 ): SlotImagePlan {
   const plan: SlotImagePlan = new Map();
   const usedAssetIdsByEntity = new Map<string, Set<string>>();
   const usedGlobalAssetIds = new Set<string>();
+  const seedPrefix = seedNamespace ? `${seedNamespace}:` : "";
 
   const bindableSlots = slots
     .filter(isImageBindingSlot)
@@ -58,10 +67,22 @@ function buildImagePlanForSlots(
     let fallback = false;
 
     if (bindingPath === "asset.random_global") {
+      const locked = findLockedAsset(assets, slot.staticImage);
+      if (locked) {
+        usedGlobalAssetIds.add(locked.assetId);
+        plan.set(slot.slotId, {
+          src: locked.sourceValue,
+          assetId: locked.assetId,
+          entityId: locked.entityId,
+          fallback: false,
+        });
+        continue;
+      }
+
       const free = assets.filter((asset) => !usedGlobalAssetIds.has(asset.assetId));
       chosen = pickStableRandom(
         free.length > 0 ? free : assets,
-        `global:${slot.originalSlotId ?? slot.slotId}`,
+        `${seedPrefix}global:${slot.originalSlotId ?? slot.slotId}`,
       );
       fallback = free.length === 0 && assets.length > 1;
       if (chosen) {
@@ -86,12 +107,17 @@ function buildImagePlanForSlots(
     usedAssetIdsByEntity.set(entity.entityId, usedAssetIds);
 
     if (bindingPath === "asset.random") {
+      const locked = findLockedAsset(pool, slot.staticImage);
+      if (locked) {
+        chosen = locked;
+      } else {
       const free = pool.filter((asset) => !usedAssetIds.has(asset.assetId));
       chosen = pickStableRandom(
         free.length > 0 ? free : pool,
-        `${entity.entityId}:${slot.originalSlotId ?? slot.slotId}`,
+        `${seedPrefix}${entity.entityId}:${slot.originalSlotId ?? slot.slotId}`,
       );
       fallback = free.length === 0 && pool.length > 1;
+      }
     } else if (bindingPath === "asset.cover") {
       const cover = pool.find((asset) => asset.isCover) ?? pool.find((asset) => asset.role === "cover");
       if (cover && !usedAssetIds.has(cover.assetId)) {
@@ -141,13 +167,14 @@ export function buildSlotImagePlan(
   assets: Asset[],
 ): SlotImagePlan {
   if (!entity) return new Map();
-  return buildImagePlanForSlots(template.slots, () => entity, assets);
+  return buildImagePlanForSlots(template.slots, () => entity, assets, template.pageTemplateId);
 }
 
 export function buildExpandedSlotImagePlan(
-  slots: Slot[],
+  slots: ImagePlanSlot[],
   assets: Asset[],
-  resolveEntity: (slot: Slot) => Entity | undefined,
+  resolveEntity: (slot: ImagePlanSlot) => Entity | undefined,
+  seedNamespace = "",
 ): SlotImagePlan {
-  return buildImagePlanForSlots(slots, resolveEntity, assets);
+  return buildImagePlanForSlots(slots, resolveEntity, assets, seedNamespace);
 }

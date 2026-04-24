@@ -2,7 +2,7 @@
 
 import { toPng } from "html-to-image";
 import JSZip from "jszip";
-import { saveAs } from "file-saver";
+import saveAs from "file-saver";
 
 export async function nodeToPngBlob(node: HTMLElement, scale = 2): Promise<Blob> {
   await (document as any).fonts?.ready;

@@ -130,6 +130,7 @@ export function PackTabContent({
   const [activePageIdx, setActivePageIdx] = useState(0);
   const [selectedSlotIds, setSelectedSlotIds] = useState<string[]>([]);
   const [previewEntityId, setPreviewEntityId] = useState<string | undefined>(undefined);
+  const [editingPreviewOpen, setEditingPreviewOpen] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
   const [captionBusy, setCaptionBusy] = useState(false);
   const [rewriteBusy, setRewriteBusy] = useState(false);
@@ -255,9 +256,11 @@ export function PackTabContent({
     setActivePageIdx(0);
     setPreviewPageDrafts({});
     setEditingPageIndex(null);
+    setEditingPreviewOpen(false);
   }, [packId]);
   useEffect(() => {
     setSelectedSlotIds([]);
+    setEditingPreviewOpen(false);
   }, [activePageIdx]);
   useEffect(() => {
     if (!previewEntityId && filteredEntities[0]) setPreviewEntityId(filteredEntities[0].entityId);
@@ -910,6 +913,15 @@ export function PackTabContent({
               <Button
                 size="sm"
                 variant="outline"
+                onClick={() => setEditingPreviewOpen(true)}
+                disabled={!effectiveActive}
+                className="h-7 text-xs"
+              >
+                <Type className="size-3 mr-1" /> Sửa layout
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
                 onClick={() => runAiSuggest(false)}
                 disabled={!effectiveActive || aiBusy}
                 className="h-7 text-xs"
@@ -983,6 +995,7 @@ export function PackTabContent({
                       assets={assets}
                       entityPool={previewEntityPool}
                       slotItems={previewSlotItems}
+                      seedKey={`${effectiveActive.pageTemplateId}:${activePageIdx}`}
                     />
                   </div>
                 )}
@@ -1004,8 +1017,9 @@ export function PackTabContent({
                       </SelectContent>
                     </Select>
                     {activePage &&
-                      packOv[activePage.pageTemplateId] &&
-                      Object.keys(packOv[activePage.pageTemplateId]).length > 0 && (
+                      ((packOv[activePage.pageTemplateId] &&
+                        Object.keys(packOv[activePage.pageTemplateId]).length > 0) ||
+                        previewPageDrafts[activePage.pageTemplateId]) && (
                         <Button
                           size="sm"
                           variant="ghost"
@@ -1365,6 +1379,7 @@ export function PackTabContent({
                                 entityPool={buildOrderedEntityPool(page.entityId)}
                                 scale={previewScale}
                                 debug={debug}
+                                seedKey={`${page.pageTemplateId}:${page.pageIndex}`}
                               />
                             </div>
                           </div>
@@ -1437,10 +1452,36 @@ export function PackTabContent({
           }
           entityPool={buildOrderedEntityPool(editingJobPage.entityId)}
           slotItems={editingJobPage.items}
+          seedKey={`${editingJobPage.pageTemplateId}:${editingJobPage.pageIndex}`}
+          preserveBindings={false}
           onApply={(nextTemplate) => {
             updatePage(editingJobPage.pageIndex, (page) => ({
               ...page,
               workingTemplate: nextTemplate ?? undefined,
+            }));
+          }}
+        />
+      )}
+
+      {editingPreviewOpen && activePage && effectiveActive && (
+        <GeneratePageEditor
+          open={editingPreviewOpen}
+          onOpenChange={setEditingPreviewOpen}
+          title={`Sửa layout preview · ${activePage.name}`}
+          template={effectiveActive}
+          baseTemplate={activePage}
+          entities={entities}
+          assets={assets}
+          entity={previewEntity}
+          entityPool={previewEntityPool}
+          slotItems={previewSlotItems}
+          seedKey={`${effectiveActive.pageTemplateId}:${activePageIdx}`}
+          preserveBindings
+          onApply={(nextTemplate) => {
+            if (!nextTemplate) return;
+            setPreviewPageDrafts((prev) => ({
+              ...prev,
+              [activePage.pageTemplateId]: nextTemplate,
             }));
           }}
         />

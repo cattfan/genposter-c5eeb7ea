@@ -157,6 +157,7 @@ function GeneratePage() {
   const [entityPages, setEntityPages] = useState<EntityPreviewPage[]>([]);
   const [previewTemplateDraft, setPreviewTemplateDraft] = useState<PageTemplate | null>(null);
   const [editingEntityPageId, setEditingEntityPageId] = useState<string | null>(null);
+  const [editingPreviewOpen, setEditingPreviewOpen] = useState(false);
   const entityRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [selectedSlotIds, setSelectedSlotIds] = useState<string[]>([]);
   const [previewEntityId, setPreviewEntityId] = useState<string | undefined>(undefined);
@@ -270,6 +271,7 @@ function GeneratePage() {
     resetAll();
     setPreviewTemplateDraft(null);
     setEditingEntityPageId(null);
+    setEditingPreviewOpen(false);
   }, [tplId, resetAll]);
 
   // Auto chọn entity preview đầu tiên
@@ -863,6 +865,15 @@ function GeneratePage() {
                   <Button
                     size="sm"
                     variant="outline"
+                    onClick={() => setEditingPreviewOpen(true)}
+                    disabled={!entityPreviewTemplate}
+                    className="h-7 text-xs"
+                  >
+                    <Type className="size-3 mr-1" /> Sửa layout
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
                     onClick={runAiSuggest}
                     disabled={!entityPreviewTemplate || suggestBusy}
                     className="h-7 text-xs"
@@ -874,7 +885,7 @@ function GeneratePage() {
                     )}
                     AI gợi ý bind
                   </Button>
-                  {Object.keys(bindOverrides).length > 0 && (
+                  {(Object.keys(bindOverrides).length > 0 || previewTemplateDraft) && (
                     <Button
                       size="sm"
                       variant="ghost"
@@ -908,6 +919,7 @@ function GeneratePage() {
                       assets={assets ?? []}
                       entityPool={previewEntityPool}
                       slotItems={previewSlotItems}
+                      seedKey={`${entityPreviewTemplate.pageTemplateId}:preview`}
                     />
                   </div>
                 )}
@@ -1167,6 +1179,7 @@ function GeneratePage() {
                             slotItems={p.items}
                             scale={previewScale}
                             debug={debug}
+                            seedKey={`${pageTemplate.pageTemplateId}:${p.entityId}:${idx}`}
                           />
                         </div>
                       </div>
@@ -1250,8 +1263,30 @@ function GeneratePage() {
               entity={entities?.find((e) => e.entityId === editingEntityPage.entityId)}
               entityPool={buildOrderedEntityPool(editingEntityPage.entityId)}
               slotItems={editingEntityPage.items}
+              seedKey={`${editingEntityTemplate.pageTemplateId}:${editingEntityPage.entityId}`}
+              preserveBindings={false}
               onApply={(nextTemplate) => {
                 updateEntityPageTemplate(editingEntityPage.entityId, nextTemplate);
+              }}
+            />
+          )}
+
+          {editingPreviewOpen && selectedTpl && entityPreviewTemplate && (
+            <GeneratePageEditor
+              open={editingPreviewOpen}
+              onOpenChange={setEditingPreviewOpen}
+              title="Sửa layout preview"
+              template={entityPreviewTemplate}
+              baseTemplate={selectedTpl}
+              entities={entities ?? []}
+              assets={assets ?? []}
+              entity={selectedPreviewEntity}
+              entityPool={previewEntityPool}
+              slotItems={previewSlotItems}
+              seedKey={`${entityPreviewTemplate.pageTemplateId}:preview`}
+              preserveBindings
+              onApply={(nextTemplate) => {
+                if (nextTemplate) setPreviewTemplateDraft(nextTemplate);
               }}
             />
           )}

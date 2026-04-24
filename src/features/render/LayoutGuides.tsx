@@ -29,7 +29,7 @@ export function LayoutGuides({
         position: "absolute",
         inset: 0,
         pointerEvents: "none",
-        zIndex: 999,
+        zIndex: 10,
       }}
     >
       {showBleed ? (

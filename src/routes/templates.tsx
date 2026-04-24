@@ -53,6 +53,42 @@ export const Route = createFileRoute("/templates")({
   component: TemplatesPage,
 });
 
+function duplicatePageTemplate(template: PageTemplate): PageTemplate {
+  const copy = JSON.parse(JSON.stringify(template)) as PageTemplate;
+  const pageTemplateId = nanoid();
+  const slotIdMap = new Map(copy.slots.map((slot) => [slot.slotId, nanoid()]));
+  const sectionIdMap = new Map(copy.sections.map((section) => [section.sectionId, nanoid()]));
+
+  return {
+    ...copy,
+    pageTemplateId,
+    name: `${copy.name} (copy)`,
+    slots: copy.slots.map((slot) => ({
+      ...slot,
+      slotId: slotIdMap.get(slot.slotId) ?? nanoid(),
+      pageId: slot.pageId ? pageTemplateId : undefined,
+      sectionId: slot.sectionId ? (sectionIdMap.get(slot.sectionId) ?? slot.sectionId) : undefined,
+      sectionRefId: slot.sectionRefId
+        ? (sectionIdMap.get(slot.sectionRefId) ?? slot.sectionRefId)
+        : undefined,
+      groupId: slot.groupId ? (slotIdMap.get(slot.groupId) ?? slot.groupId) : undefined,
+    })),
+    sections: copy.sections.map((section) => ({
+      ...section,
+      sectionId: sectionIdMap.get(section.sectionId) ?? nanoid(),
+      imageSlotId: section.imageSlotId
+        ? (slotIdMap.get(section.imageSlotId) ?? section.imageSlotId)
+        : undefined,
+    })),
+    cardGroups: copy.cardGroups?.map((group) => ({
+      ...group,
+      groupId: slotIdMap.get(group.groupId) ?? group.groupId,
+    })),
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+
 function TemplatesPage() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -528,13 +564,7 @@ function TemplatesPage() {
                   size="sm"
                   variant="outline"
                   onClick={async () => {
-                    const dup: PageTemplate = {
-                      ...t,
-                      pageTemplateId: nanoid(),
-                      name: t.name + " (copy)",
-                      createdAt: Date.now(),
-                      updatedAt: Date.now(),
-                    };
+                    const dup = duplicatePageTemplate(t);
                     await db.pageTemplates.put(dup);
                     toast.success("Đã duplicate");
                   }}

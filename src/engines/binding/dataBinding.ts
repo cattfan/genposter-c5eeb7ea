@@ -247,10 +247,11 @@ export function resolveImageBinding(
   entity: Entity | undefined,
   assets: Asset[],
   fallback: string | undefined,
+  options?: { seed?: string },
 ): { src?: string; assetId?: string; entityId?: string } {
   if (!bindingPath) return { src: fallback };
   if (bindingPath === "asset.random_global") {
-    const randomAsset = pickStableRandomAsset(assets, entity?.entityId ?? "global");
+    const randomAsset = pickStableRandomAsset(assets, options?.seed ?? entity?.entityId ?? "global");
     return randomAsset
       ? {
           src: randomAsset.sourceValue,
@@ -262,7 +263,10 @@ export function resolveImageBinding(
   if (!entity) return { src: fallback };
   const pool = assets.filter((a) => a.entityId === entity.entityId);
   if (bindingPath === "asset.random") {
-    const randomAsset = pickStableRandomAsset(pool, entity.entityId);
+    const randomAsset = pickStableRandomAsset(
+      pool,
+      options?.seed ?? `${entity.entityId}:asset.random`,
+    );
     return randomAsset
       ? {
           src: randomAsset.sourceValue,

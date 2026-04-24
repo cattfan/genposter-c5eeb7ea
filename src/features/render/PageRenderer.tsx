@@ -42,6 +42,7 @@ interface Props {
   entity?: Entity;
   entityPool?: Entity[];
   slotItems?: RenderedItem[];
+  seedKey?: string;
 }
 
 export function PageRenderer({
@@ -55,6 +56,7 @@ export function PageRenderer({
   entity,
   entityPool,
   slotItems,
+  seedKey,
 }: Props) {
   const entityMap = useMemo(
     () => new Map(entities.map((item) => [item.entityId, item])),
@@ -117,9 +119,10 @@ export function PageRenderer({
     return entity;
   };
 
+  const imageSeedKey = seedKey ?? `${template.pageTemplateId}:${page?.pageIndex ?? "preview"}`;
   const imagePlan: SlotImagePlan = useMemo(
-    () => buildExpandedSlotImagePlan(expanded.slots, assets, resolveEntityForSlot),
-    [expanded.slots, assets, entityMap, slotEntityOverride, entity],
+    () => buildExpandedSlotImagePlan(expanded.slots, assets, resolveEntityForSlot, imageSeedKey),
+    [expanded.slots, assets, entityMap, slotEntityOverride, entity, imageSeedKey],
   );
 
   return (

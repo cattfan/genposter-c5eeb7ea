@@ -38,6 +38,7 @@ import {
   Type,
   Ungroup,
   Upload,
+  X,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -628,12 +629,14 @@ function layerTree(
 export function DesignWorkspace({
   initialDocument,
   mode,
+  contextTitle,
   onSave,
   onClose,
   allowMultiplePages = true,
 }: {
   initialDocument: DesignDocument;
   mode?: WorkspaceMode;
+  contextTitle?: string;
   onSave?: (document: DesignDocument) => void | Promise<void>;
   onClose?: () => void;
   allowMultiplePages?: boolean;
@@ -1514,7 +1517,7 @@ export function DesignWorkspace({
 
   return (
     <TooltipProvider delayDuration={250}>
-      <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
+      <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background text-foreground">
         <div className="flex flex-wrap items-center gap-2 border-b bg-card/40 px-3 py-2">
           <Input
             value={editor.document.name}
@@ -1522,6 +1525,15 @@ export function DesignWorkspace({
             className="h-9 max-w-[220px]"
             aria-label="Tên design"
           />
+
+          {contextTitle ? (
+            <div
+              className="max-w-[320px] truncate rounded-md bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground"
+              title={contextTitle}
+            >
+              {contextTitle}
+            </div>
+          ) : null}
 
           <ToolbarDivider />
 
@@ -1755,7 +1767,7 @@ export function DesignWorkspace({
             </Tooltip>
           </div>
 
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button size="sm" variant="outline">
@@ -1815,17 +1827,35 @@ export function DesignWorkspace({
                 Lưu
               </Button>
             ) : null}
+
+            {onClose ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="outline"
+                    className="size-9 rounded-full"
+                    onClick={onClose}
+                    aria-label="Đóng editor"
+                  >
+                    <X className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Đóng editor</TooltipContent>
+              </Tooltip>
+            ) : null}
           </div>
         </div>
 
         <div
-          className="grid min-h-0 flex-1"
+          className="grid min-h-0 min-w-0 flex-1 overflow-hidden"
           style={{
             gridTemplateColumns: `${leftOpen ? 320 : 0}px minmax(0,1fr) ${rightOpen ? 340 : 0}px`,
           }}
         >
           {leftOpen ? (
-            <aside className="min-h-0 overflow-hidden border-r">
+            <aside className="min-h-0 min-w-0 overflow-hidden border-r">
               <Tabs value={leftTab} onValueChange={setLeftTab} className="flex h-full flex-col">
                 <TabsList className="mx-4 mt-4 grid grid-cols-3">
                   <TabsTrigger value="insert">Insert</TabsTrigger>
@@ -2076,7 +2106,7 @@ export function DesignWorkspace({
 
           <div
             ref={stageWrapRef}
-            className="min-h-0 overflow-auto bg-muted/30 p-6"
+            className="min-h-0 min-w-0 overflow-auto bg-muted/30 p-6"
             onWheel={handleCanvasWheel}
           >
             <div
@@ -2184,7 +2214,7 @@ export function DesignWorkspace({
           </div>
 
           {rightOpen ? (
-            <aside className="min-h-0 overflow-hidden border-l">
+            <aside className="min-h-0 min-w-0 overflow-hidden border-l">
               <Tabs value={rightTab} onValueChange={setRightTab} className="flex h-full flex-col">
                 <TabsList className="mx-4 mt-4 grid grid-cols-3">
                   <TabsTrigger value="properties">Properties</TabsTrigger>
@@ -2456,6 +2486,73 @@ export function DesignWorkspace({
                                 }
                                 className="h-10 p-1"
                               />
+                            </div>
+                            <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
+                              <div className="flex items-center justify-between gap-2">
+                                <Label className="text-xs">Text outline</Label>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() =>
+                                    editor.updateElements(
+                                      [primary.elementId],
+                                      {
+                                        style: {
+                                          ...(primary.style ?? {}),
+                                          textStrokeWidth: 0,
+                                        },
+                                      } as Partial<DesignElement>,
+                                      { history: false },
+                                    )
+                                  }
+                                >
+                                  Off
+                                </Button>
+                              </div>
+                              <div className="grid grid-cols-[1fr_96px] items-end gap-2">
+                                <NumberField
+                                  label="Width"
+                                  value={Number(primary.style?.textStrokeWidth ?? 0)}
+                                  onChange={(value) =>
+                                    editor.updateElements(
+                                      [primary.elementId],
+                                      {
+                                        style: {
+                                          ...(primary.style ?? {}),
+                                          textStrokeWidth: Math.max(0, value),
+                                          textStrokeColor:
+                                            primary.style?.textStrokeColor ?? "#ffffff",
+                                        },
+                                      } as Partial<DesignElement>,
+                                      { history: false },
+                                    )
+                                  }
+                                />
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Color</Label>
+                                  <Input
+                                    type="color"
+                                    value={primary.style?.textStrokeColor ?? "#ffffff"}
+                                    onChange={(event) =>
+                                      editor.updateElements(
+                                        [primary.elementId],
+                                        {
+                                          style: {
+                                            ...(primary.style ?? {}),
+                                            textStrokeColor: event.target.value,
+                                            textStrokeWidth:
+                                              Number(primary.style?.textStrokeWidth ?? 0) > 0
+                                                ? primary.style?.textStrokeWidth
+                                                : 2,
+                                          },
+                                        } as Partial<DesignElement>,
+                                        { history: false },
+                                      )
+                                    }
+                                    className="h-10 p-1"
+                                  />
+                                </div>
+                              </div>
                             </div>
                           </div>
                         ) : null}

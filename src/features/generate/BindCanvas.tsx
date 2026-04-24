@@ -31,6 +31,7 @@ export function BindCanvas({
   assets,
   entityPool,
   slotItems,
+  seedKey,
 }: {
   template: PageTemplate;
   scale: number;
@@ -40,6 +41,7 @@ export function BindCanvas({
   assets: Asset[];
   entityPool?: Entity[];
   slotItems?: RenderedItem[];
+  seedKey?: string;
 }) {
   const { width, height, background, backgroundImage } = template.canvas;
   const resolvedBg = useResolvedImageSrc(backgroundImage);
@@ -91,8 +93,14 @@ export function BindCanvas({
   };
 
   const imagePlan: SlotImagePlan = useMemo(
-    () => buildExpandedSlotImagePlan(expanded.slots, assets, resolveEntityForSlot),
-    [expanded.slots, assets, entityLookup, slotEntityOverride, entity],
+    () =>
+      buildExpandedSlotImagePlan(
+        expanded.slots,
+        assets,
+        resolveEntityForSlot,
+        seedKey ?? template.pageTemplateId,
+      ),
+    [expanded.slots, assets, entityLookup, slotEntityOverride, entity, seedKey, template.pageTemplateId],
   );
 
   return (
