@@ -1,10 +1,11 @@
 import { createRoot } from "react-dom/client";
 import { PDFDocument } from "pdf-lib";
-import { saveAs } from "file-saver";
 import { toJpeg, toPng, toSvg } from "html-to-image";
 import type { DesignDocument, DesignElement, DesignPage } from "@/models";
 import { DesignRenderer } from "./DesignRenderer";
 import { downloadJSON } from "@/features/render/exportPng";
+import { saveBlob } from "@/features/render/saveBlob";
+import { getEmbeddedFontsCss } from "@/features/render/fontEmbedCss";
 
 function slugify(input: string): string {
   return input
@@ -81,13 +82,15 @@ export async function exportDesignPagePng(params: {
   if (!page) throw new Error("Document không có page");
   const { node, cleanup } = await renderPageNode(page, pageElements(params.document, page.pageId));
   try {
+    const fontEmbedCSS = await getEmbeddedFontsCss();
     const dataUrl = await toPng(node, {
       pixelRatio: params.scale ?? 2,
       cacheBust: true,
-      skipFonts: false,
+      skipFonts: true,
+      fontEmbedCSS,
     });
     const blob = await fetch(dataUrl).then((response) => response.blob());
-    saveAs(
+    saveBlob(
       blob,
       `${params.fileName ?? `${slugify(params.document.name)}-${slugify(page.name) || "page"}`}.png`,
     );
@@ -110,14 +113,16 @@ export async function exportDesignPageJpg(params: {
   if (!page) throw new Error("Document không có page");
   const { node, cleanup } = await renderPageNode(page, pageElements(params.document, page.pageId));
   try {
+    const fontEmbedCSS = await getEmbeddedFontsCss();
     const dataUrl = await toJpeg(node, {
       pixelRatio: params.scale ?? 2,
       quality: params.quality ?? 0.92,
       cacheBust: true,
-      skipFonts: false,
+      skipFonts: true,
+      fontEmbedCSS,
     });
     const blob = await fetch(dataUrl).then((response) => response.blob());
-    saveAs(
+    saveBlob(
       blob,
       `${params.fileName ?? `${slugify(params.document.name)}-${slugify(page.name) || "page"}`}.jpg`,
     );
@@ -138,12 +143,14 @@ export async function exportDesignPageSvg(params: {
   if (!page) throw new Error("Document không có page");
   const { node, cleanup } = await renderPageNode(page, pageElements(params.document, page.pageId));
   try {
+    const fontEmbedCSS = await getEmbeddedFontsCss();
     const dataUrl = await toSvg(node, {
       cacheBust: true,
-      skipFonts: false,
+      skipFonts: true,
+      fontEmbedCSS,
     });
     const svgText = await fetch(dataUrl).then((response) => response.text());
-    saveAs(
+    saveBlob(
       new Blob([svgText], { type: "image/svg+xml;charset=utf-8" }),
       `${params.fileName ?? `${slugify(params.document.name)}-${slugify(page.name) || "page"}`}.svg`,
     );
@@ -164,10 +171,12 @@ export async function exportDesignDocumentPdf(params: {
       pageElements(params.document, page.pageId),
     );
     try {
+      const fontEmbedCSS = await getEmbeddedFontsCss();
       const dataUrl = await toPng(node, {
         pixelRatio: params.scale ?? 2,
         cacheBust: true,
-        skipFonts: false,
+        skipFonts: true,
+        fontEmbedCSS,
       });
       const bytes = await fetch(dataUrl).then((response) => response.arrayBuffer());
       const image = await pdf.embedPng(bytes);
@@ -183,7 +192,7 @@ export async function exportDesignDocumentPdf(params: {
     }
   }
   const pdfBytes = await pdf.save();
-  saveAs(
+  saveBlob(
     new Blob([pdfBytes], { type: "application/pdf" }),
     `${(params.fileName ?? slugify(params.document.name)) || "design-document"}.pdf`,
   );
