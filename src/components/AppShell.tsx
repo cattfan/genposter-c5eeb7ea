@@ -269,7 +269,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   </div>
                 </div>
               </SheetHeader>
-              <div className="flex-1 overflow-hidden bg-sidebar text-sidebar-foreground">
+              <div className="flex flex-1 flex-col overflow-hidden bg-sidebar text-sidebar-foreground">
                 <NavLinks
                   collapsed={false}
                   pathname={location.pathname}
