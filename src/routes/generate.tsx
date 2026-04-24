@@ -59,7 +59,7 @@ import {
 } from "@/engines/selection/entityBindAllocator";
 import { buildEntityBindingTargets } from "@/engines/binding/cardRepeater";
 import { PageContainer, PageHeader } from "@/components/PageHeader";
-import { createWorkingTemplate } from "@/features/generate/templateState";
+import { clonePageTemplate, createWorkingTemplate } from "@/features/generate/templateState";
 
 export const Route = createFileRoute("/generate")({
   component: GeneratePage,
