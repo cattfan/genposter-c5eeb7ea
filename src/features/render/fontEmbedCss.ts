@@ -41,7 +41,10 @@ async function inlineFontUrls(css: string): Promise<string> {
 }
 
 export async function getEmbeddedFontsCss(): Promise<string> {
-  if (cachedCss) return cachedCss;
+  // Cache is `null` until resolved once. After resolution it holds either the
+  // inlined CSS or `""` (failure fallback). Treat both non-null values as
+  // cached so offline / firewalled sessions don't re-fetch on every export.
+  if (cachedCss !== null) return cachedCss;
   if (pendingPromise) return pendingPromise;
   pendingPromise = (async () => {
     try {
