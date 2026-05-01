@@ -82,6 +82,23 @@ export const FIELD_ALIASES: Record<string, string[]> = {
     "noi_bat",
     "noi bat",
   ],
+  imageRef: [
+    "link_drive",
+    "link drive",
+    "drive",
+    "google_drive",
+    "google drive",
+    "link_anh",
+    "link anh",
+    "link_hinh",
+    "link hinh",
+    "thu_muc_anh",
+    "thu muc anh",
+    "folder_anh",
+    "folder anh",
+    "ten_file_anh",
+    "ten file anh",
+  ],
   image: [
     "image",
     "img",
@@ -100,6 +117,8 @@ export const FIELD_ALIASES: Record<string, string[]> = {
   images: ["images", "anh_phu", "ảnh phụ", "gallery"],
   // Cột tuỳ ý cho lịch trình du lịch — sẽ chui vào entity.metadata
   day: ["day", "ngày", "ngay", "ngay_thu", "day_no"],
+  timeSlot: ["thoi_diem", "thoi diem", "time_slot", "time slot", "khung_thoi_gian"],
+  direction: ["huong_di", "huong di", "duong_di", "duong di", "route", "direction"],
   description: [
     "description",
     "desc",
@@ -113,8 +132,11 @@ export const FIELD_ALIASES: Record<string, string[]> = {
   ],
 };
 
+const IGNORE_FIELD_ALIASES = new Set(["", "empty", "stt", "no", "so_thu_tu", "index"]);
+
 export function normalizeKey(key: string): string {
   const k = normalizeAliasToken(key);
+  if (IGNORE_FIELD_ALIASES.has(k) || /^\d+$/.test(k)) return "__ignore__";
   for (const [field, aliases] of Object.entries(FIELD_ALIASES)) {
     if (aliases.some((a) => normalizeAliasToken(a) === k)) return field;
   }
@@ -160,7 +182,14 @@ export function parseNumber(v: unknown, fallback = 0): number {
  * Các "standard fields" mà sau khi map sẽ được dồn vào entity.metadata
  * (không phải core field của Entity).
  */
-export const METADATA_FIELDS = new Set(["day", "description", "signatureDish"]);
+export const METADATA_FIELDS = new Set([
+  "day",
+  "description",
+  "signatureDish",
+  "timeSlot",
+  "direction",
+  "imageRef",
+]);
 
 /**
  * Nhãn tiếng Việt hiển thị trong dropdown mapping cột.
@@ -182,9 +211,12 @@ export const FIELD_LABELS_VI: Record<string, string> = {
   campaignTags: "Tag chiến dịch",
   seoKeywords: "Từ khoá SEO",
   signatureDish: "Món / điểm nhấn",
+  imageRef: "Tên folder/link ảnh",
   image: "Ảnh chính",
   images: "Ảnh phụ (gallery)",
   day: "Ngày (lịch trình)",
+  timeSlot: "Thời điểm",
+  direction: "Hướng đi",
   description: "Mô tả / ghi chú",
 };
 

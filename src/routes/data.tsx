@@ -132,7 +132,7 @@ function optionsForMappingValue(value: string) {
 function inferFieldFromHeader(header: string): MappingFieldGuess | null {
   const text = normalizeForCheck(header).replace(/[_-]+/g, " ");
 
-  if (/^(stt|no|so thu tu|index|id)$/.test(text)) {
+  if (/^(__empty|empty|stt|no|so thu tu|index|id|\d+)$/.test(text)) {
     return { field: "__ignore__", confidence: 0.95, reason: "cột số thứ tự" };
   }
   if (/(ten|name|title|ten quan|ten dia diem|homestay|hotel)/.test(text)) {
@@ -150,6 +150,12 @@ function inferFieldFromHeader(header: string): MappingFieldGuess | null {
   if (/(gio|open|time|hour)/.test(text)) {
     return { field: "openingHours", confidence: 0.9, reason: "tên cột giống giờ mở cửa" };
   }
+  if (/(thoi diem|khung thoi gian|time slot)/.test(text)) {
+    return { field: "timeSlot", confidence: 0.9, reason: "tên cột giống thời điểm" };
+  }
+  if (/(huong di|duong di|route|direction)/.test(text)) {
+    return { field: "direction", confidence: 0.9, reason: "tên cột giống hướng đi" };
+  }
   if (/(gia|price|cost|khoang)/.test(text)) {
     return { field: "priceRange", confidence: 0.9, reason: "tên cột giống khoảng giá" };
   }
@@ -159,7 +165,10 @@ function inferFieldFromHeader(header: string): MappingFieldGuess | null {
   if (/(mon|dish|highlight|diem nhan|noi bat|dac san)/.test(text)) {
     return { field: "signatureDish", confidence: 0.86, reason: "tên cột giống món/điểm nhấn" };
   }
-  if (/(anh|image|photo|hinh|drive|url|link)/.test(text)) {
+  if (/(link drive|drive|thu muc anh|folder anh|ten file anh|link anh|link hinh)/.test(text)) {
+    return { field: "imageRef", confidence: 0.8, reason: "tên cột giống tên folder/link ảnh" };
+  }
+  if (/(anh|image|photo|hinh|url)/.test(text)) {
     return { field: "image", confidence: 0.78, reason: "tên cột giống link ảnh" };
   }
 
@@ -239,6 +248,53 @@ function collectSamples(rows: Record<string, unknown>[], header: string) {
     .slice(0, 40)
     .map((row) => cleanSample(row[header]))
     .filter(Boolean);
+}
+
+function autoMapImportSource(
+  headers: string[],
+  rows: Record<string, unknown>[],
+  previousMapping?: FieldMapping,
+): FieldMapping {
+  const next = autoMap(headers);
+
+  for (const header of headers) {
+    const headerGuess = inferFieldFromHeader(header);
+    const sampleGuess = inferFieldFromSamples(collectSamples(rows, header));
+
+    if (headerGuess?.field === "__ignore__") {
+      next[header] = "__ignore__";
+      continue;
+    }
+
+    const previousValue = previousMapping?.[header];
+    if (previousValue) {
+      next[header] = previousValue;
+      continue;
+    }
+
+    if (sampleGuess?.field === "image") {
+      next[header] = "image";
+      continue;
+    }
+
+    if (headerGuess && (!isKnownStandardField(next[header]) || next[header] === header)) {
+      next[header] = headerGuess.field;
+    }
+  }
+
+  return next;
+}
+
+function autoMapWorkbook(
+  workbook: ParsedWorkbookSheet[],
+  previousMappings: Record<string, FieldMapping>,
+) {
+  return Object.fromEntries(
+    workbook.map((sheet) => [
+      sheet.name,
+      autoMapImportSource(sheet.headers, sheet.rows, previousMappings[sheet.name]),
+    ]),
+  );
 }
 
 function validateMapping(
@@ -562,7 +618,7 @@ function DataPage() {
         ...validateMapping(
           sheet.headers,
           sheet.rows,
-          mappingsBySheet[sheet.name] ?? autoMap(sheet.headers),
+          mappingsBySheet[sheet.name] ?? autoMapImportSource(sheet.headers, sheet.rows),
         ),
       }));
     }
@@ -596,7 +652,7 @@ function DataPage() {
       sourceSheetName: nextSheet.name,
       workbookSheets: workbook,
     });
-    setMapping(nextMappings[nextSheet.name] ?? autoMap(nextSheet.headers));
+    setMapping(nextMappings[nextSheet.name] ?? autoMapImportSource(nextSheet.headers, nextSheet.rows));
   };
 
   const onFile = async (file: File) => {
@@ -605,9 +661,7 @@ function DataPage() {
       const nextParsed = await parseDataFile(file);
 
       if (nextParsed.workbookSheets?.length) {
-        const nextMappings = Object.fromEntries(
-          nextParsed.workbookSheets.map((sheet) => [sheet.name, autoMap(sheet.headers)]),
-        );
+        const nextMappings = autoMapWorkbook(nextParsed.workbookSheets, mappingsBySheet);
         setMappingsBySheet(nextMappings);
         activateWorkbookSheet(
           nextParsed.workbookSheets,
@@ -630,7 +684,7 @@ function DataPage() {
 
       setParsed(nextParsed);
       setMappingsBySheet({});
-      setMapping(autoMap(nextParsed.headers));
+      setMapping(autoMapImportSource(nextParsed.headers, nextParsed.rows, mapping));
       if (!sheetName) setSheetName(stripImportExtension(file.name));
       toast.success(`Đã đọc ${nextParsed.rows.length} dòng`);
     } catch (error) {
@@ -646,9 +700,7 @@ function DataPage() {
       const nextParsed = await fetchSheetWorkbook(sheetUrl);
 
       if (nextParsed.workbookSheets?.length) {
-        const nextMappings = Object.fromEntries(
-          nextParsed.workbookSheets.map((sheet) => [sheet.name, autoMap(sheet.headers)]),
-        );
+        const nextMappings = autoMapWorkbook(nextParsed.workbookSheets, mappingsBySheet);
         setMappingsBySheet(nextMappings);
         activateWorkbookSheet(
           nextParsed.workbookSheets,
@@ -673,7 +725,7 @@ function DataPage() {
 
       setParsed(nextParsed);
       setMappingsBySheet({});
-      setMapping(autoMap(nextParsed.headers));
+      setMapping(autoMapImportSource(nextParsed.headers, nextParsed.rows, mapping));
       if (!sheetName) setSheetName(guessSheetName(sheetUrl) || "Quan_an");
       toast.success(`Đã tải ${nextParsed.rows.length} dòng từ Google Sheets`);
     } catch (error) {
@@ -720,7 +772,7 @@ function DataPage() {
           : sheetName.trim() || source.name.trim() || "default";
       const sourceMapping =
         parsed.workbookSheets?.length && parsed.workbookSheets.length > 0
-          ? (mappingsBySheet[source.name] ?? autoMap(source.headers))
+          ? (mappingsBySheet[source.name] ?? autoMapImportSource(source.headers, source.rows))
           : mapping;
       const normalized = normalizeRows(source.rows, sourceMapping, finalSheet);
       return {
