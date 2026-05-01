@@ -1,4 +1,4 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
@@ -9,7 +9,6 @@ import {
   FileSpreadsheet,
   Image as ImageIcon,
   Link as LinkIcon,
-  Settings2,
   Store,
   Upload,
   XCircle,
@@ -824,13 +823,6 @@ function DataPage() {
         icon={<Database />}
         title="Dữ liệu"
         description="Import, ghép ảnh và kiểm tra dữ liệu local dùng cho generate."
-        actions={
-          <Button variant="outline" asChild>
-            <Link to="/settings">
-              <Settings2 /> Cài đặt dữ liệu
-            </Link>
-          </Button>
-        }
       />
 
       <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
