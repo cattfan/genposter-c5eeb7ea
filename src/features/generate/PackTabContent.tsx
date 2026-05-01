@@ -1266,13 +1266,6 @@ export function PackTabContent({
           ) : (
             <div className="flex flex-col gap-4">
               {matchingPresets.map((preset) => {
-                const { pack, pages } = getPresetPackPages(preset);
-                const pageCount = preset.pageTemplateIds?.length ?? pages.length;
-                const bindCount = Object.values(preset.bindOverrides ?? {}).reduce(
-                  (sum, page) => sum + Object.keys(page ?? {}).length,
-                  0,
-                );
-
                 return (
                   <div key={preset.presetId} className="rounded-xl border bg-card shadow-sm">
                     <div className="flex items-center justify-between gap-3 border-b p-4">
@@ -1282,10 +1275,6 @@ export function PackTabContent({
                         onClick={() => openPresetWorkspace(preset)}
                       >
                         <div className="truncate text-lg font-semibold">{preset.name}</div>
-                        <div className="mt-1 truncate text-sm text-muted-foreground">
-                          {preset.packTemplateNameSnapshot ?? pack?.name ?? "Bộ mẫu"} · {pageCount}{" "}
-                          trang · {bindCount} liên kết
-                        </div>
                       </button>
                       <div className="flex shrink-0 items-center gap-1">
                         <Button
