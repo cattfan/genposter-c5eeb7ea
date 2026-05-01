@@ -59,6 +59,7 @@ import type { Asset, Entity } from "@/models";
 import { db } from "@/storage/db";
 import { getBlobKeyFromSrc } from "@/storage/imageSrc";
 import { setLastActiveSheet } from "@/storage/lastSheet";
+import { getSettings } from "@/storage/settings";
 
 export const Route = createFileRoute("/data")({
   component: DataPage,
@@ -100,11 +101,34 @@ interface MappingCheckResult {
   blockingIssues: string[];
 }
 
+type DriveLinkIssueType = "private" | "not_found" | "not_image" | "too_large" | "unknown";
+type DriveLinkIssueFilter = "all" | DriveLinkIssueType;
+
+interface DriveLinkCandidate {
+  sheetName: string;
+  rowNumber: number;
+  entityName: string;
+  reference: string;
+}
+
+interface DriveLinkIssue extends DriveLinkCandidate {
+  type: DriveLinkIssueType;
+  error: string;
+}
+
 const STANDARD_FIELD_OPTIONS_LABELED = standardFieldOptionsLabeled();
 const STANDARD_FIELD_LABELS = new Map(
   STANDARD_FIELD_OPTIONS_LABELED.map((option) => [option.value, option.label]),
 );
 const NON_OVERWRITING_FIELDS = new Set(["images", "campaignTags", "seoKeywords"]);
+const DRIVE_LINK_ISSUE_FILTERS: DriveLinkIssueFilter[] = [
+  "private",
+  "not_found",
+  "not_image",
+  "too_large",
+  "unknown",
+  "all",
+];
 
 function normalizeForCheck(value: unknown) {
   return String(value ?? "")
@@ -133,6 +157,68 @@ function optionsForMappingValue(value: string) {
     return [{ value, label: `Metadata: ${value}` }, ...STANDARD_FIELD_OPTIONS_LABELED];
   }
   return STANDARD_FIELD_OPTIONS_LABELED;
+}
+
+function splitReferenceParts(value: unknown): string[] {
+  if (value == null || value === "") return [];
+  if (Array.isArray(value)) return value.flatMap(splitReferenceParts);
+  if (typeof value === "object") return Object.values(value).flatMap(splitReferenceParts);
+  return String(value)
+    .split(/[,;|]/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function classifyDriveIssue(error: string, errorCode?: string): DriveLinkIssueType {
+  if (
+    errorCode === "private" ||
+    /private|quyền|truy cập|access|permission|đăng nhập|sign in/i.test(error)
+  ) {
+    return "private";
+  }
+  if (errorCode === "not_found" || /không tìm thấy|not found|404/i.test(error)) return "not_found";
+  if (errorCode === "not_image" || /không phải file ảnh/i.test(error)) return "not_image";
+  if (errorCode === "too_large" || /25MB|lớn hơn/i.test(error)) return "too_large";
+  return "unknown";
+}
+
+function labelDriveIssueFilter(filter: DriveLinkIssueFilter) {
+  switch (filter) {
+    case "private":
+      return "Bị private";
+    case "not_found":
+      return "Không tìm thấy";
+    case "not_image":
+      return "Không phải ảnh";
+    case "too_large":
+      return "Quá nặng";
+    case "unknown":
+      return "Lỗi khác";
+    default:
+      return "Tất cả";
+  }
+}
+
+function buildDriveIssueCounts(issues: DriveLinkIssue[]) {
+  const counts: Record<DriveLinkIssueFilter, number> = {
+    all: issues.length,
+    private: 0,
+    not_found: 0,
+    not_image: 0,
+    too_large: 0,
+    unknown: 0,
+  };
+  for (const issue of issues) counts[issue.type] += 1;
+  return counts;
+}
+
+function displayRowNumberFromIndex(rowIndex: number) {
+  return rowIndex + 2;
+}
+
+function displayRowNumberFromSourceRowId(sourceRowId: unknown) {
+  const rowIndex = Number(sourceRowId ?? 0);
+  return Number.isFinite(rowIndex) ? displayRowNumberFromIndex(rowIndex) : 0;
 }
 
 function inferFieldFromHeader(header: string): MappingFieldGuess | null {
@@ -318,6 +404,63 @@ function defaultIncludedSheets(
       sheetHasUsableNameMapping(sheet, mappings[sheet.name] ?? {}) || workbook.length === 1,
     ]),
   );
+}
+
+function collectDriveLinkCandidates(
+  sources: ParsedWorkbookSheet[],
+  mappings: Record<string, FieldMapping>,
+  rootFolderUrl?: string,
+): DriveLinkCandidate[] {
+  const candidates: DriveLinkCandidate[] = [];
+  const seen = new Set<string>();
+
+  const pushCandidate = (
+    sheetName: string,
+    rowNumber: number,
+    entityName: string,
+    reference: string,
+  ) => {
+    const cleanReference = reference.trim();
+    if (!cleanReference) return;
+    if (!looksLikeDriveReference(cleanReference) && !rootFolderUrl) return;
+    const key = `${sheetName}:${rowNumber}:${entityName}:${cleanReference}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    candidates.push({ sheetName, rowNumber, entityName, reference: cleanReference });
+  };
+
+  for (const source of sources) {
+    const sourceMapping = mappings[source.name] ?? autoMapImportSource(source.headers, source.rows);
+    const normalized = normalizeRows(source.rows, sourceMapping, source.name);
+    const entityById = new Map(normalized.entities.map((entity) => [entity.entityId, entity]));
+
+    for (const entity of normalized.entities) {
+      const rowNumber = displayRowNumberFromSourceRowId(entity.sourceRowId);
+      for (const reference of getEntityImageReferences(entity)) {
+        pushCandidate(source.name, rowNumber, entity.name, reference);
+      }
+    }
+
+    for (const asset of normalized.assets) {
+      const entity = entityById.get(asset.entityId);
+      if (!entity || !looksLikeDriveReference(asset.sourceValue)) continue;
+      const rowNumber = displayRowNumberFromSourceRowId(entity.sourceRowId);
+      pushCandidate(source.name, rowNumber, entity.name, asset.sourceValue);
+    }
+
+    source.rows.forEach((row, rowIndex) => {
+      for (const value of Object.values(row)) {
+        for (const reference of splitReferenceParts(value)) {
+          if (looksLikeDriveReference(reference)) {
+            const rowNumber = displayRowNumberFromIndex(rowIndex);
+            pushCandidate(source.name, rowNumber, `Dòng ${rowNumber}`, reference);
+          }
+        }
+      }
+    });
+  }
+
+  return candidates;
 }
 
 function validateMapping(
@@ -599,6 +742,11 @@ function DataPage() {
   const [sheetName, setSheetName] = useState("");
   const [busy, setBusy] = useState(false);
   const [activeTab, setActiveTab] = useState("import");
+  const [driveCheckBusy, setDriveCheckBusy] = useState(false);
+  const [driveCheckDone, setDriveCheckDone] = useState(0);
+  const [driveCheckTotal, setDriveCheckTotal] = useState(0);
+  const [driveLinkIssues, setDriveLinkIssues] = useState<DriveLinkIssue[]>([]);
+  const [driveIssueFilter, setDriveIssueFilter] = useState<DriveLinkIssueFilter>("private");
 
   const workbookSheets = parsed?.workbookSheets ?? [];
   const isMultiSheetWorkbook = workbookSheets.length > 1;
@@ -644,6 +792,14 @@ function DataPage() {
         (entity) => !assetEntityIds.has(entity.entityId) && getEntityImageReferences(entity).length > 0,
       ).length,
     [assetEntityIds, entities],
+  );
+  const driveIssueCounts = useMemo(() => buildDriveIssueCounts(driveLinkIssues), [driveLinkIssues]);
+  const filteredDriveLinkIssues = useMemo(
+    () =>
+      driveIssueFilter === "all"
+        ? driveLinkIssues
+        : driveLinkIssues.filter((issue) => issue.type === driveIssueFilter),
+    [driveIssueFilter, driveLinkIssues],
   );
   const mappingChecks = useMemo(() => {
     if (!parsed) return [];
@@ -700,9 +856,145 @@ function DataPage() {
     setMapping(nextMappings[nextSheet.name] ?? autoMapImportSource(nextSheet.headers, nextSheet.rows));
   };
 
+  const resetDriveLinkCheck = () => {
+    setDriveCheckBusy(false);
+    setDriveCheckDone(0);
+    setDriveCheckTotal(0);
+    setDriveLinkIssues([]);
+    setDriveIssueFilter("private");
+  };
+
+  const checkDriveLinksFromSheet = async (
+    nextParsed: ParsedTable,
+    nextMappings: Record<string, FieldMapping>,
+  ) => {
+    const sources = nextParsed.workbookSheets?.length
+      ? nextParsed.workbookSheets
+      : [
+          {
+            name: sheetName.trim() || nextParsed.sourceSheetName || "default",
+            headers: nextParsed.headers,
+            rows: nextParsed.rows,
+          },
+        ];
+    const settings = await getSettings();
+    const rootFolderUrl = settings.driveRootFolderUrl?.trim();
+    const candidates = collectDriveLinkCandidates(sources, nextMappings, rootFolderUrl);
+
+    setDriveCheckDone(0);
+    setDriveCheckTotal(candidates.length);
+    setDriveLinkIssues([]);
+    if (candidates.length === 0) {
+      toast.info("Không có link Drive trong sheet để kiểm tra quyền.");
+      return;
+    }
+
+    setDriveCheckBusy(true);
+    const toastId = "sheet-drive-link-check";
+    toast.loading(`Đang kiểm tra quyền ${candidates.length} link Drive...`, {
+      id: toastId,
+      duration: Infinity,
+    });
+
+    const issues: DriveLinkIssue[] = [];
+
+    try {
+      const { checkDriveReferenceServer } = await import("@/server/driveFetch");
+      const resultCache = new Map<
+        string,
+        ReturnType<typeof checkDriveReferenceServer>
+      >();
+      let nextIndex = 0;
+      let completed = 0;
+
+      const checkCandidate = async (candidate: DriveLinkCandidate) => {
+        const cacheKey = `${candidate.sheetName}\u0000${candidate.reference}`;
+        let resultPromise = resultCache.get(cacheKey);
+        if (!resultPromise) {
+          resultPromise = checkDriveReferenceServer({
+            data: {
+              reference: candidate.reference,
+              rootFolderUrl: rootFolderUrl || undefined,
+              searchContext: candidate.sheetName,
+              maxFiles: 1,
+            },
+          });
+          resultCache.set(cacheKey, resultPromise);
+        }
+
+        const result = await resultPromise;
+        if (!result.ok) {
+          const errorCode = "errorCode" in result ? result.errorCode : undefined;
+          issues.push({
+            ...candidate,
+            error: result.error,
+            type: classifyDriveIssue(result.error, errorCode),
+          });
+        }
+
+        completed += 1;
+        setDriveCheckDone(completed);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      };
+
+      const concurrency = Math.min(8, candidates.length);
+      await Promise.all(
+        Array.from({ length: concurrency }, async () => {
+          while (nextIndex < candidates.length) {
+            const candidate = candidates[nextIndex];
+            nextIndex += 1;
+            await checkCandidate(candidate);
+          }
+        }),
+      );
+
+      setDriveLinkIssues(issues);
+      setDriveIssueFilter(issues.some((issue) => issue.type === "private") ? "private" : "all");
+
+      const privateCount = issues.filter((issue) => issue.type === "private").length;
+      if (issues.length === 0) {
+        toast.success(`Đã kiểm tra ${candidates.length} link Drive, không thấy link private.`, {
+          id: toastId,
+          duration: 6000,
+        });
+      } else {
+        toast.warning(
+          `Đã kiểm tra ${candidates.length} link Drive: ${issues.length} lỗi${
+            privateCount ? `, ${privateCount} bị private` : ""
+          }.`,
+          { id: toastId, duration: 8000 },
+        );
+      }
+    } catch (error) {
+      toast.error("Lỗi kiểm tra quyền Drive: " + (error instanceof Error ? error.message : String(error)), {
+        id: toastId,
+        duration: 8000,
+      });
+    } finally {
+      setDriveCheckBusy(false);
+    }
+  };
+
+  const checkCurrentDriveLinks = async () => {
+    if (!parsed) return;
+
+    const singleSheetName = parsed.sourceSheetName ?? sheetName.trim();
+    const currentMappings = parsed.workbookSheets?.length
+      ? {
+          ...mappingsBySheet,
+          ...(parsed.sourceSheetName ? { [parsed.sourceSheetName]: mapping } : {}),
+        }
+      : {
+          [singleSheetName || "default"]: mapping,
+        };
+
+    await checkDriveLinksFromSheet(parsed, currentMappings);
+  };
+
   const onFile = async (file: File) => {
     try {
       setBusy(true);
+      resetDriveLinkCheck();
       const nextParsed = await parseDataFile(file);
 
       if (nextParsed.workbookSheets?.length) {
@@ -744,6 +1036,7 @@ function DataPage() {
   const onSheet = async () => {
     try {
       setBusy(true);
+      resetDriveLinkCheck();
       const nextParsed = await fetchSheetWorkbook(sheetUrl);
 
       if (nextParsed.workbookSheets?.length) {
@@ -771,10 +1064,11 @@ function DataPage() {
         return;
       }
 
+      const nextMapping = autoMapImportSource(nextParsed.headers, nextParsed.rows, mapping);
       setParsed(nextParsed);
       setMappingsBySheet({});
       setIncludedSheets({});
-      setMapping(autoMapImportSource(nextParsed.headers, nextParsed.rows, mapping));
+      setMapping(nextMapping);
       if (!sheetName) setSheetName(guessSheetName(sheetUrl) || "Quan_an");
       toast.success(`Đã tải ${nextParsed.rows.length} dòng từ Google Sheets`);
     } catch (error) {
@@ -1045,6 +1339,111 @@ function DataPage() {
                     <pre className="max-h-72 overflow-auto rounded-lg border bg-muted/20 p-3 text-xs">
                       {JSON.stringify(parsed.rows.slice(0, 5), null, 2)}
                     </pre>
+
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/20 p-3 text-sm">
+                      <div>
+                        <div className="font-medium">Kiểm tra link Drive</div>
+                        <div className="text-xs text-muted-foreground">
+                          Tùy chọn. Dùng khi cần lọc link private hoặc link ảnh lỗi trước khi import.
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={driveCheckBusy}
+                        onClick={checkCurrentDriveLinks}
+                      >
+                        <LinkIcon />
+                        {driveCheckBusy ? "Đang kiểm tra" : "Kiểm tra link"}
+                      </Button>
+                    </div>
+
+                    {(driveCheckBusy || driveCheckTotal > 0 || driveLinkIssues.length > 0) && (
+                      <div className="rounded-lg border bg-muted/20 p-3 text-sm">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <div className="font-medium">Kiểm tra quyền ảnh Drive</div>
+                            <div className="text-xs text-muted-foreground">
+                              {driveCheckBusy
+                                ? `Đang kiểm tra ${driveCheckDone}/${driveCheckTotal} link`
+                                : driveLinkIssues.length
+                                  ? `${driveLinkIssues.length}/${driveCheckTotal} link có lỗi`
+                                  : driveCheckTotal > 0
+                                    ? `Đã kiểm tra ${driveCheckTotal} link, không thấy link private`
+                                    : "Chưa có link Drive để kiểm tra"}
+                            </div>
+                          </div>
+                          {driveLinkIssues.length > 0 && (
+                            <Badge variant={driveIssueCounts.private ? "destructive" : "outline"}>
+                              {driveIssueCounts.private} private
+                            </Badge>
+                          )}
+                        </div>
+
+                        {driveCheckBusy && driveCheckTotal > 0 && (
+                          <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
+                            <div
+                              className="h-full rounded-full bg-primary"
+                              style={{
+                                width: `${Math.round((driveCheckDone / driveCheckTotal) * 100)}%`,
+                              }}
+                            />
+                          </div>
+                        )}
+
+                        {driveLinkIssues.length > 0 && (
+                          <div className="mt-3 flex flex-col gap-3">
+                            <div className="flex flex-wrap gap-2">
+                              {DRIVE_LINK_ISSUE_FILTERS.map((filter) => {
+                                const count = driveIssueCounts[filter];
+                                if (count === 0 && filter !== "all") return null;
+                                return (
+                                  <Button
+                                    key={filter}
+                                    type="button"
+                                    size="sm"
+                                    variant={driveIssueFilter === filter ? "default" : "outline"}
+                                    onClick={() => setDriveIssueFilter(filter)}
+                                  >
+                                    {labelDriveIssueFilter(filter)} ({count})
+                                  </Button>
+                                );
+                              })}
+                            </div>
+
+                            <div className="grid max-h-60 gap-2 overflow-y-auto md:grid-cols-2">
+                              {filteredDriveLinkIssues.map((issue) => (
+                                <div
+                                  key={`${issue.sheetName}:${issue.rowNumber}:${issue.reference}`}
+                                  className="min-w-0 rounded-md border bg-background p-2"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <span
+                                      className={`size-2 shrink-0 rounded-full ${
+                                        issue.type === "private" ? "bg-destructive" : "bg-amber-500"
+                                      }`}
+                                    />
+                                    <div className="min-w-0 truncate font-medium">
+                                      {issue.entityName}
+                                    </div>
+                                  </div>
+                                  <div className="mt-1 text-xs text-muted-foreground">
+                                    {issue.sheetName}, dòng {issue.rowNumber}
+                                  </div>
+                                  <div className="mt-1 truncate text-xs text-muted-foreground">
+                                    {issue.reference}
+                                  </div>
+                                  <div className="mt-1 text-xs text-muted-foreground">
+                                    {issue.error}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <Button
                       onClick={importNow}

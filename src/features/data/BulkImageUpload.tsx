@@ -44,11 +44,30 @@ interface PendingFile {
   role: Asset["role"];
 }
 
+type DriveFailureType = "private" | "not_found" | "not_image" | "too_large" | "unknown";
+type DriveFailureFilter = "all" | DriveFailureType;
+
+interface DriveFailure {
+  entityId: string;
+  entityName: string;
+  reference: string;
+  error: string;
+  type: DriveFailureType;
+}
+
 const PREVIEW_PAGE_SIZE = 80;
 const PREVIEW_INCREMENT = 80;
 const DEFAULT_FUZZY_THRESHOLD = 0.78;
 const EMPTY_ENTITIES: Entity[] = [];
 const EMPTY_ASSETS: Asset[] = [];
+const DRIVE_FAILURE_FILTERS: DriveFailureFilter[] = [
+  "private",
+  "not_found",
+  "not_image",
+  "too_large",
+  "unknown",
+  "all",
+];
 
 function pendingKey(item: PendingFile): string {
   const path = item.relativePath || item.file.name;
@@ -71,6 +90,36 @@ function base64ToBlob(base64: string, mimeType: string) {
     bytes[index] = binary.charCodeAt(index);
   }
   return new Blob([bytes], { type: mimeType });
+}
+
+function classifyDriveFailure(error: string, errorCode?: string): DriveFailureType {
+  if (
+    errorCode === "private" ||
+    /private|quyền|truy cập|access|permission|đăng nhập|sign in/i.test(error)
+  ) {
+    return "private";
+  }
+  if (errorCode === "not_found" || /không tìm thấy|not found|404/i.test(error)) return "not_found";
+  if (errorCode === "not_image" || /không phải file ảnh/i.test(error)) return "not_image";
+  if (errorCode === "too_large" || /25MB|lớn hơn/i.test(error)) return "too_large";
+  return "unknown";
+}
+
+function labelDriveFailureFilter(filter: DriveFailureFilter) {
+  switch (filter) {
+    case "private":
+      return "Bị private";
+    case "not_found":
+      return "Không tìm thấy";
+    case "not_image":
+      return "Không phải ảnh";
+    case "too_large":
+      return "Quá nặng";
+    case "unknown":
+      return "Lỗi khác";
+    default:
+      return "Tất cả";
+  }
 }
 
 function DriveImportToast({
@@ -175,6 +224,8 @@ export function BulkImageUpload() {
   const [matching, setMatching] = useState(false);
   const [driveBusy, setDriveBusy] = useState(false);
   const [driveRootUrl, setDriveRootUrl] = useState("");
+  const [driveFailures, setDriveFailures] = useState<DriveFailure[]>([]);
+  const [driveFailureFilter, setDriveFailureFilter] = useState<DriveFailureFilter>("private");
   const [visibleCount, setVisibleCount] = useState(PREVIEW_PAGE_SIZE);
   const [, setPreviewVersion] = useState(0);
   const previewUrlsRef = useRef(new Map<string, string>());
@@ -380,6 +431,25 @@ export function BulkImageUpload() {
       ),
     [assetEntityIds, entities],
   );
+  const driveFailureCounts = useMemo(() => {
+    const counts: Record<DriveFailureFilter, number> = {
+      all: driveFailures.length,
+      private: 0,
+      not_found: 0,
+      not_image: 0,
+      too_large: 0,
+      unknown: 0,
+    };
+    for (const failure of driveFailures) counts[failure.type] += 1;
+    return counts;
+  }, [driveFailures]);
+  const filteredDriveFailures = useMemo(
+    () =>
+      driveFailureFilter === "all"
+        ? driveFailures
+        : driveFailures.filter((failure) => failure.type === driveFailureFilter),
+    [driveFailureFilter, driveFailures],
+  );
 
   const saveDriveRoot = async () => {
     const settings = await getSettings();
@@ -407,11 +477,12 @@ export function BulkImageUpload() {
     }
 
     setDriveBusy(true);
+    setDriveFailures([]);
     const toastId = "drive-image-import";
     const total = driveImportCandidates.length;
     let done = 0;
     let imported = 0;
-    const failed: string[] = [];
+    const failed: DriveFailure[] = [];
     const coverCount: Record<string, number> = {};
 
     for (const asset of allAssets) {
@@ -439,11 +510,23 @@ export function BulkImageUpload() {
         const entityAssets: Asset[] = [];
         for (const reference of getEntityImageReferences(entity)) {
           const result = await fetchDriveImagesServer({
-            data: { reference, rootFolderUrl: rootUrl || undefined, maxFiles: 20 },
+            data: {
+              reference,
+              rootFolderUrl: rootUrl || undefined,
+              searchContext: entity.sheetName,
+              maxFiles: 20,
+            },
           });
 
           if (!result.ok) {
-            failed.push(`${entity.name}: ${result.error}`);
+            const errorCode = "errorCode" in result ? result.errorCode : undefined;
+            failed.push({
+              entityId: entity.entityId,
+              entityName: entity.name,
+              reference,
+              error: result.error,
+              type: classifyDriveFailure(result.error, errorCode),
+            });
             continue;
           }
 
@@ -480,15 +563,25 @@ export function BulkImageUpload() {
         await yieldToBrowser();
       }
 
+      setDriveFailures(failed);
+      if (failed.some((item) => item.type === "private")) {
+        setDriveFailureFilter("private");
+      } else if (failed.length) {
+        setDriveFailureFilter("all");
+      }
+
       if (imported > 0) {
+        const privateCount = failed.filter((item) => item.type === "private").length;
         toast.success(
           `Đã tải ${imported} ảnh Drive cho ${total - failed.length}/${total} quán${
-            failed.length ? `. Lỗi ${failed.length} quán.` : "."
+            failed.length
+              ? `. Lỗi ${failed.length} quán${privateCount ? `, bị private ${privateCount}` : ""}.`
+              : "."
           }`,
           { id: toastId, duration: 8000 },
         );
       } else {
-        toast.error(failed[0] ?? "Không tải được ảnh Drive.", { id: toastId, duration: 8000 });
+        toast.error(failed[0]?.error ?? "Không tải được ảnh Drive.", { id: toastId, duration: 8000 });
       }
     } catch (error) {
       toast.error("Lỗi tải Drive: " + (error instanceof Error ? error.message : String(error)), {
@@ -624,9 +717,85 @@ export function BulkImageUpload() {
                 <div className="text-sm text-muted-foreground">Ảnh đã gán quán</div>
               </div>
             ) : null}
+            {driveFailures.length > 0 ? (
+              <div className="rounded-lg border p-3">
+                <div className="flex items-center gap-2">
+                  <div className="text-2xl font-semibold">{driveFailureCounts.private}</div>
+                  <AlertTriangle className="text-destructive" />
+                </div>
+                <div className="text-sm text-muted-foreground">Link Drive bị private</div>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       </div>
+
+      {driveFailures.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <CardTitle>Lọc lỗi tải Drive</CardTitle>
+                <CardDescription>
+                  Các quán có link Drive không tải được. Mục “Bị private” là file/folder chưa public hoặc cần quyền truy cập.
+                </CardDescription>
+              </div>
+              <Badge variant={driveFailureCounts.private ? "destructive" : "outline"}>
+                {driveFailureCounts.private} private
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <div className="flex flex-wrap gap-2">
+              {DRIVE_FAILURE_FILTERS.map((filter) => {
+                const count = driveFailureCounts[filter];
+                if (count === 0 && filter !== "all") return null;
+                return (
+                  <Button
+                    key={filter}
+                    type="button"
+                    size="sm"
+                    variant={driveFailureFilter === filter ? "default" : "outline"}
+                    onClick={() => setDriveFailureFilter(filter)}
+                  >
+                    {labelDriveFailureFilter(filter)} ({count})
+                  </Button>
+                );
+              })}
+            </div>
+
+            {filteredDriveFailures.length === 0 ? (
+              <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                Không có lỗi trong nhóm này.
+              </div>
+            ) : (
+              <div className="grid max-h-72 gap-2 overflow-y-auto text-sm md:grid-cols-2 xl:grid-cols-3">
+                {filteredDriveFailures.map((failure) => (
+                  <div
+                    key={`${failure.entityId}:${failure.reference}`}
+                    className="min-w-0 rounded-lg border p-3"
+                  >
+                    <div className="flex items-start gap-2">
+                      <span
+                        className={`mt-1 size-2 shrink-0 rounded-full ${
+                          failure.type === "private" ? "bg-destructive" : "bg-amber-500"
+                        }`}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-medium">{failure.entityName}</div>
+                        <div className="mt-1 truncate text-xs text-muted-foreground">
+                          {failure.reference}
+                        </div>
+                        <div className="mt-2 text-xs text-muted-foreground">{failure.error}</div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {pending.length > 0 && (
         <Card>
