@@ -45,7 +45,14 @@ export function PackPagePreview({ tpl }: { tpl: PageTemplate }) {
             pointerEvents: "none",
           }}
         >
-          <PageRenderer template={tpl} entities={[]} assets={[]} scale={scale} showSlotBounds />
+          <PageRenderer
+            template={tpl}
+            entities={[]}
+            assets={[]}
+            scale={scale}
+            showSlotBounds
+            hideImagePlaceholderText
+          />
         </div>
       ) : null}
     </div>

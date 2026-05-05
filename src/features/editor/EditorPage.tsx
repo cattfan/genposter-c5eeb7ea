@@ -60,45 +60,40 @@ export function EditorPage() {
   const template = payload.template;
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-3 border-b px-4 py-3">
-        <Button variant="outline" onClick={backToTemplates}>
+    <DesignWorkspace
+      initialDocument={initialDocument}
+      mode="template"
+      allowMultiplePages={false}
+      autosave
+      packPages={payload.packPages}
+      activeTemplateId={template.pageTemplateId}
+      headerLeading={
+        <Button variant="outline" className="h-8" onClick={backToTemplates}>
           <ArrowLeft className="mr-2 size-4" />
           Quay lại
         </Button>
-      </div>
-
-      <div className="min-h-0 flex-1">
-        <DesignWorkspace
-          initialDocument={initialDocument}
-          mode="template"
-          allowMultiplePages={false}
-          autosave
-          packPages={payload.packPages}
-          activeTemplateId={template.pageTemplateId}
-          onOpenTemplatePage={(pageTemplateId) => {
-            void navigate({
-              to: "/templates/$id/edit",
-              params: { id: pageTemplateId },
-              search: { packId },
-            });
-          }}
-          onClose={backToTemplates}
-          onSave={async (nextDocument) => {
-            const nextTemplate = designDocumentToPageTemplate(nextDocument, template);
-            await db.transaction("rw", [db.pageTemplates, db.designDocuments], async () => {
-              await db.pageTemplates.put(nextTemplate);
-              await db.designDocuments.put({
-                ...nextDocument,
-                designDocumentId: nextDocument.designDocumentId || id,
-                sourcePageTemplateId: template.pageTemplateId,
-                mode: "template",
-                updatedAt: Date.now(),
-              });
-            });
-          }}
-        />
-      </div>
-    </div>
+      }
+      onOpenTemplatePage={(pageTemplateId) => {
+        void navigate({
+          to: "/templates/$id/edit",
+          params: { id: pageTemplateId },
+          search: { packId },
+        });
+      }}
+      onClose={backToTemplates}
+      onSave={async (nextDocument) => {
+        const nextTemplate = designDocumentToPageTemplate(nextDocument, template);
+        await db.transaction("rw", [db.pageTemplates, db.designDocuments], async () => {
+          await db.pageTemplates.put(nextTemplate);
+          await db.designDocuments.put({
+            ...nextDocument,
+            designDocumentId: nextDocument.designDocumentId || id,
+            sourcePageTemplateId: template.pageTemplateId,
+            mode: "template",
+            updatedAt: Date.now(),
+          });
+        });
+      }}
+    />
   );
 }

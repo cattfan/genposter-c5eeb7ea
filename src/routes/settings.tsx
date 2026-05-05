@@ -26,6 +26,8 @@ import {
   createSystemBackupZip,
   getSystemBackupFileName,
   importSystemBackupFile,
+  type SystemBackupSection,
+  type SystemBackupScope,
   type SystemBackupImportMode,
 } from "@/storage/systemBackup";
 import { db } from "@/storage/db";
@@ -52,12 +54,50 @@ import {
   Upload,
 } from "lucide-react";
 import { PageContainer, PageHeader } from "@/components/PageHeader";
+import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 
 export const Route = createFileRoute("/settings")({
   component: SettingsPage,
 });
 
 const UNDO_TOAST_DURATION = 15_000;
+
+const BACKUP_SECTION_OPTIONS: Array<{
+  value: SystemBackupSection;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "systemData",
+    label: "Dữ liệu hệ thống",
+    description: "Dữ liệu import, lịch sử, cài đặt, asset và thư viện local.",
+  },
+  {
+    value: "packTemplates",
+    label: "Bộ khuôn",
+    description: "Bộ khuôn và các trang khuôn đang được dùng.",
+  },
+  {
+    value: "generatePresets",
+    label: "Khuôn đổ dữ liệu",
+    description: "Khuôn tạo nội dung, kèm bộ khuôn và trang khuôn liên quan.",
+  },
+];
+
+function getBackupScopeFromSections(sections: SystemBackupSection[]): SystemBackupScope {
+  const selected = new Set(sections);
+  if (
+    selected.has("systemData") &&
+    selected.has("packTemplates") &&
+    selected.has("generatePresets")
+  ) {
+    return "all";
+  }
+  if (selected.size === 1 && selected.has("packTemplates")) return "packTemplates";
+  if (selected.size === 1 && selected.has("generatePresets")) return "generatePresets";
+  return "custom";
+}
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
@@ -97,6 +137,12 @@ function SettingsPage() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<null | { ok: boolean; msg: string }>(null);
   const [backupBusy, setBackupBusy] = useState(false);
+  const [backupSections, setBackupSections] = useState<SystemBackupSection[]>([
+    "systemData",
+    "packTemplates",
+    "generatePresets",
+  ]);
+  const [backupIncludeImages, setBackupIncludeImages] = useState(true);
   const [importBusy, setImportBusy] = useState(false);
   const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
   const backupInputRef = useRef<HTMLInputElement>(null);
@@ -116,8 +162,17 @@ function SettingsPage() {
 
   const ai = s.ai ?? defaultAiConfig("deepseek");
   const presetSpec = AI_PRESETS[ai.preset];
+  const backupScope = getBackupScopeFromSections(backupSections);
+  const canExportBackup = backupSections.length > 0;
 
   const setAi = (next: AiProviderConfig) => setS({ ...s, ai: next });
+
+  const toggleBackupSection = (section: SystemBackupSection, checked: boolean) => {
+    setBackupSections((current) => {
+      if (checked) return Array.from(new Set([...current, section]));
+      return current.filter((item) => item !== section);
+    });
+  };
 
   const onPresetChange = (preset: AiProviderPreset) => {
     if (preset === ai.preset) return;
@@ -149,9 +204,12 @@ function SettingsPage() {
   const exportBackup = async () => {
     setBackupBusy(true);
     try {
-      const blob = await createSystemBackupZip();
-      saveAs(blob, getSystemBackupFileName());
-      toast.success("Đã tải backup toàn hệ thống.");
+      const blob = await createSystemBackupZip({
+        sections: backupSections,
+        includeImages: backupIncludeImages,
+      });
+      saveAs(blob, getSystemBackupFileName(Date.now(), backupScope, backupIncludeImages));
+      toast.success("Đã tải backup.");
     } catch (error) {
       toast.error(`Lỗi backup: ${errorMessage(error)}`);
     } finally {
@@ -254,19 +312,59 @@ function SettingsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Backup dạng ZIP chứa dữ liệu, template, lịch sử và ảnh local trong IndexedDB. API key
-            không nằm trong file backup.
+            Backup dạng ZIP. Có thể chọn toàn hệ thống, chỉ pack template hoặc chỉ khuôn đổ dữ
+            liệu. API key không nằm trong file backup.
           </p>
+          <div className="grid gap-3 rounded-lg border bg-muted/20 p-4">
+            <div className="space-y-2">
+              <Label>Phạm vi backup</Label>
+              <div className="grid gap-2 lg:grid-cols-3">
+                {BACKUP_SECTION_OPTIONS.map((option) => {
+                  const checked = backupSections.includes(option.value);
+                  return (
+                    <label
+                      key={option.value}
+                      className="flex min-h-24 cursor-pointer items-start gap-3 rounded-md border bg-background p-3 transition-colors hover:border-primary/40"
+                    >
+                      <Checkbox
+                        checked={checked}
+                        onCheckedChange={(value) => toggleBackupSection(option.value, value === true)}
+                        className="mt-0.5"
+                      />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium">{option.label}</span>
+                        <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                          {option.description}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+              {!canExportBackup ? (
+                <div className="text-xs text-destructive">Chọn ít nhất một mục để backup.</div>
+              ) : null}
+            </div>
+            <div className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2">
+              <div>
+                <div className="text-sm font-medium">Backup ảnh local</div>
+                <div className="text-xs text-muted-foreground">
+                  Tắt để file nhẹ hơn, nhưng ảnh trong IndexedDB không được khôi phục.
+                </div>
+              </div>
+              <Switch checked={backupIncludeImages} onCheckedChange={setBackupIncludeImages} />
+            </div>
+          </div>
           <div className="grid gap-3 md:grid-cols-2">
             <div className="rounded-lg border p-4">
               <div className="font-medium">Tải backup</div>
               <p className="mt-1 text-sm text-muted-foreground">
-                Xuất file genposter-backup kèm ảnh local.
+                Xuất file ZIP theo phạm vi đã chọn.
               </p>
               <Button
                 className="mt-4 w-full"
                 onClick={() => void exportBackup()}
-                disabled={backupBusy}
+                disabled={backupBusy || !canExportBackup}
               >
                 {backupBusy ? (
                   <Loader2 className="size-4 animate-spin" />

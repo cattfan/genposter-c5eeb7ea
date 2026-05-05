@@ -61,6 +61,7 @@ import {
   readPortableBundleFile,
   safePortableFileName,
 } from "@/features/generate/generatePresetPortability";
+import { formatTemplateDisplayName } from "@/lib/templateNames";
 
 export const Route = createFileRoute("/templates")({
   component: TemplatesPage,
@@ -230,15 +231,17 @@ function PackSummaryCard({
     >
       <div className="flex items-center justify-between gap-3 border-b p-3">
         <button type="button" className="min-w-0 flex-1 text-left" onClick={onSelect}>
-          <div className="truncate text-lg font-semibold">{pack.name}</div>
+          <div className="truncate text-lg font-semibold">
+            {formatTemplateDisplayName(pack.name, "Bộ khuôn")}
+          </div>
         </button>
         <div className="flex shrink-0 items-center gap-1">
           <Button
             variant="ghost"
             size="icon"
             onClick={onDuplicate}
-            title="Nhân bản pack"
-            aria-label="Nhân bản pack"
+            title="Nhân bản bộ khuôn"
+            aria-label="Nhân bản bộ khuôn"
             className="shrink-0 text-muted-foreground"
           >
             <Copy />
@@ -247,8 +250,8 @@ function PackSummaryCard({
             variant="ghost"
             size="icon"
             onClick={onExport}
-            title="Export pack"
-            aria-label="Export pack"
+            title="Xuất bộ khuôn"
+            aria-label="Xuất bộ khuôn"
             className="shrink-0 text-muted-foreground"
           >
             <FileDown />
@@ -257,8 +260,8 @@ function PackSummaryCard({
             variant="ghost"
             size="icon"
             onClick={onDelete}
-            title="Xóa pack"
-            aria-label="Xóa pack"
+            title="Xóa bộ khuôn"
+            aria-label="Xóa bộ khuôn"
             className="shrink-0 text-muted-foreground hover:text-destructive"
           >
             <Trash2 />
@@ -269,7 +272,7 @@ function PackSummaryCard({
       <button type="button" className="block w-full p-4 text-left" onClick={onSelect}>
         {pageItems.length === 0 ? (
           <div className="rounded-lg border border-dashed bg-muted/20 p-6 text-center text-sm text-muted-foreground">
-            Pack chưa có page.
+            Bộ khuôn chưa có trang.
           </div>
         ) : (
           <div className="pack-horizontal-scroll -mx-1 overflow-x-auto px-1 pb-3">
@@ -284,7 +287,9 @@ function PackSummaryCard({
                       P{index + 1}
                     </div>
                     <div className="min-w-0 truncate text-sm font-medium">
-                      {template?.name ?? "Template không tồn tại"}
+                      {template
+                        ? formatTemplateDisplayName(template.name, "Trang")
+                        : "Trang khuôn không tồn tại"}
                     </div>
                   </div>
                   <PackPreviewThumb template={template} className="w-full" />
@@ -374,7 +379,7 @@ function TemplatesPage() {
         .catch((error) => {
           if (packAutosaveErrorRef.current) return;
           packAutosaveErrorRef.current = true;
-          toast.error("Không thể tự lưu pack: " + errorMessage(error));
+          toast.error("Không thể tự lưu bộ khuôn: " + errorMessage(error));
         });
     }, 400);
 
@@ -389,7 +394,7 @@ function TemplatesPage() {
     const pack = createPackTemplate();
     await db.packTemplates.put(pack);
     setEditing(pack);
-    toast.success("Đã tạo pack mới");
+    toast.success("Đã tạo bộ khuôn mới");
     navigate({ to: "/templates", search: { open: pack.packTemplateId } });
   };
 
@@ -411,8 +416,8 @@ function TemplatesPage() {
       setEditing(null);
       navigate({ to: "/templates", search: { open: undefined } });
     }
-    toast.success("Đã xóa pack", {
-      description: `"${pack.name}" có thể khôi phục trong vài giây.`,
+    toast.success("Đã xóa bộ khuôn", {
+      description: `"${formatTemplateDisplayName(pack.name, "Bộ khuôn")}" có thể khôi phục trong vài giây.`,
       duration: UNDO_TOAST_DURATION,
       action: {
         label: "Khôi phục",
@@ -424,10 +429,10 @@ function TemplatesPage() {
                 setEditing(deletedPack);
                 navigate({ to: "/templates", search: { open: deletedPack.packTemplateId } });
               }
-              toast.success("Đã khôi phục pack");
+              toast.success("Đã khôi phục bộ khuôn");
             })
             .catch((error) => {
-              toast.error("Không thể khôi phục pack: " + errorMessage(error));
+              toast.error("Không thể khôi phục bộ khuôn: " + errorMessage(error));
             });
         },
       },
@@ -451,13 +456,13 @@ function TemplatesPage() {
     const dup: PackTemplate = {
       ...pack,
       packTemplateId: nanoid(),
-      name: pack.name + " (copy)",
+      name: `${formatTemplateDisplayName(pack.name, "Bộ khuôn")} - bản sao`,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
     await db.packTemplates.put(dup);
     setEditing(dup);
-    toast.success("Đã duplicate pack");
+    toast.success("Đã nhân bản bộ khuôn");
     navigate({ to: "/templates", search: { open: dup.packTemplateId } });
   };
 
@@ -470,7 +475,10 @@ function TemplatesPage() {
     const pageSet = new Set(pack.orderedPages);
     const pages = (tpls ?? []).filter((template) => pageSet.has(template.pageTemplateId));
     const bundle = buildPackTemplateBundle(pack, pages);
-    downloadJson(`${safePortableFileName(pack.name)}-pack-template.json`, bundle);
+    downloadJson(
+      `${safePortableFileName(formatTemplateDisplayName(pack.name, "bo-khuon"))}-bo-khuon.json`,
+      bundle,
+    );
   };
 
   const importPortableTemplateBundle = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -485,17 +493,17 @@ function TemplatesPage() {
         navigate({ to: "/templates", search: { open: result.packs[0].packTemplateId } });
       }
       toast.success(
-        `Đã import ${result.packs.length} pack, ${result.pages.length} page, ${result.presets.length} khuôn`,
+        `Đã nhập ${result.packs.length} bộ, ${result.pages.length} trang, ${result.presets.length} khuôn`,
       );
     } catch (error) {
-      toast.error("Không thể import: " + errorMessage(error));
+      toast.error("Không thể nhập khuôn: " + errorMessage(error));
     }
   };
 
   const createPageInPack = async () => {
     const pack = await ensureActivePack();
     const pageNumber = pack.orderedPages.length + 1;
-    const page = createBlankPageTemplate({ name: `Page mới ${pageNumber}` });
+    const page = createBlankPageTemplate({ name: `Trang mới ${pageNumber}` });
     const nextPack = appendPageToPack(pack, page.pageTemplateId);
     await db.transaction("rw", [db.pageTemplates, db.packTemplates], async () => {
       await db.pageTemplates.put(page);
@@ -514,7 +522,7 @@ function TemplatesPage() {
       await db.packTemplates.put(nextPack);
     });
     setEditing(nextPack);
-    toast.success("Đã duplicate page vào pack");
+    toast.success("Đã nhân bản trang vào bộ khuôn");
   };
 
   const deletePageFromPack = async (template: PageTemplate) => {
@@ -552,8 +560,8 @@ function TemplatesPage() {
     if (nextEditing) {
       setEditing(nextEditing);
     }
-    toast.success("Đã xóa page", {
-      description: `"${template.name}" có thể khôi phục trong vài giây.`,
+    toast.success("Đã xóa trang", {
+      description: `"${formatTemplateDisplayName(template.name, "Trang")}" có thể khôi phục trong vài giây.`,
       duration: UNDO_TOAST_DURATION,
       action: {
         label: "Khôi phục",
@@ -573,10 +581,10 @@ function TemplatesPage() {
                 setEditing(restoredActivePack);
                 navigate({ to: "/templates", search: { open: restoredActivePack.packTemplateId } });
               }
-              toast.success("Đã khôi phục page");
+              toast.success("Đã khôi phục trang");
             })
             .catch((error) => {
-              toast.error("Không thể khôi phục page: " + errorMessage(error));
+              toast.error("Không thể khôi phục trang: " + errorMessage(error));
             });
         },
       },
@@ -636,16 +644,16 @@ function TemplatesPage() {
         { sourceImageDataUrl: singlePreview },
       );
       if (quality.warnings.length > 0) {
-        toast.warning(`${quality.warnings.length} cảnh báo blueprint — kiểm tra validationRules.`);
+        toast.warning(`${quality.warnings.length} cảnh báo bố cục, nên kiểm tra lại trang khuôn.`);
       }
-      const pack = await ensureActivePack(singleTemplateName.trim() || "Pack mới");
+      const pack = await ensureActivePack(singleTemplateName.trim() || "Bộ khuôn mới");
       const nextPack = appendPageToPack(pack, tpl.pageTemplateId);
       await db.transaction("rw", [db.pageTemplates, db.packTemplates], async () => {
         await db.pageTemplates.put(tpl);
         await db.packTemplates.put(nextPack);
       });
       setEditing(nextPack);
-      toast.success("AI dựng xong — đã thêm page vào pack");
+      toast.success("AI dựng xong, đã thêm trang vào bộ khuôn");
       setSingleOpen(false);
       setSinglePreview("");
       setSingleFileName("");
@@ -716,7 +724,7 @@ function TemplatesPage() {
         toast.error(out.error);
         return;
       }
-      setComboStep(`Dựng ${out.pages.length} page → tạo pack...`);
+      setComboStep(`Dựng ${out.pages.length} trang, tạo bộ khuôn...`);
       setComboProgress(80);
       const built = buildComboFromAiResult(
         { pages: out.pages, packMeta: out.packMeta },
@@ -725,9 +733,11 @@ function TemplatesPage() {
       const packId = await persistCombo(built);
       setComboProgress(100);
       if (out.warnings && out.warnings.length > 0) {
-        toast.warning(`Có ${out.warnings.length} page lỗi — pack vẫn tạo được`);
+        toast.warning(`Có ${out.warnings.length} trang lỗi, bộ khuôn vẫn tạo được`);
       } else {
-        toast.success(`Đã tạo pack "${built.pack.name}" (${built.pages.length} page)`);
+        toast.success(
+          `Đã tạo bộ khuôn "${formatTemplateDisplayName(built.pack.name, "Bộ khuôn")}" (${built.pages.length} trang)`,
+        );
       }
       setComboOpen(false);
       setComboFiles([]);
@@ -774,23 +784,23 @@ function TemplatesPage() {
             <Package className="size-5" />
           </div>
           <div className="min-w-0">
-            <h1 className="text-3xl font-bold tracking-tight">Pack Templates</h1>
+            <h1 className="text-3xl font-bold tracking-tight">Khuôn mẫu</h1>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 xl:shrink-0">
           <Button variant="outline" onClick={() => portableImportRef.current?.click()}>
-            <FileUp className="size-4 mr-2" /> Import
+            <FileUp className="size-4 mr-2" /> Nhập khuôn
           </Button>
           {editing && (
             <Button variant="outline" onClick={() => exportPackTemplate(editing)}>
-              <FileDown className="size-4 mr-2" /> Export pack
+              <FileDown className="size-4 mr-2" /> Xuất bộ
             </Button>
           )}
           <Button variant="outline" onClick={onPickComboImages} disabled={aiBusy}>
-            <Layers className="size-4 mr-2" /> AI Gen
+            <Layers className="size-4 mr-2" /> AI tạo ảnh
           </Button>
           <Button onClick={createNewPack}>
-            <Plus className="size-4 mr-2" /> Tạo pack mới
+            <Plus className="size-4 mr-2" /> Tạo bộ mới
           </Button>
         </div>
       </div>
@@ -798,7 +808,7 @@ function TemplatesPage() {
       <Dialog open={singleOpen} onOpenChange={(o) => !aiBusy && setSingleOpen(o)}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>AI dựng template từ ảnh</DialogTitle>
+            <DialogTitle>AI dựng trang khuôn từ ảnh</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             {singlePreview && (
@@ -812,11 +822,11 @@ function TemplatesPage() {
             )}
 
             <div>
-              <Label>Tên template</Label>
+              <Label>Tên trang khuôn</Label>
               <Input
                 value={singleTemplateName}
                 onChange={(e) => setSingleTemplateName(e.target.value)}
-                placeholder="AI: Ten-template"
+                placeholder="AI: Tên trang khuôn"
                 disabled={aiBusy}
               />
             </div>
@@ -874,7 +884,7 @@ function TemplatesPage() {
               ) : (
                 <Sparkles className="size-4 mr-2" />
               )}
-              Dựng template
+              Dựng trang khuôn
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -887,7 +897,7 @@ function TemplatesPage() {
           </DialogHeader>
           <div className="space-y-3">
             <div>
-              <Label>Tên pack</Label>
+              <Label>Tên bộ khuôn</Label>
               <Input
                 value={comboPackName}
                 onChange={(e) => setComboPackName(e.target.value)}
@@ -914,7 +924,7 @@ function TemplatesPage() {
                     key={idx}
                     className="relative group aspect-[4/5] rounded overflow-hidden border bg-muted"
                   >
-                    <img src={src} alt={`page-${idx + 1}`} className="w-full h-full object-cover" />
+                    <img src={src} alt={`trang-${idx + 1}`} className="w-full h-full object-cover" />
                     <div className="absolute top-1 left-1 text-[10px] bg-black/60 text-white rounded px-1">
                       P{idx + 1}
                     </div>
@@ -959,7 +969,7 @@ function TemplatesPage() {
             <span className="mx-auto mb-3 grid size-12 place-items-center rounded-full bg-accent text-primary">
               <Package className="size-5" />
             </span>
-            Chưa có pack. Bấm "Tạo pack mới" để bắt đầu.
+            Chưa có bộ khuôn. Bấm "Tạo bộ mới" để bắt đầu.
           </div>
         ) : null}
 

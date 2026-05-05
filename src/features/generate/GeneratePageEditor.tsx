@@ -65,6 +65,7 @@ export function GeneratePageEditor({
         contextTitle={title}
         allowMultiplePages={false}
         onClose={() => onOpenChange(false)}
+        showCloseButton
         onSave={(nextDocument) => {
           const edited = designDocumentToPageTemplate(nextDocument, baseTemplate);
           onApply(

@@ -15,6 +15,7 @@ import { CropOverlay } from "./CropOverlay";
 import { SlotContextMenu, type SlotMenuActions } from "./SlotContextMenu";
 import { useResolvedImageSrc } from "@/storage/imageSrc";
 import { LayoutGuides } from "@/features/render/LayoutGuides";
+import { renderRichTextRuns } from "./richText";
 
 export function NumField({
   label,
@@ -265,7 +266,12 @@ function SlotEditor({
           height: "100%",
         }}
       >
-        {displayText}
+        {renderRichTextRuns({
+          text: displayText ?? "",
+          runs: slot.textRuns,
+          baseStyle: slot.style,
+          scale: zoom,
+        })}
       </div>
     );
   } else if (slot.kind === "image") {

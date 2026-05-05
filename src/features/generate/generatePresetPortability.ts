@@ -5,6 +5,7 @@ import type {
   PackTemplate,
   PageTemplate,
 } from "@/models";
+import { formatImportedTemplateName } from "@/lib/templateNames";
 import { db } from "@/storage/db";
 
 export function safePortableFileName(name: string) {
@@ -88,7 +89,7 @@ function clonePageForImport(
   return {
     ...copied,
     pageTemplateId: nextId,
-    name: nextId === page.pageTemplateId ? copied.name : `${copied.name} (import)`,
+    name: nextId === page.pageTemplateId ? copied.name : formatImportedTemplateName(copied.name, "Trang"),
     slots: copied.slots.map((slot) => ({
       ...slot,
       pageId: slot.pageId === page.pageTemplateId ? nextId : slot.pageId,
@@ -112,7 +113,7 @@ function clonePackForImport(
   return {
     ...structuredClone(pack),
     packTemplateId: nextId,
-    name: nextId === pack.packTemplateId ? pack.name : `${pack.name} (import)`,
+    name: nextId === pack.packTemplateId ? pack.name : formatImportedTemplateName(pack.name, "Bộ khuôn"),
     orderedPages: remapPageIds(pack.orderedPages),
     requiredPages: remapPageIds(pack.requiredPages),
     optionalPages: remapPageIds(pack.optionalPages),
@@ -134,16 +135,26 @@ function clonePresetForImport(
   Object.entries(preset.bindOverrides ?? {}).forEach(([pageId, overrides]) => {
     bindOverrides[pageIdMap.get(pageId) ?? pageId] = { ...overrides };
   });
+  const generateConfig = structuredClone(preset.generateConfig);
+  if (generateConfig.pageConfigs) {
+    generateConfig.pageConfigs = Object.fromEntries(
+      Object.entries(generateConfig.pageConfigs).map(([pageId, config]) => [
+        pageIdMap.get(pageId) ?? pageId,
+        config,
+      ]),
+    );
+  }
 
   return {
     ...structuredClone(preset),
     presetId: nextId,
-    name: nextId === preset.presetId ? preset.name : `${preset.name} (import)`,
+    name: nextId === preset.presetId ? preset.name : formatImportedTemplateName(preset.name, "Khuôn"),
     packTemplateId: preset.packTemplateId
       ? (packIdMap.get(preset.packTemplateId) ?? preset.packTemplateId)
       : undefined,
     pageTemplateIds: preset.pageTemplateIds.map((id) => pageIdMap.get(id) ?? id),
     bindOverrides,
+    generateConfig,
     createdAt: nextId === preset.presetId ? preset.createdAt : now,
     updatedAt: now,
     version: 1,

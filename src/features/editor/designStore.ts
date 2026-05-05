@@ -183,23 +183,121 @@ function updateStateFromDocument(
   );
 }
 
-function createDuplicatedElement(element: DesignElement, offset: number): DesignElement {
-  return {
-    ...cloneDesignDocument({
-      designDocumentId: "dup",
-      name: "dup",
-      pages: [],
-      elements: [element],
-      activePageId: undefined,
-      mode: "design",
-      createdAt: 0,
-      updatedAt: 0,
-      version: 1,
-    }).elements[0],
-    elementId: nanoid(),
-    x: element.x + offset,
-    y: element.y + offset,
-  };
+function cloneDesignElements(elements: DesignElement[]): DesignElement[] {
+  return cloneDesignDocument({
+    designDocumentId: "copy",
+    name: "copy",
+    pages: [],
+    elements,
+    activePageId: undefined,
+    mode: "design",
+    createdAt: 0,
+    updatedAt: 0,
+    version: 1,
+  }).elements;
+}
+
+function hasSelectedAncestor(
+  state: DesignEditorState,
+  element: DesignElement,
+  selectedIds: Set<string>,
+) {
+  const visited = new Set<string>();
+  let parentId = element.parentId;
+  while (parentId) {
+    if (selectedIds.has(parentId)) return true;
+    if (visited.has(parentId)) return false;
+    visited.add(parentId);
+    parentId = state.elementsById[parentId]?.parentId;
+  }
+  return false;
+}
+
+function getSelectionElementsWithDescendants(state: DesignEditorState): DesignElement[] {
+  return getElementsWithDescendantsByIds(state, state.selection.ids);
+}
+
+function uniqueElementIds(ids: string[]): string[] {
+  return Array.from(new Set(ids));
+}
+
+function getElementsWithDescendantsByIds(state: DesignEditorState, ids: string[]): DesignElement[] {
+  const rootIds = uniqueElementIds(ids);
+  const selectedIds = new Set(rootIds);
+  const includedIds = new Set<string>();
+
+  for (const id of rootIds) {
+    const element = state.elementsById[id];
+    if (!element || hasSelectedAncestor(state, element, selectedIds)) continue;
+    includedIds.add(id);
+    getDescendantIds(state, id).forEach((descendantId) => includedIds.add(descendantId));
+  }
+
+  return getPageElements(state).filter((element) => includedIds.has(element.elementId));
+}
+
+function duplicateElementGraph(
+  elements: DesignElement[],
+  offset: number,
+  pageId?: string,
+): { elements: DesignElement[]; rootIds: string[] } {
+  const sourceIds = new Set(elements.map((element) => element.elementId));
+  const idMap = new Map(elements.map((element) => [element.elementId, nanoid()]));
+  const cloned = cloneDesignElements(elements);
+
+  const duplicates = cloned.map((element) => {
+    const nextParentId = element.parentId ? idMap.get(element.parentId) : undefined;
+    const nextChildren = element.children
+      ?.map((childId) => idMap.get(childId))
+      .filter((childId): childId is string => !!childId);
+
+    return {
+      ...element,
+      elementId: idMap.get(element.elementId) ?? nanoid(),
+      pageId: pageId ?? element.pageId,
+      parentId: nextParentId,
+      children: nextChildren && nextChildren.length > 0 ? nextChildren : undefined,
+      x: element.x + offset,
+      y: element.y + offset,
+    } as DesignElement;
+  });
+
+  const rootIds = duplicates
+    .filter((element, index) => {
+      const sourceParentId = elements[index]?.parentId;
+      return !sourceParentId || !sourceIds.has(sourceParentId);
+    })
+    .map((element) => element.elementId);
+
+  return { elements: duplicates, rootIds };
+}
+
+function stackDuplicatedElementsOnTop(
+  duplicated: DesignElement[],
+  existing: DesignElement[],
+): DesignElement[] {
+  const maxZByPage = new Map<string, number>();
+  for (const element of existing) {
+    const pageId = element.pageId ?? "";
+    maxZByPage.set(pageId, Math.max(maxZByPage.get(pageId) ?? -1, element.zIndex ?? 0));
+  }
+
+  const nextOffsetByPage = new Map<string, number>();
+  const zIndexById = new Map<string, number>();
+  duplicated
+    .slice()
+    .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
+    .forEach((element) => {
+      const pageId = element.pageId ?? "";
+      const offset = (nextOffsetByPage.get(pageId) ?? 0) + 1;
+      nextOffsetByPage.set(pageId, offset);
+      zIndexById.set(element.elementId, (maxZByPage.get(pageId) ?? -1) + offset);
+    });
+
+  return duplicated.map((element) => ({
+    ...element,
+    zIndex: zIndexById.get(element.elementId) ?? element.zIndex,
+  }));
 }
 
 export function getDescendantIds(state: DesignEditorState, groupId: string): string[] {
@@ -225,7 +323,11 @@ export function getPageElements(
 }
 
 function getSelectionElements(state: DesignEditorState): DesignElement[] {
-  return state.selection.ids
+  return getElementsByIds(state, state.selection.ids);
+}
+
+function getElementsByIds(state: DesignEditorState, ids: string[]): DesignElement[] {
+  return uniqueElementIds(ids)
     .map((id) => state.elementsById[id])
     .filter((element): element is DesignElement => !!element);
 }
@@ -512,14 +614,11 @@ export function useDesignEditor(document: DesignDocument) {
       };
       const index = next.pages.findIndex((item) => item.pageId === activePage.pageId);
       next.pages.splice(index + 1, 0, clonedPage);
-      const clonedElements = next.elements
-        .filter((element) => element.pageId === activePage.pageId)
-        .map((element) => ({
-          ...createDuplicatedElement(element, 0),
-          pageId: newPageId,
-          x: element.x,
-          y: element.y,
-        }));
+      const clonedElements = duplicateElementGraph(
+        next.elements.filter((element) => element.pageId === activePage.pageId),
+        0,
+        newPageId,
+      ).elements;
       next.elements.push(...clonedElements);
       next.activePageId = newPageId;
     });
@@ -628,77 +727,65 @@ export function useDesignEditor(document: DesignDocument) {
     [state.selection.ids, updateElements],
   );
 
-  const copySelection = useCallback(() => {
+  const copySelection = useCallback((ids?: string[]) => {
     setState((prev) => ({
       ...prev,
-      clipboard: getSelectionElements(prev).map(
-        (element) =>
-          cloneDesignDocument({
-            designDocumentId: "copy",
-            name: "copy",
-            pages: [],
-            elements: [element],
-            mode: "design",
-            createdAt: 0,
-            updatedAt: 0,
-            version: 1,
-          }).elements[0],
+      clipboard: cloneDesignElements(
+        getElementsWithDescendantsByIds(prev, ids ?? prev.selection.ids),
       ),
     }));
   }, []);
 
-  const deleteSelection = useCallback(() => {
-    if (state.selection.ids.length === 0) return;
-    const idsToRemove = new Set<string>();
-    state.selection.ids.forEach((id) => {
-      idsToRemove.add(id);
-      getDescendantIds(state, id).forEach((descendantId) => idsToRemove.add(descendantId));
-    });
-    commitDocument(
-      (next) => {
-        next.elements = next.elements.filter((element) => !idsToRemove.has(element.elementId));
-      },
-      {
+  const deleteSelection = useCallback((ids?: string[]) => {
+    setState((prev) => {
+      const rootIds = uniqueElementIds(ids ?? prev.selection.ids);
+      if (rootIds.length === 0) return prev;
+      const idsToRemove = new Set<string>();
+      rootIds.forEach((id) => {
+        idsToRemove.add(id);
+        getDescendantIds(prev, id).forEach((descendantId) => idsToRemove.add(descendantId));
+      });
+      const next = cloneDesignDocument(materializeDesignDocument(prev));
+      next.elements = next.elements.filter((element) => !idsToRemove.has(element.elementId));
+      return updateStateFromDocument(prev, next, {
         nextSelection: { ids: [], primaryId: null },
-      },
-    );
-  }, [commitDocument, state]);
+      });
+    });
+  }, []);
 
   const duplicateSelection = useCallback(
-    (offset = 24) => {
-      const selected = getSelectionElements(state);
-      if (selected.length === 0) return;
-      const duplicates = selected.map((element) => createDuplicatedElement(element, offset));
-      commitDocument(
-        (next) => {
-          next.elements.push(...duplicates);
-        },
-        {
+    (idsOrOffset?: string[] | number, offset = 24) => {
+      setState((prev) => {
+        const ids = Array.isArray(idsOrOffset) ? idsOrOffset : prev.selection.ids;
+        const duplicateOffset = typeof idsOrOffset === "number" ? idsOrOffset : offset;
+        const selected = getElementsWithDescendantsByIds(prev, ids);
+        if (selected.length === 0) return prev;
+        const duplicated = duplicateElementGraph(selected, duplicateOffset);
+        const next = cloneDesignDocument(materializeDesignDocument(prev));
+        next.elements.push(...stackDuplicatedElementsOnTop(duplicated.elements, next.elements));
+        return updateStateFromDocument(prev, next, {
           nextSelection: {
-            ids: duplicates.map((element) => element.elementId),
-            primaryId: duplicates.at(-1)?.elementId ?? null,
+            ids: duplicated.rootIds,
+            primaryId: duplicated.rootIds.at(-1) ?? null,
           },
-        },
-      );
+        });
+      });
     },
-    [commitDocument, state],
+    [],
   );
 
   const pasteClipboard = useCallback(
     (offset = 24) => {
       if (!state.clipboard || state.clipboard.length === 0) return;
-      const duplicates = state.clipboard.map((element) => ({
-        ...createDuplicatedElement(element, offset),
-        pageId: state.activePageId,
-      }));
+      const duplicated = duplicateElementGraph(state.clipboard, offset, state.activePageId);
       commitDocument(
         (next) => {
-          next.elements.push(...duplicates);
+          next.elements.push(...stackDuplicatedElementsOnTop(duplicated.elements, next.elements));
         },
         {
           nextSelection: {
-            ids: duplicates.map((element) => element.elementId),
-            primaryId: duplicates.at(-1)?.elementId ?? null,
+            ids: duplicated.rootIds,
+            primaryId: duplicated.rootIds.at(-1) ?? null,
           },
         },
       );
@@ -707,9 +794,10 @@ export function useDesignEditor(document: DesignDocument) {
   );
 
   const orderSelection = useCallback(
-    (mode: "forward" | "backward" | "front" | "back") => {
-      if (state.selection.ids.length === 0) return;
+    (mode: "forward" | "backward" | "front" | "back", ids?: string[]) => {
       setState((prev) => {
+        const targetIds = uniqueElementIds(ids ?? prev.selection.ids);
+        if (targetIds.length === 0) return prev;
         const current = materializeDesignDocument(prev);
         const next = cloneDesignDocument(current);
         const activePage = next.activePageId ?? prev.activePageId;
@@ -718,7 +806,7 @@ export function useDesignEditor(document: DesignDocument) {
           .slice()
           .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
           .map((element) => element.elementId);
-        const reordered = reorderIds(orderedIds, prev.selection.ids, mode);
+        const reordered = reorderIds(orderedIds, targetIds, mode);
         let zIndex = 0;
         next.elements = next.elements.map((element) => {
           if (element.pageId !== activePage) return element;
@@ -728,10 +816,21 @@ export function useDesignEditor(document: DesignDocument) {
             zIndex: nextIndex >= 0 ? nextIndex : zIndex++,
           };
         });
-        return updateStateFromDocument(prev, next);
+        return updateStateFromDocument(
+          prev,
+          next,
+          ids
+            ? {
+                nextSelection: {
+                  ids: targetIds,
+                  primaryId: targetIds.at(-1) ?? null,
+                },
+              }
+            : undefined,
+        );
       });
     },
-    [state.selection.ids],
+    [],
   );
 
   const alignSelection = useCallback(
@@ -790,64 +889,63 @@ export function useDesignEditor(document: DesignDocument) {
     [state, updateElements],
   );
 
-  const groupSelection = useCallback(() => {
-    const selected = getSelectionElements(state);
-    const bounds = selectionBounds(selected);
-    if (!bounds || selected.length < 2) return;
-    const groupId = nanoid();
-    const groupElement: DesignElement = {
-      elementId: groupId,
-      pageId: state.activePageId,
-      kind: "group",
-      name: "Group",
-      x: bounds.x,
-      y: bounds.y,
-      width: bounds.width,
-      height: bounds.height,
-      zIndex: Math.max(...selected.map((element) => element.zIndex ?? 0)) + 1,
-      children: selected.map((element) => element.elementId),
-    };
-    commitDocument(
-      (next) => {
-        next.elements = next.elements.map((element) =>
-          state.selection.ids.includes(element.elementId)
+  const groupSelection = useCallback((ids?: string[]) => {
+    setState((prev) => {
+      const rootIds = uniqueElementIds(ids ?? prev.selection.ids);
+      const selected = getElementsByIds(prev, rootIds);
+      const bounds = selectionBounds(selected);
+      if (!bounds || selected.length < 2) return prev;
+      const groupId = nanoid();
+      const groupElement: DesignElement = {
+        elementId: groupId,
+        pageId: prev.activePageId,
+        kind: "group",
+        name: "Group",
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: bounds.height,
+        zIndex: Math.max(...selected.map((element) => element.zIndex ?? 0)) + 1,
+        children: selected.map((element) => element.elementId),
+      };
+      const next = cloneDesignDocument(materializeDesignDocument(prev));
+      next.elements = next.elements.map((element) =>
+        rootIds.includes(element.elementId)
+          ? {
+              ...element,
+              parentId: groupId,
+            }
+          : element,
+      );
+      next.elements.push(groupElement);
+      return updateStateFromDocument(prev, next, {
+        nextSelection: { ids: [groupId], primaryId: groupId },
+      });
+    });
+  }, []);
+
+  const ungroupSelection = useCallback((ids?: string[]) => {
+    setState((prev) => {
+      const groupIds = getElementsByIds(prev, ids ?? prev.selection.ids)
+        .filter((element) => element.kind === "group")
+        .map((element) => element.elementId);
+      if (groupIds.length === 0) return prev;
+      const next = cloneDesignDocument(materializeDesignDocument(prev));
+      next.elements = next.elements
+        .map((element) =>
+          groupIds.includes(element.parentId ?? "")
             ? {
                 ...element,
-                parentId: groupId,
+                parentId: undefined,
               }
             : element,
-        );
-        next.elements.push(groupElement);
-      },
-      {
-        nextSelection: { ids: [groupId], primaryId: groupId },
-      },
-    );
-  }, [commitDocument, state]);
-
-  const ungroupSelection = useCallback(() => {
-    const groupIds = getSelectionElements(state)
-      .filter((element) => element.kind === "group")
-      .map((element) => element.elementId);
-    if (groupIds.length === 0) return;
-    commitDocument(
-      (next) => {
-        next.elements = next.elements
-          .map((element) =>
-            groupIds.includes(element.parentId ?? "")
-              ? {
-                  ...element,
-                  parentId: undefined,
-                }
-              : element,
-          )
-          .filter((element) => !groupIds.includes(element.elementId));
-      },
-      {
+        )
+        .filter((element) => !groupIds.includes(element.elementId));
+      return updateStateFromDocument(prev, next, {
         nextSelection: { ids: [], primaryId: null },
-      },
-    );
-  }, [commitDocument, state]);
+      });
+    });
+  }, []);
 
   const documentValue = useMemo(() => materializeDesignDocument(state), [state]);
   const activePage = state.pagesById[state.activePageId];

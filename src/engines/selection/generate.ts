@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 import type {
   Asset,
   Entity,
+  GeneratePageConfig,
   GenerationJob,
   ManualOverride,
   PackTemplate,
@@ -38,6 +39,12 @@ export interface GenerateInput {
   bindOverrides?: Record<string, Record<string, string | undefined>>;
   partnerQuotaPerPage?: number;
   prioritizePartner?: boolean;
+  onlyPartner?: boolean;
+  maxEntities?: number;
+  selectedSheet?: string;
+  filterMoHinh?: string;
+  filterPhongCach?: string;
+  pageConfigs?: Record<string, GeneratePageConfig>;
 }
 
 export function generatePackJob(input: GenerateInput): GenerationJob {
@@ -52,6 +59,9 @@ export function generatePackJob(input: GenerateInput): GenerationJob {
     bindOverrides = {},
     partnerQuotaPerPage = 0,
     prioritizePartner = true,
+    onlyPartner = false,
+    maxEntities,
+    pageConfigs = {},
   } = input;
 
   // === Branch: bind theo entity (không section selection) ===
@@ -64,6 +74,12 @@ export function generatePackJob(input: GenerateInput): GenerationJob {
       bindOverrides,
       partnerQuotaPerPage,
       prioritizePartner,
+      onlyPartner,
+      maxEntities,
+      selectedSheet,
+      filterMoHinh,
+      filterPhongCach,
+      pageConfigs,
     );
   }
 
@@ -183,6 +199,12 @@ function generateEntityBindJob(
   bindOverrides: Record<string, Record<string, string | undefined>>,
   partnerQuotaPerPage: number,
   prioritizePartner: boolean,
+  onlyPartner: boolean,
+  maxEntities: number | undefined,
+  selectedSheet: string | undefined,
+  filterMoHinh: string | undefined,
+  filterPhongCach: string | undefined,
+  pageConfigs: Record<string, GeneratePageConfig>,
 ): GenerationJob {
   const pageMap = new Map(pageTemplates.map((p) => [p.pageTemplateId, p]));
   const renderedPages: RenderedPage[] = [];
@@ -216,18 +238,66 @@ function generateEntityBindJob(
     };
   };
 
-  const randomizedEntityOrder = buildEntityAllocationOrder(entityPool, prioritizePartner);
+  const resolvePageConfig = (templateId: string) => {
+    const pageConfig = pageConfigs[templateId];
+    const pageOnlyPartner = pageConfig?.onlyPartner ?? onlyPartner;
+    return {
+      selectedSheet: pageConfig?.selectedSheet ?? selectedSheet ?? "__all__",
+      filterMoHinh: pageConfig?.filterMoHinh ?? filterMoHinh ?? "__all__",
+      filterPhongCach: pageConfig?.filterPhongCach ?? filterPhongCach ?? "__all__",
+      prioritizePartner: pageConfig?.prioritizePartner ?? prioritizePartner,
+      onlyPartner: pageOnlyPartner,
+      partnerQuotaPerPage: pageOnlyPartner
+        ? Number.MAX_SAFE_INTEGER
+        : (pageConfig?.partnerQuotaPerPage ?? partnerQuotaPerPage),
+      maxEntities: Math.max(1, Math.floor(pageConfig?.maxEntities ?? maxEntities ?? entityPool.length)),
+    };
+  };
+
+  const matchesPageSource = (entity: Entity, config: ReturnType<typeof resolvePageConfig>) => {
+    if (config.selectedSheet !== "__all__" && entity.sheetName !== config.selectedSheet) {
+      return false;
+    }
+    if (config.filterMoHinh !== "__all__" && entity.categoryMain !== config.filterMoHinh) {
+      return false;
+    }
+    if (config.filterPhongCach !== "__all__" && entity.categorySub !== config.filterPhongCach) {
+      return false;
+    }
+    return true;
+  };
+
+  const pageOrderCache = new Map<string, Entity[]>();
+  const getPageEntityOrder = (templateId: string): Entity[] => {
+    const cached = pageOrderCache.get(templateId);
+    if (cached) return cached;
+    const config = resolvePageConfig(templateId);
+    const scopedEntityPool = entityPool.filter((entity) => matchesPageSource(entity, config));
+    const source = config.onlyPartner
+      ? scopedEntityPool.filter((entity) => entity.partnerFlag)
+      : scopedEntityPool.slice();
+    const ordered = buildEntityAllocationOrder(source, config.prioritizePartner).slice(
+      0,
+      config.maxEntities,
+    );
+    pageOrderCache.set(templateId, ordered);
+    return ordered;
+  };
+
   const templateDemands = new Map(
-    orderedTpls.map((tpl) => [
-      tpl.pageTemplateId,
-      Math.max(
-        1,
-        computeTemplateEntityDemand(
-          applyPageBindOverrides(tpl, bindOverrides[tpl.pageTemplateId]),
-          entityPool,
+    orderedTpls.map((tpl) => {
+      const pageEntityOrder = getPageEntityOrder(tpl.pageTemplateId);
+      return [
+        tpl.pageTemplateId,
+        Math.max(
+          1,
+          computeTemplateEntityDemand(
+            applyPageBindOverrides(tpl, bindOverrides[tpl.pageTemplateId]),
+            pageEntityOrder,
+          ),
         ),
-      ),
-    ]),
+      ] as const;
+    }),
   );
   const packDemand = Math.max(
     1,
@@ -240,7 +310,7 @@ function generateEntityBindJob(
     perPackIdx: number,
     batchState: { usedEntityIds: Set<string> },
   ) => {
-    const owner = pageEntityPool[0] ?? entityPool[0];
+    const owner = pageEntityPool[0];
     if (!owner) return;
     const ov = bindOverrides[tpl.pageTemplateId];
     const effectiveTemplate = applyPageBindOverrides(tpl, ov);
@@ -250,8 +320,8 @@ function generateEntityBindJob(
       template: effectiveTemplate,
       orderedEntities: pageEntityPool,
       pageOwner: shouldPinOwner ? owner : undefined,
-      partnerQuota: partnerQuotaPerPage,
-      prioritizePartner,
+      partnerQuota: resolvePageConfig(tpl.pageTemplateId).partnerQuotaPerPage,
+      prioritizePartner: resolvePageConfig(tpl.pageTemplateId).prioritizePartner,
       batchState,
     });
     const slugEnt = slugify(owner.name);
@@ -275,17 +345,23 @@ function generateEntityBindJob(
   };
 
   if (mode === "one-entity-per-pack") {
-    const packCount = Math.max(1, Math.ceil(randomizedEntityOrder.length / packDemand));
+    const maxPageEntityCount = Math.max(
+      0,
+      ...orderedTpls.map((tpl) => getPageEntityOrder(tpl.pageTemplateId).length),
+    );
+    const packCount = Math.max(1, Math.ceil(maxPageEntityCount / packDemand));
     for (let packIdx = 0; packIdx < packCount; packIdx += 1) {
       const batchState = { usedEntityIds: new Set<string>() };
       let packOffset = packIdx * packDemand;
       orderedTpls.forEach((tpl, i) => {
         const demand = templateDemands.get(tpl.pageTemplateId) ?? 1;
+        const config = resolvePageConfig(tpl.pageTemplateId);
         const pageEntityPool = selectPageEntityPool(
-          randomizedEntityOrder,
+          getPageEntityOrder(tpl.pageTemplateId),
           packOffset,
           demand,
-          partnerQuotaPerPage,
+          config.partnerQuotaPerPage,
+          batchState.usedEntityIds,
         );
         pushPage(tpl, pageEntityPool, i, batchState);
         packOffset += demand;
@@ -296,11 +372,13 @@ function generateEntityBindJob(
     let pageOffset = 0;
     orderedTpls.forEach((tpl, i) => {
       const demand = templateDemands.get(tpl.pageTemplateId) ?? 1;
+      const config = resolvePageConfig(tpl.pageTemplateId);
       const pageEntityPool = selectPageEntityPool(
-        randomizedEntityOrder,
+        getPageEntityOrder(tpl.pageTemplateId),
         pageOffset,
         demand,
-        partnerQuotaPerPage,
+        config.partnerQuotaPerPage,
+        batchState.usedEntityIds,
       );
       pushPage(tpl, pageEntityPool, i, batchState);
       pageOffset += demand;
@@ -337,6 +415,7 @@ function selectPageEntityPool(
   startIndex: number,
   demand: number,
   partnerQuotaPerPage: number,
+  usedEntityIds?: Set<string>,
 ): Entity[] {
   if (orderedEntities.length === 0) return [];
   const required = Math.max(1, Math.min(orderedEntities.length, Math.floor(demand) || 1));
@@ -352,19 +431,29 @@ function selectPageEntityPool(
   const selected: Entity[] = [];
   const selectedIds = new Set<string>();
 
-  const take = (candidates: Entity[], limit: number) => {
+  const take = (candidates: Entity[], limit: number, unusedOnly: boolean) => {
+    let taken = 0;
     for (const entity of rotateEntities(candidates, startIndex)) {
       if (selected.length >= required || limit <= 0) break;
       if (selectedIds.has(entity.entityId)) continue;
+      if (unusedOnly && usedEntityIds?.has(entity.entityId)) continue;
       selected.push(entity);
       selectedIds.add(entity.entityId);
       limit -= 1;
+      taken += 1;
     }
+    return taken;
   };
 
-  if (partnerQuota > 0) take(partnerEntities, partnerQuota);
-  take(nonPartnerEntities, required - selected.length);
-  take(orderedEntities, required - selected.length);
+  const partnerTaken = partnerQuota > 0 ? take(partnerEntities, partnerQuota, true) : 0;
+  take(nonPartnerEntities, required - selected.length, true);
+  take(orderedEntities, required - selected.length, true);
+
+  if (selected.length < required && partnerQuota > partnerTaken) {
+    take(partnerEntities, partnerQuota - partnerTaken, false);
+  }
+  take(nonPartnerEntities, required - selected.length, false);
+  take(orderedEntities, required - selected.length, false);
   return selected;
 }
 

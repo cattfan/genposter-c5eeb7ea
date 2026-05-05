@@ -22,7 +22,7 @@ const NAV_SECTIONS: NavSection[] = [
     label: "Tạo nội dung",
     items: [
       { to: "/", label: "Trang chủ", icon: Home },
-      { to: "/templates", label: "Pack Templates", icon: Package },
+      { to: "/templates", label: "Khuôn mẫu", icon: Package },
       { to: "/generate", label: "Tạo nội dung", icon: Sparkles },
     ],
   },
@@ -40,8 +40,6 @@ const NAV_SECTIONS: NavSection[] = [
 ];
 
 const FLAT_NAV: NavItem[] = NAV_SECTIONS.flatMap((s) => s.items);
-
-const STORAGE_KEY = "appShell.collapsed";
 
 function isActive(pathname: string, to: string) {
   return to === "/" ? pathname === "/" : pathname.startsWith(to);
@@ -126,17 +124,8 @@ function NavLinks({
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const location = useLocation();
-  const [collapsed, setCollapsed] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem(STORAGE_KEY) === "1";
-  });
+  const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(STORAGE_KEY, collapsed ? "1" : "0");
-    }
-  }, [collapsed]);
 
   useEffect(() => {
     setMobileOpen(false);

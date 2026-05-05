@@ -157,9 +157,11 @@ export interface Slot {
   zIndex?: number;
   locked?: boolean;
   groupId?: ID;
+  dataGroupId?: ID;
   kind: SlotKind;
   // dữ liệu tĩnh (nếu không bind)
   staticText?: string;
+  textRuns?: DesignTextRun[];
   staticImage?: string; // url hoặc blob key
   shapeKind?: "rectangle" | "circle" | "triangle" | "line" | "divider" | "badge";
   // bind
@@ -503,6 +505,17 @@ export interface GeneratePresetConfig {
   partnerQuotaPerPage?: number;
   maxEntities?: number;
   varyFontsFromSecondBundle?: boolean;
+  pageConfigs?: Record<ID, GeneratePageConfig>;
+}
+
+export interface GeneratePageConfig {
+  selectedSheet?: string;
+  filterMoHinh?: string;
+  filterPhongCach?: string;
+  prioritizePartner?: boolean;
+  onlyPartner?: boolean;
+  partnerQuotaPerPage?: number;
+  maxEntities?: number;
 }
 
 export interface GenerateBindingPreset {

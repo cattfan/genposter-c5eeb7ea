@@ -4,12 +4,31 @@ import { toPng } from "html-to-image";
 import JSZip from "jszip";
 import saveAs from "file-saver";
 
+const TRANSPARENT_IMAGE_PLACEHOLDER =
+  "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+
+export function formatExportError(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (error instanceof Event) {
+    const target = error.target as HTMLElement | null;
+    const src =
+      target instanceof HTMLImageElement || target instanceof HTMLSourceElement
+        ? target.src || target.getAttribute("src")
+        : target?.getAttribute?.("src");
+    return src ? `Không tải được ảnh: ${src}` : "Không tải được một ảnh trong khung xuất";
+  }
+  const text = String(error ?? "");
+  return text === "[object Event]" ? "Không tải được một ảnh trong khung xuất" : text;
+}
+
 export async function nodeToPngBlob(node: HTMLElement, scale = 2): Promise<Blob> {
   await document.fonts?.ready;
   const dataUrl = await toPng(node, {
     pixelRatio: scale,
     cacheBust: true,
     skipFonts: false,
+    imagePlaceholder: TRANSPARENT_IMAGE_PLACEHOLDER,
+    onImageErrorHandler: () => undefined,
   });
   const res = await fetch(dataUrl);
   return await res.blob();

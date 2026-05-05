@@ -1,15 +1,19 @@
 import { createFileRoute, useLocation } from "@tanstack/react-router";
 import { useLiveQuery } from "dexie-react-hooks";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import {
   AlertTriangle,
   CheckCircle2,
   Database,
   FileSpreadsheet,
+  ImagePlus,
   Image as ImageIcon,
   Link as LinkIcon,
+  Loader2,
   Store,
+  Trash2,
   Upload,
   XCircle,
 } from "lucide-react";
@@ -34,6 +38,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { PageContainer, PageHeader } from "@/components/PageHeader";
 import { BulkImageUpload } from "@/features/data/BulkImageUpload";
 import {
@@ -56,8 +69,8 @@ import {
   type FieldMapping,
 } from "@/engines/normalize/normalizer";
 import type { Asset, Entity } from "@/models";
-import { db } from "@/storage/db";
-import { getBlobKeyFromSrc } from "@/storage/imageSrc";
+import { db, saveBlob } from "@/storage/db";
+import { getBlobKeyFromSrc, makeIdbSrc } from "@/storage/imageSrc";
 import { setLastActiveSheet } from "@/storage/lastSheet";
 import { getSettings } from "@/storage/settings";
 
@@ -630,6 +643,11 @@ function looksLikeDirectImageSrc(src: string | undefined | null) {
   return Boolean(src && /^(https?:|data:|blob:|\/|\.\/|\.\.\/|idb:\/\/)/i.test(src));
 }
 
+function isImageFile(file: File) {
+  if (file.type.startsWith("image/")) return true;
+  return /\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(file.name);
+}
+
 function getDirectAssetImageSrc(sourceValue: string | undefined, sourceType: Asset["sourceType"]) {
   if (!sourceValue) return undefined;
   if (sourceValue.startsWith("idb://")) return undefined;
@@ -649,6 +667,31 @@ function getAssetBlobKeyCandidates(
   ].filter((value): value is string => !!value?.trim());
 
   return [...new Set(candidates)];
+}
+
+async function removeAssetAndUnusedBlob(asset: Asset) {
+  const blobKeys = getAssetBlobKeyCandidates(asset.blobKey, asset.sourceValue, asset.sourceType);
+
+  await db.transaction("rw", [db.assets, db.blobs], async () => {
+    await db.assets.delete(asset.assetId);
+    const remainingAssets = await db.assets.toArray();
+
+    for (const blobKey of blobKeys) {
+      const stillUsed = remainingAssets.some((item) =>
+        getAssetBlobKeyCandidates(item.blobKey, item.sourceValue, item.sourceType).includes(blobKey),
+      );
+      if (!stillUsed) await db.blobs.delete(blobKey);
+    }
+
+    if (asset.isCover) {
+      const remainingForEntity = remainingAssets.filter((item) => item.entityId === asset.entityId);
+      const hasCover = remainingForEntity.some((item) => item.isCover);
+      const nextCover = remainingForEntity[0];
+      if (!hasCover && nextCover) {
+        await db.assets.update(nextCover.assetId, { isCover: true, role: "cover" });
+      }
+    }
+  });
 }
 
 function useAssetImage(asset: Asset) {
@@ -701,7 +744,17 @@ function useAssetImage(asset: Asset) {
   return state;
 }
 
-function AssetCard({ asset, entity, index }: { asset: Asset; entity?: Entity; index: number }) {
+function AssetCard({
+  asset,
+  entity,
+  index,
+  onDelete,
+}: {
+  asset: Asset;
+  entity?: Entity;
+  index: number;
+  onDelete: (asset: Asset) => void;
+}) {
   const { src, status } = useAssetImage(asset);
   const [failed, setFailed] = useState(false);
 
@@ -715,6 +768,24 @@ function AssetCard({ asset, entity, index }: { asset: Asset; entity?: Entity; in
         <Badge className="absolute left-2 top-2 z-10 rounded-md px-1.5 py-0 text-[11px]">
           P{index + 1}
         </Badge>
+        <Button
+          type="button"
+          size="icon"
+          variant="destructive"
+          className="absolute right-2 top-2 z-10 size-7 opacity-90 shadow-sm"
+          onClick={() => onDelete(asset)}
+          aria-label="Xoá ảnh khỏi quán"
+        >
+          <Trash2 className="size-3.5" />
+        </Button>
+        {asset.isCover ? (
+          <Badge
+            variant="secondary"
+            className="absolute bottom-2 left-2 z-10 rounded-md px-1.5 py-0 text-[11px]"
+          >
+            cover
+          </Badge>
+        ) : null}
         {src && !failed ? (
           <img
             src={src}
@@ -755,6 +826,11 @@ function DataPage() {
   const [driveCheckTotal, setDriveCheckTotal] = useState(0);
   const [driveLinkIssues, setDriveLinkIssues] = useState<DriveLinkIssue[]>([]);
   const [driveIssueFilter, setDriveIssueFilter] = useState<DriveLinkIssueFilter>("private");
+  const [assetActionBusy, setAssetActionBusy] = useState(false);
+  const [assetUploadEntityId, setAssetUploadEntityId] = useState("");
+  const [assetDeleteTarget, setAssetDeleteTarget] = useState<Asset | null>(null);
+  const assetUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const assetUploadTargetRef = useRef<string | null>(null);
 
   const workbookSheets = parsed?.workbookSheets ?? [];
   const isMultiSheetWorkbook = workbookSheets.length > 1;
@@ -874,6 +950,66 @@ function DataPage() {
     setDriveCheckTotal(0);
     setDriveLinkIssues([]);
     setDriveIssueFilter("private");
+  };
+
+  const openAssetUpload = (entityId: string) => {
+    assetUploadTargetRef.current = entityId;
+    assetUploadInputRef.current?.click();
+  };
+
+  const addAssetFilesToEntity = async (event: ChangeEvent<HTMLInputElement>) => {
+    const entityId = assetUploadTargetRef.current;
+    const files = Array.from(event.currentTarget.files ?? []).filter(isImageFile);
+    event.currentTarget.value = "";
+    assetUploadTargetRef.current = null;
+
+    if (!entityId || files.length === 0) return;
+
+    setAssetActionBusy(true);
+    try {
+      const existing = await db.assets.where("entityId").equals(entityId).toArray();
+      let hasCover = existing.some((asset) => asset.isCover || asset.role === "cover");
+      const newAssets: Asset[] = [];
+
+      for (const file of files) {
+        const blobKey = await saveBlob(file);
+        const isCover = !hasCover;
+        if (isCover) hasCover = true;
+        newAssets.push({
+          assetId: nanoid(),
+          entityId,
+          sourceType: "local",
+          sourceValue: makeIdbSrc(blobKey),
+          blobKey,
+          role: isCover ? "cover" : "generic",
+          isCover,
+          qualityScore: 80,
+          status: "ok",
+        });
+      }
+
+      await db.assets.bulkPut(newAssets);
+      const entityName = entityMap.get(entityId)?.name ?? "quán";
+      toast.success(`Đã thêm ${newAssets.length} ảnh vào ${entityName}`);
+    } catch (error) {
+      toast.error("Lỗi thêm ảnh: " + (error instanceof Error ? error.message : String(error)));
+    } finally {
+      setAssetActionBusy(false);
+    }
+  };
+
+  const deleteSelectedAsset = async () => {
+    if (!assetDeleteTarget) return;
+    setAssetActionBusy(true);
+    try {
+      await removeAssetAndUnusedBlob(assetDeleteTarget);
+      toast.success("Đã xoá ảnh khỏi quán.");
+      setAssetDeleteTarget(null);
+    } catch (error) {
+      toast.error("Lỗi xoá ảnh: " + (error instanceof Error ? error.message : String(error)));
+    } finally {
+      setAssetActionBusy(false);
+    }
   };
 
   const checkDriveLinksFromSheet = async (
@@ -1656,15 +1792,55 @@ function DataPage() {
         </TabsContent>
 
         <TabsContent value="assets" className="mt-0">
-          {assets.length === 0 ? (
+          <div className="flex flex-col gap-4">
+            <input
+              ref={assetUploadInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              hidden
+              onChange={(event) => void addAssetFilesToEntity(event)}
+            />
+
             <Card>
-              <CardContent className="p-10 text-center text-sm text-muted-foreground">
-                Chưa có ảnh import.
+              <CardHeader className="pb-3">
+                <CardTitle>Quản lý ảnh theo quán</CardTitle>
+                <CardDescription>
+                  Chọn quán rồi thêm ảnh thủ công, hoặc xoá từng ảnh đang gắn với quán.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3 sm:flex-row">
+                <Select value={assetUploadEntityId} onValueChange={setAssetUploadEntityId}>
+                  <SelectTrigger className="sm:max-w-sm">
+                    <SelectValue placeholder="Chọn quán để thêm ảnh" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {entities.map((entity) => (
+                      <SelectItem key={entity.entityId} value={entity.entityId}>
+                        {entity.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  type="button"
+                  onClick={() => openAssetUpload(assetUploadEntityId)}
+                  disabled={!assetUploadEntityId || assetActionBusy}
+                >
+                  {assetActionBusy ? <Loader2 className="size-4 animate-spin" /> : <ImagePlus />}
+                  Thêm ảnh vào quán
+                </Button>
               </CardContent>
             </Card>
-          ) : (
-            <div className="flex flex-col gap-4">
-              {assetGroups.map((group) => (
+
+            {assets.length === 0 ? (
+              <Card>
+                <CardContent className="p-10 text-center text-sm text-muted-foreground">
+                  Chưa có ảnh import.
+                </CardContent>
+              </Card>
+            ) : (
+              assetGroups.map((group) => (
                 <Card key={group.entity?.entityId ?? group.entityId} className="overflow-hidden">
                   <CardHeader className="border-b p-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1678,7 +1854,19 @@ function DataPage() {
                           </CardDescription>
                         ) : null}
                       </div>
-                      <Badge variant="secondary">{group.assets.length} ảnh</Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary">{group.assets.length} ảnh</Badge>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openAssetUpload(group.entityId)}
+                          disabled={assetActionBusy}
+                        >
+                          <ImagePlus className="size-4" />
+                          Thêm ảnh
+                        </Button>
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent className="p-4">
@@ -1689,14 +1877,43 @@ function DataPage() {
                           asset={asset}
                           entity={group.entity}
                           index={index}
+                          onDelete={setAssetDeleteTarget}
                         />
                       ))}
                     </div>
                   </CardContent>
                 </Card>
-              ))}
-            </div>
-          )}
+              ))
+            )}
+          </div>
+
+          <AlertDialog
+            open={Boolean(assetDeleteTarget)}
+            onOpenChange={(open) => {
+              if (!open && !assetActionBusy) setAssetDeleteTarget(null);
+            }}
+          >
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Xoá ảnh khỏi quán?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Ảnh sẽ bị xoá khỏi danh sách asset. Nếu blob local này không còn ảnh nào khác dùng,
+                  app cũng xoá blob trong IndexedDB để nhẹ trình duyệt hơn.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={assetActionBusy}>Huỷ</AlertDialogCancel>
+                <Button
+                  variant="destructive"
+                  onClick={() => void deleteSelectedAsset()}
+                  disabled={assetActionBusy}
+                >
+                  {assetActionBusy ? <Loader2 className="size-4 animate-spin" /> : null}
+                  Xoá ảnh
+                </Button>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </TabsContent>
       </Tabs>
     </PageContainer>

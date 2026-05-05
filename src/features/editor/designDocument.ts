@@ -170,7 +170,9 @@ function slotToElement(slot: Slot, pageId: string, canvas: CanvasSize): DesignEl
       kind: "text",
       text: slot.staticText ?? "Text",
       textRuns:
-        slot.staticText && slot.staticText.length > 0
+        slot.textRuns?.length
+          ? clone(slot.textRuns)
+          : slot.staticText && slot.staticText.length > 0
           ? [
               {
                 start: 0,
@@ -255,6 +257,7 @@ function elementToSlot(element: DesignElement): Slot {
       locked: element.locked,
       groupId: legacyMeta.groupId as string | undefined,
       staticText: element.text,
+      textRuns: element.textRuns ? clone(element.textRuns) : undefined,
       style,
       ...binding,
     };

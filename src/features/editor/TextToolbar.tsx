@@ -4,16 +4,22 @@
 import { useCallback } from "react";
 import {
   AlignCenter,
+  AlignJustify,
   AlignLeft,
   AlignRight,
+  Blend,
   Bold,
   Italic,
+  MoveHorizontal,
+  Sparkles,
   Strikethrough,
+  TypeOutline,
   Underline,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -21,14 +27,92 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
 import type { DesignTextElement, ElementStyle } from "@/models";
+import type { TextSelectionRange } from "./richText";
 
 const FONT_SIZE_PRESETS = [10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 64, 72, 96, 120];
+const DEFAULT_STROKE_COLOR = "#ffffff";
+const DEFAULT_TEXT_SHADOW_COLOR = "#000000";
+const DEFAULT_GRADIENT_FROM = "#f97316";
+const DEFAULT_GRADIENT_TO = "#ec4899";
+const LETTER_SPACING_MIN = -5;
+const LETTER_SPACING_MAX = 32;
+const LETTER_SPACING_STEP = 0.5;
 
 /** Check if there's a text selection inside a contentEditable */
 function hasSelection(): boolean {
   const sel = window.getSelection();
   return !!sel && !sel.isCollapsed && sel.rangeCount > 0;
+}
+
+function safeColor(value: string | undefined, fallback: string): string {
+  return value?.startsWith("#") ? value : fallback;
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value));
+}
+
+function styleNumber(
+  value: number | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  return clampNumber(typeof value === "number" ? value : fallback, min, max);
+}
+
+function shouldAllowNativeToolbarControl(target: EventTarget | null): boolean {
+  return target instanceof HTMLInputElement && target.type === "color";
+}
+
+function attrSelectorValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function getSelectionRangeForElement(elementId: string): TextSelectionRange | null {
+  const root = document.querySelector(
+    `[data-rich-text-editor-id="${attrSelectorValue(elementId)}"]`,
+  );
+  const selection = window.getSelection();
+  if (!root || !selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+  const range = selection.getRangeAt(0);
+  if (!root.contains(range.commonAncestorContainer)) return null;
+  const before = document.createRange();
+  before.selectNodeContents(root);
+  before.setEnd(range.startContainer, range.startOffset);
+  const start = before.toString().length;
+  const selected = range.toString().length;
+  if (selected <= 0) return null;
+  return { start, end: start + selected };
+}
+
+function applyCssToSelection(patch: Partial<ElementStyle>): boolean {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false;
+  const range = selection.getRangeAt(0);
+  const span = document.createElement("span");
+  if (patch.fontFamily) span.style.fontFamily = patch.fontFamily;
+  if (patch.fontSize) span.style.fontSize = `${patch.fontSize}px`;
+  if (patch.fontWeight) span.style.fontWeight = String(patch.fontWeight);
+  if (patch.fontStyle) span.style.fontStyle = patch.fontStyle;
+  if (patch.textDecoration) span.style.textDecoration = patch.textDecoration;
+  if (patch.color) span.style.color = patch.color;
+  if (patch.lineHeight != null) span.style.lineHeight = String(patch.lineHeight);
+  if (patch.letterSpacing != null) span.style.letterSpacing = `${patch.letterSpacing}px`;
+  try {
+    span.appendChild(range.extractContents());
+    range.insertNode(span);
+    selection.removeAllRanges();
+    const nextRange = document.createRange();
+    nextRange.selectNodeContents(span);
+    selection.addRange(nextRange);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 interface TextToolbarProps {
@@ -37,36 +121,61 @@ interface TextToolbarProps {
   canvasWidth: number;
   availableFontFamilies: string[];
   onUpdateStyle: (patch: Partial<ElementStyle>) => void;
+  onUpdateTextRunStyle?: (range: TextSelectionRange, patch: Partial<ElementStyle>) => void;
   onUpdateText: (text: string) => void;
 }
 
-export function TextToolbar({ element, availableFontFamilies, onUpdateStyle }: TextToolbarProps) {
+export function TextToolbar({
+  element,
+  canvasWidth,
+  availableFontFamilies,
+  onUpdateStyle,
+  onUpdateTextRunStyle,
+}: TextToolbarProps) {
   const style = element.style ?? {};
   const isBold = Number(style.fontWeight ?? 400) >= 600;
   const isItalic = style.fontStyle === "italic";
   const isUnderline = style.textDecoration?.includes("underline") ?? false;
   const isStrikethrough = style.textDecoration?.includes("line-through") ?? false;
   const textAlign = style.textAlign ?? "left";
+  const hasOutline = Number(style.textStrokeWidth ?? 0) > 0;
+  const hasGradient = Boolean(style.gradientEnabled);
+  const hasTextShadow = Boolean(style.textShadowColor);
+  const lineHeight = styleNumber(style.lineHeight, 1.2, 0.8, 3);
+  const letterSpacing = styleNumber(style.letterSpacing, 0, LETTER_SPACING_MIN, LETTER_SPACING_MAX);
+
+  const applyTextStyle = useCallback(
+    (patch: Partial<ElementStyle>) => {
+      const range = getSelectionRangeForElement(element.elementId);
+      if (range && onUpdateTextRunStyle) {
+        applyCssToSelection(patch);
+        onUpdateTextRunStyle(range, patch);
+        return;
+      }
+      onUpdateStyle(patch);
+    },
+    [element.elementId, onUpdateStyle, onUpdateTextRunStyle],
+  );
 
   const toggleBold = useCallback(() => {
     if (hasSelection()) {
-      document.execCommand("bold", false);
+      applyTextStyle({ fontWeight: 700 });
     } else {
       onUpdateStyle({ fontWeight: isBold ? 400 : 700 });
     }
-  }, [isBold, onUpdateStyle]);
+  }, [applyTextStyle, isBold, onUpdateStyle]);
 
   const toggleItalic = useCallback(() => {
     if (hasSelection()) {
-      document.execCommand("italic", false);
+      applyTextStyle({ fontStyle: "italic" });
     } else {
       onUpdateStyle({ fontStyle: isItalic ? "normal" : "italic" });
     }
-  }, [isItalic, onUpdateStyle]);
+  }, [applyTextStyle, isItalic, onUpdateStyle]);
 
   const toggleUnderline = useCallback(() => {
     if (hasSelection()) {
-      document.execCommand("underline", false);
+      applyTextStyle({ textDecoration: "underline" });
     } else {
       const base = style.textDecoration ?? "none";
       const hasU = base.includes("underline");
@@ -77,11 +186,11 @@ export function TextToolbar({ element, availableFontFamilies, onUpdateStyle }: T
         onUpdateStyle({ textDecoration: hasS ? "underline line-through" : "underline" });
       }
     }
-  }, [style.textDecoration, onUpdateStyle]);
+  }, [applyTextStyle, style.textDecoration, onUpdateStyle]);
 
   const toggleStrikethrough = useCallback(() => {
     if (hasSelection()) {
-      document.execCommand("strikeThrough", false);
+      applyTextStyle({ textDecoration: "line-through" });
     } else {
       const base = style.textDecoration ?? "none";
       const hasU = base.includes("underline");
@@ -92,7 +201,7 @@ export function TextToolbar({ element, availableFontFamilies, onUpdateStyle }: T
         onUpdateStyle({ textDecoration: hasU ? "underline line-through" : "line-through" });
       }
     }
-  }, [style.textDecoration, onUpdateStyle]);
+  }, [applyTextStyle, style.textDecoration, onUpdateStyle]);
 
   const setAlign = useCallback(
     (align: "left" | "center" | "right") => {
@@ -101,16 +210,53 @@ export function TextToolbar({ element, availableFontFamilies, onUpdateStyle }: T
     [onUpdateStyle],
   );
 
+  const toggleOutline = useCallback(() => {
+    onUpdateStyle({
+      textStrokeWidth: hasOutline ? 0 : Math.max(2, Number(style.textStrokeWidth ?? 0)),
+      textStrokeColor: style.textStrokeColor ?? DEFAULT_STROKE_COLOR,
+    });
+  }, [hasOutline, onUpdateStyle, style.textStrokeColor, style.textStrokeWidth]);
+
+  const toggleGradient = useCallback(() => {
+    onUpdateStyle({
+      gradientEnabled: !hasGradient,
+      gradientFrom: style.gradientFrom ?? DEFAULT_GRADIENT_FROM,
+      gradientTo: style.gradientTo ?? DEFAULT_GRADIENT_TO,
+      gradientAngle: style.gradientAngle ?? 90,
+    });
+  }, [hasGradient, onUpdateStyle, style.gradientAngle, style.gradientFrom, style.gradientTo]);
+
+  const toggleTextShadow = useCallback(() => {
+    onUpdateStyle({
+      textShadowColor: hasTextShadow
+        ? undefined
+        : (style.textShadowColor ?? DEFAULT_TEXT_SHADOW_COLOR),
+      textShadowBlur: hasTextShadow ? undefined : (style.textShadowBlur ?? 8),
+      textShadowX: hasTextShadow ? undefined : (style.textShadowX ?? 2),
+      textShadowY: hasTextShadow ? undefined : (style.textShadowY ?? 4),
+      textShadow: hasTextShadow ? undefined : style.textShadow,
+    });
+  }, [
+    hasTextShadow,
+    onUpdateStyle,
+    style.textShadow,
+    style.textShadowBlur,
+    style.textShadowColor,
+    style.textShadowX,
+    style.textShadowY,
+  ]);
+
   return (
     <div
-      className="pointer-events-auto absolute left-0 top-[-44px] z-50 flex w-max max-w-none flex-nowrap items-center gap-0.5 whitespace-nowrap rounded-lg border bg-card px-1 py-0.5 shadow-lg"
+      className="pointer-events-auto absolute left-1/2 top-[-52px] z-50 flex w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-nowrap items-center gap-0.5 whitespace-nowrap rounded-lg border bg-card px-1 py-0.5 shadow-lg"
       style={{
-        transform: "translateX(0)",
+        maxWidth: Math.max(280, canvasWidth - 24),
       }}
       onMouseDown={(e) => {
-        // Prevent stealing focus from contentEditable
-        e.preventDefault();
         e.stopPropagation();
+        if (!shouldAllowNativeToolbarControl(e.target)) {
+          e.preventDefault();
+        }
       }}
     >
       {/* Bold */}
@@ -162,7 +308,7 @@ export function TextToolbar({ element, availableFontFamilies, onUpdateStyle }: T
       {/* Font family */}
       <Select
         value={String(style.fontFamily ?? "Be Vietnam Pro")}
-        onValueChange={(value) => onUpdateStyle({ fontFamily: value })}
+        onValueChange={(value) => applyTextStyle({ fontFamily: value })}
       >
         <SelectTrigger className="h-7 w-[120px] gap-1 border-none px-1.5 text-xs shadow-none">
           <SelectValue />
@@ -179,7 +325,7 @@ export function TextToolbar({ element, availableFontFamilies, onUpdateStyle }: T
       {/* Font size */}
       <Select
         value={String(style.fontSize ?? 48)}
-        onValueChange={(value) => onUpdateStyle({ fontSize: Number(value) })}
+        onValueChange={(value) => applyTextStyle({ fontSize: Number(value) })}
       >
         <SelectTrigger className="h-7 w-[56px] gap-0.5 border-none px-1.5 text-xs shadow-none">
           <SelectValue />
@@ -223,14 +369,379 @@ export function TextToolbar({ element, availableFontFamilies, onUpdateStyle }: T
 
       {/* Color */}
       <div className="ml-0.5 flex items-center">
-        <Label className="sr-only">Text color</Label>
+        <Label className="sr-only">Màu chữ</Label>
         <Input
           type="color"
           value={style.color ?? "#0f172a"}
-          onChange={(event) => onUpdateStyle({ color: event.target.value })}
+          onInput={(event) => applyTextStyle({ color: event.currentTarget.value })}
+          onChange={(event) => applyTextStyle({ color: event.target.value })}
+          aria-label="Màu chữ"
           className="size-7 cursor-pointer rounded border p-0.5"
         />
       </div>
+
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-7"
+            aria-label="Khoảng cách dòng"
+            title="Khoảng cách dòng"
+          >
+            <AlignJustify className="size-3.5" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          className="w-64 p-3"
+          side="top"
+          align="start"
+          onOpenAutoFocus={(event) => event.preventDefault()}
+        >
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-xs font-medium">Khoảng cách dòng</Label>
+              <span className="text-[11px] tabular-nums text-muted-foreground">
+                {lineHeight.toFixed(2)}
+              </span>
+            </div>
+            <Slider
+              value={[lineHeight]}
+              min={0.8}
+              max={3}
+              step={0.05}
+              onValueChange={([value]) => applyTextStyle({ lineHeight: value })}
+            />
+          </div>
+        </PopoverContent>
+      </Popover>
+
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            size="icon"
+            variant={letterSpacing !== 0 ? "default" : "ghost"}
+            className="size-7"
+            aria-label="Giãn chữ"
+            title="Giãn chữ"
+          >
+            <MoveHorizontal className="size-3.5" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          className="w-64 p-3"
+          side="top"
+          align="start"
+          onOpenAutoFocus={(event) => event.preventDefault()}
+        >
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-xs font-medium">Giãn chữ</Label>
+              <span className="text-[11px] tabular-nums text-muted-foreground">
+                {letterSpacing.toFixed(1)}px
+              </span>
+            </div>
+            <Slider
+              value={[letterSpacing]}
+              min={LETTER_SPACING_MIN}
+              max={LETTER_SPACING_MAX}
+              step={LETTER_SPACING_STEP}
+              onValueChange={([value]) => applyTextStyle({ letterSpacing: value })}
+            />
+            <div className="grid grid-cols-[1fr_auto] items-end gap-2">
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs text-muted-foreground">Khoảng</Label>
+                <Input
+                  type="number"
+                  value={letterSpacing}
+                  min={LETTER_SPACING_MIN}
+                  max={LETTER_SPACING_MAX}
+                  step={LETTER_SPACING_STEP}
+                  onChange={(event) =>
+                    applyTextStyle({
+                      letterSpacing: clampNumber(
+                        Number(event.target.value),
+                        LETTER_SPACING_MIN,
+                        LETTER_SPACING_MAX,
+                      ),
+                    })
+                  }
+                  className="h-8"
+                />
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8"
+                onClick={() => applyTextStyle({ letterSpacing: 0 })}
+              >
+                Về 0
+              </Button>
+            </div>
+          </div>
+        </PopoverContent>
+      </Popover>
+
+      <div className="mx-0.5 h-5 w-px bg-border" />
+
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            size="icon"
+            variant={hasOutline ? "default" : "ghost"}
+            className="size-7"
+            aria-label="Viền chữ"
+            title="Viền chữ"
+          >
+            <TypeOutline className="size-3.5" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          className="w-64 p-3"
+          side="top"
+          align="start"
+          onOpenAutoFocus={(event) => event.preventDefault()}
+        >
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-xs font-medium">Viền chữ</Label>
+              <Button
+                size="sm"
+                variant={hasOutline ? "default" : "outline"}
+                onClick={toggleOutline}
+              >
+                {hasOutline ? "Bật" : "Tắt"}
+              </Button>
+            </div>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-xs text-muted-foreground">Độ dày</Label>
+                <span className="text-[11px] tabular-nums text-muted-foreground">
+                  {Number(style.textStrokeWidth ?? 0)}px
+                </span>
+              </div>
+              <Slider
+                value={[Number(style.textStrokeWidth ?? 0)]}
+                min={0}
+                max={12}
+                step={1}
+                onValueChange={([value]) =>
+                  onUpdateStyle({
+                    textStrokeWidth: value,
+                    textStrokeColor: style.textStrokeColor ?? DEFAULT_STROKE_COLOR,
+                  })
+                }
+              />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <Label className="text-xs text-muted-foreground">Màu</Label>
+              <Input
+                type="color"
+                value={safeColor(style.textStrokeColor, DEFAULT_STROKE_COLOR)}
+                onChange={(event) =>
+                  onUpdateStyle({
+                    textStrokeColor: event.target.value,
+                    textStrokeWidth: hasOutline ? style.textStrokeWidth : 2,
+                  })
+                }
+                className="h-8 w-12 cursor-pointer p-1"
+              />
+            </div>
+          </div>
+        </PopoverContent>
+      </Popover>
+
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            size="icon"
+            variant={hasGradient ? "default" : "ghost"}
+            className="size-7"
+            aria-label="Màu chuyển"
+            title="Màu chuyển"
+          >
+            <Blend className="size-3.5" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          className="w-64 p-3"
+          side="top"
+          align="start"
+          onOpenAutoFocus={(event) => event.preventDefault()}
+        >
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-xs font-medium">Màu chuyển</Label>
+              <Button
+                size="sm"
+                variant={hasGradient ? "default" : "outline"}
+                onClick={toggleGradient}
+              >
+                {hasGradient ? "Bật" : "Tắt"}
+              </Button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs text-muted-foreground">Từ</Label>
+                <Input
+                  type="color"
+                  value={safeColor(style.gradientFrom, DEFAULT_GRADIENT_FROM)}
+                  onChange={(event) =>
+                    onUpdateStyle({
+                      gradientEnabled: true,
+                      gradientFrom: event.target.value,
+                      gradientTo: style.gradientTo ?? DEFAULT_GRADIENT_TO,
+                    })
+                  }
+                  className="h-8 cursor-pointer p-1"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs text-muted-foreground">Đến</Label>
+                <Input
+                  type="color"
+                  value={safeColor(style.gradientTo, DEFAULT_GRADIENT_TO)}
+                  onChange={(event) =>
+                    onUpdateStyle({
+                      gradientEnabled: true,
+                      gradientFrom: style.gradientFrom ?? DEFAULT_GRADIENT_FROM,
+                      gradientTo: event.target.value,
+                    })
+                  }
+                  className="h-8 cursor-pointer p-1"
+                />
+              </div>
+            </div>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-xs text-muted-foreground">Góc</Label>
+                <span className="text-[11px] tabular-nums text-muted-foreground">
+                  {style.gradientAngle ?? 90}°
+                </span>
+              </div>
+              <Slider
+                value={[style.gradientAngle ?? 90]}
+                min={0}
+                max={360}
+                step={15}
+                onValueChange={([value]) =>
+                  onUpdateStyle({
+                    gradientEnabled: true,
+                    gradientFrom: style.gradientFrom ?? DEFAULT_GRADIENT_FROM,
+                    gradientTo: style.gradientTo ?? DEFAULT_GRADIENT_TO,
+                    gradientAngle: value,
+                  })
+                }
+              />
+            </div>
+          </div>
+        </PopoverContent>
+      </Popover>
+
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            size="icon"
+            variant={hasTextShadow ? "default" : "ghost"}
+            className="size-7"
+            aria-label="Bóng chữ"
+            title="Bóng chữ"
+          >
+            <Sparkles className="size-3.5" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          className="w-64 p-3"
+          side="top"
+          align="start"
+          onOpenAutoFocus={(event) => event.preventDefault()}
+        >
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-xs font-medium">Bóng chữ</Label>
+              <Button
+                size="sm"
+                variant={hasTextShadow ? "default" : "outline"}
+                onClick={toggleTextShadow}
+              >
+                {hasTextShadow ? "Bật" : "Tắt"}
+              </Button>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <Label className="text-xs text-muted-foreground">Màu</Label>
+              <Input
+                type="color"
+                value={safeColor(style.textShadowColor, DEFAULT_TEXT_SHADOW_COLOR)}
+                onChange={(event) =>
+                  onUpdateStyle({
+                    textShadowColor: event.target.value,
+                    textShadowBlur: style.textShadowBlur ?? 8,
+                    textShadowX: style.textShadowX ?? 2,
+                    textShadowY: style.textShadowY ?? 4,
+                  })
+                }
+                className="h-8 w-12 cursor-pointer p-1"
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-xs text-muted-foreground">Mờ</Label>
+                <span className="text-[11px] tabular-nums text-muted-foreground">
+                  {Number(style.textShadowBlur ?? 8)}px
+                </span>
+              </div>
+              <Slider
+                value={[Number(style.textShadowBlur ?? 8)]}
+                min={0}
+                max={40}
+                step={1}
+                onValueChange={([value]) =>
+                  onUpdateStyle({
+                    textShadowColor: style.textShadowColor ?? DEFAULT_TEXT_SHADOW_COLOR,
+                    textShadowBlur: value,
+                    textShadowX: style.textShadowX ?? 2,
+                    textShadowY: style.textShadowY ?? 4,
+                  })
+                }
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs text-muted-foreground">X</Label>
+                <Input
+                  type="number"
+                  value={Number(style.textShadowX ?? 2)}
+                  onChange={(event) =>
+                    onUpdateStyle({
+                      textShadowColor: style.textShadowColor ?? DEFAULT_TEXT_SHADOW_COLOR,
+                      textShadowBlur: style.textShadowBlur ?? 8,
+                      textShadowX: Number(event.target.value),
+                      textShadowY: style.textShadowY ?? 4,
+                    })
+                  }
+                  className="h-8"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs text-muted-foreground">Y</Label>
+                <Input
+                  type="number"
+                  value={Number(style.textShadowY ?? 4)}
+                  onChange={(event) =>
+                    onUpdateStyle({
+                      textShadowColor: style.textShadowColor ?? DEFAULT_TEXT_SHADOW_COLOR,
+                      textShadowBlur: style.textShadowBlur ?? 8,
+                      textShadowX: style.textShadowX ?? 2,
+                      textShadowY: Number(event.target.value),
+                    })
+                  }
+                  className="h-8"
+                />
+              </div>
+            </div>
+          </div>
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }

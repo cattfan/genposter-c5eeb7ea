@@ -631,6 +631,27 @@ function matchesAssetRandomScope(
   return entityScopeValues(owner, asset).some((value) => normalizeLookupToken(value) === target);
 }
 
+function fallbackAssetsForEntity(
+  renderableAssets: Asset[],
+  entityById: Map<string, Entity>,
+  entity: Entity,
+): Asset[] {
+  const sameSheet = renderableAssets.filter((asset) => {
+    const owner = entityById.get(asset.entityId);
+    return !!entity.sheetName && owner?.sheetName === entity.sheetName;
+  });
+  if (sameSheet.length > 0) return sameSheet;
+
+  const sameCategory = renderableAssets.filter((asset) => {
+    const owner = entityById.get(asset.entityId);
+    return (
+      (!!entity.categoryMain && owner?.categoryMain === entity.categoryMain) ||
+      (!!entity.categorySub && owner?.categorySub === entity.categorySub)
+    );
+  });
+  return sameCategory.length > 0 ? sameCategory : renderableAssets;
+}
+
 export function resolveImageBinding(
   bindingPath: string | undefined,
   entity: Entity | undefined,
@@ -674,7 +695,10 @@ export function resolveImageBinding(
       : { src: fallback };
   }
   if (!entity) return { src: fallback };
-  const pool = renderableAssets.filter((a) => a.entityId === entity.entityId);
+  const entityById = new Map((options?.entities ?? []).map((item) => [item.entityId, item]));
+  const exactPool = renderableAssets.filter((a) => a.entityId === entity.entityId);
+  const pool =
+    exactPool.length > 0 ? exactPool : fallbackAssetsForEntity(renderableAssets, entityById, entity);
   if (bindingPath === "asset.random") {
     const randomAsset = pickStableRandomAsset(
       pool,
@@ -684,7 +708,7 @@ export function resolveImageBinding(
       ? {
           src: getAssetImageSource(randomAsset) ?? randomAsset.sourceValue,
           assetId: randomAsset.assetId,
-          entityId: entity.entityId,
+          entityId: randomAsset.entityId,
         }
       : { src: fallback };
   }
@@ -694,7 +718,7 @@ export function resolveImageBinding(
       ? {
           src: getAssetImageSource(cover) ?? cover.sourceValue,
           assetId: cover.assetId,
-          entityId: entity.entityId,
+          entityId: cover.entityId,
         }
       : { src: fallback };
   }
@@ -705,7 +729,7 @@ export function resolveImageBinding(
       ? {
           src: getAssetImageSource(found) ?? found.sourceValue,
           assetId: found.assetId,
-          entityId: entity.entityId,
+          entityId: found.entityId,
         }
       : { src: fallback };
   }
@@ -746,18 +770,16 @@ export function buildTextShadow(style: Slot["style"], scale = 1): string | undef
 
 function buildTextStrokeFallbackShadow(style: Slot["style"], scale = 1): string | undefined {
   if (!style?.textStrokeColor || !style.textStrokeWidth) return undefined;
-  const width = Math.max(0, style.textStrokeWidth * scale);
+  const width = Math.max(0, Math.round(style.textStrokeWidth * scale));
   if (!width) return undefined;
-  const offsets = [
-    [-width, 0],
-    [width, 0],
-    [0, -width],
-    [0, width],
-    [-width, -width],
-    [width, -width],
-    [-width, width],
-    [width, width],
-  ];
+  const offsets: Array<[number, number]> = [];
+  for (let x = -width; x <= width; x += 1) {
+    for (let y = -width; y <= width; y += 1) {
+      if (x === 0 && y === 0) continue;
+      const distance = Math.sqrt(x * x + y * y);
+      if (distance <= width + 0.25) offsets.push([x, y]);
+    }
+  }
   return offsets.map(([x, y]) => `${x}px ${y}px 0 ${style.textStrokeColor}`).join(", ");
 }
 
@@ -788,7 +810,7 @@ export function buildTextStyle(style: Slot["style"] | undefined, scale = 1): Rea
   const s = style ?? {};
   const lineHeight =
     typeof s.lineHeight === "number" && Number.isFinite(s.lineHeight)
-      ? Math.max(1.05, Math.min(2.4, s.lineHeight))
+      ? Math.max(0.8, Math.min(3, s.lineHeight))
       : 1.2;
   const textShadows = [buildTextShadow(s, scale), buildTextStrokeFallbackShadow(s, scale)].filter(
     Boolean,
@@ -811,13 +833,7 @@ export function buildTextStyle(style: Slot["style"] | undefined, scale = 1): Rea
     wordBreak: "break-word",
     overflow: s.maxLines && s.maxLines > 0 ? "hidden" : "visible",
   };
-  // Text stroke (webkit)
-  if (s.textStrokeWidth && s.textStrokeColor) {
-    (css as React.CSSProperties & { WebkitTextStroke?: string }).WebkitTextStroke =
-      `${s.textStrokeWidth * scale}px ${s.textStrokeColor}`;
-  } else if (s.textStroke) {
-    (css as React.CSSProperties & { WebkitTextStroke?: string }).WebkitTextStroke = s.textStroke;
-  }
+  // Text outline is rendered with text-shadow, not WebKit text-stroke, so stroke cannot cover fill.
   // Gradient text
   if (s.gradientEnabled && s.gradientFrom && s.gradientTo) {
     const grad = buildGradient(s)!;

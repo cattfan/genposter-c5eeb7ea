@@ -91,7 +91,7 @@ export function ColorPicker({ value, onChange, className }: ColorPickerProps) {
       {/* Recent colors */}
       {recent.length > 0 ? (
         <div>
-          <p className="mb-1 text-[10px] uppercase text-muted-foreground">Recent</p>
+          <p className="mb-1 text-[10px] uppercase text-muted-foreground">Gần đây</p>
           <div className="flex flex-wrap gap-1">
             {recent.map((color) => (
               <button
@@ -108,7 +108,7 @@ export function ColorPicker({ value, onChange, className }: ColorPickerProps) {
 
       {/* Swatches */}
       <div>
-        <p className="mb-1 text-[10px] uppercase text-muted-foreground">Swatches</p>
+        <p className="mb-1 text-[10px] uppercase text-muted-foreground">Mẫu màu</p>
         <div className="flex flex-wrap gap-0.5">
           {SWATCHES.map((color) => (
             <button

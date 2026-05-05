@@ -1,8 +1,9 @@
 import { nanoid } from "nanoid";
 import type { PackTemplate, PageTemplate, PageType } from "@/models";
 import { db } from "@/storage/db";
+import { formatTemplateDisplayName } from "@/lib/templateNames";
 
-export const DEFAULT_PACK_NAME = "Pack mặc định";
+export const DEFAULT_PACK_NAME = "Bộ khuôn mặc định";
 
 export function createPackTemplate(
   input: { name?: string; orderedPages?: string[] } = {},
@@ -10,7 +11,7 @@ export function createPackTemplate(
   const now = Date.now();
   return {
     packTemplateId: nanoid(),
-    name: input.name?.trim() || "Pack mới",
+    name: input.name?.trim() || "Bộ khuôn mới",
     orderedPages: Array.from(new Set(input.orderedPages ?? [])),
     requiredPages: [],
     optionalPages: [],
@@ -27,7 +28,7 @@ export function createBlankPageTemplate(
   const now = Date.now();
   return {
     pageTemplateId: nanoid(),
-    name: input.name?.trim() || "Page Template mới",
+    name: input.name?.trim() || "Trang mới",
     type: input.type ?? "cover",
     canvas: { width: 1080, height: 1350, background: "#ffffff" },
     slots: [],
@@ -46,7 +47,7 @@ export function duplicatePageTemplate(template: PageTemplate, name?: string): Pa
   return {
     ...copy,
     pageTemplateId,
-    name: name?.trim() || `${copy.name} (copy)`,
+    name: name?.trim() || `${formatTemplateDisplayName(copy.name, "Trang")} - bản sao`,
     slots: copy.slots.map((slot) => ({
       ...slot,
       slotId: slotIdMap.get(slot.slotId) ?? nanoid(),

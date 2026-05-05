@@ -21,6 +21,20 @@ import type {
 } from "@/models";
 
 export type SystemBackupImportMode = "replace" | "merge";
+export type SystemBackupScope = "all" | "packTemplates" | "generatePresets" | "custom";
+export type SystemBackupSection = "systemData" | "packTemplates" | "generatePresets";
+
+export interface SystemBackupExportOptions {
+  scope?: SystemBackupScope;
+  sections?: SystemBackupSection[];
+  includeImages?: boolean;
+}
+
+const ALL_BACKUP_SECTIONS: SystemBackupSection[] = [
+  "systemData",
+  "packTemplates",
+  "generatePresets",
+];
 
 interface BackupBlobMeta {
   blobKey: string;
@@ -34,6 +48,9 @@ interface SystemBackupManifestV1 {
   app: "genposter";
   kind: "system-backup";
   version: 1;
+  scope?: SystemBackupScope;
+  sections?: SystemBackupSection[];
+  includesImages?: boolean;
   exportedAt: number;
   projects: Project[];
   entities: Entity[];
@@ -72,6 +89,77 @@ function blobPath(blobKey: string) {
   return `blobs/${encodeURIComponent(blobKey)}`;
 }
 
+function getIdbBlobKey(src: string) {
+  return src.startsWith("idb://") ? src.slice("idb://".length) : null;
+}
+
+function collectIdbBlobKeys(value: unknown, out = new Set<string>()) {
+  if (!value) return out;
+  if (typeof value === "string") {
+    const key = getIdbBlobKey(value);
+    if (key) out.add(key);
+    return out;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectIdbBlobKeys(item, out);
+    return out;
+  }
+  if (typeof value === "object") {
+    for (const item of Object.values(value as Record<string, unknown>)) {
+      collectIdbBlobKeys(item, out);
+    }
+  }
+  return out;
+}
+
+function pageIdsForPacks(packTemplates: PackTemplate[]) {
+  return new Set(
+    packTemplates.flatMap((pack) => [
+      ...pack.orderedPages,
+      ...pack.requiredPages,
+      ...pack.optionalPages,
+    ]),
+  );
+}
+
+function sectionsFromOptions(options: SystemBackupExportOptions): SystemBackupSection[] {
+  if (options.sections?.length) {
+    return Array.from(new Set(options.sections));
+  }
+
+  if (options.scope === "packTemplates") return ["packTemplates"];
+  if (options.scope === "generatePresets") return ["generatePresets"];
+  return ALL_BACKUP_SECTIONS;
+}
+
+function scopeFromSections(sections: SystemBackupSection[]): SystemBackupScope {
+  const selected = new Set(sections);
+  if (ALL_BACKUP_SECTIONS.every((section) => selected.has(section))) return "all";
+  if (selected.size === 1 && selected.has("packTemplates")) return "packTemplates";
+  if (selected.size === 1 && selected.has("generatePresets")) return "generatePresets";
+  return "custom";
+}
+
+function addBlobKeysFromRecords(
+  records: Array<{ blobKey?: string; sourceValue?: string; imageBlobKeys?: string[] }>,
+  out: Set<string>,
+) {
+  for (const record of records) {
+    if (record.blobKey) out.add(record.blobKey);
+    if (record.sourceValue) collectIdbBlobKeys(record.sourceValue, out);
+    for (const key of record.imageBlobKeys ?? []) out.add(key);
+  }
+}
+
+function collectManifestBlobKeys(manifest: SystemBackupManifestV1) {
+  const keys = collectIdbBlobKeys(manifest);
+  addBlobKeysFromRecords(manifest.assets, keys);
+  addBlobKeysFromRecords(manifest.assetLibrary, keys);
+  addBlobKeysFromRecords(manifest.fontAssets, keys);
+  addBlobKeysFromRecords(manifest.analyses, keys);
+  return keys;
+}
+
 function assertManifest(data: unknown): asserts data is SystemBackupManifestV1 {
   if (!data || typeof data !== "object") {
     throw new Error("Backup không hợp lệ.");
@@ -85,7 +173,13 @@ function assertManifest(data: unknown): asserts data is SystemBackupManifestV1 {
   }
 }
 
-async function readCurrentManifest(): Promise<{ manifest: SystemBackupManifestV1; blobRecords: BlobRecord[] }> {
+async function readCurrentManifest(
+  options: SystemBackupExportOptions = {},
+): Promise<{ manifest: SystemBackupManifestV1; blobRecords: BlobRecord[] }> {
+  const sections = sectionsFromOptions(options);
+  const scope = scopeFromSections(sections);
+  const selectedSections = new Set(sections);
+  const includeImages = options.includeImages ?? true;
   const [
     projects,
     entities,
@@ -125,44 +219,105 @@ async function readCurrentManifest(): Promise<{ manifest: SystemBackupManifestV1
       ? settingsRecords.map((record) => stripSecretsFromSettings(record))
       : [{ id: "app", ...stripSecretsFromSettings(await getSettings()) }];
 
+  const includeSystemData = selectedSections.has("systemData");
+  const packMap = new Map<string, PackTemplate>();
+  const pageIds = new Set<string>();
+
+  if (selectedSections.has("packTemplates")) {
+    for (const pack of packTemplates) packMap.set(pack.packTemplateId, pack);
+    for (const pageId of pageIdsForPacks(packTemplates)) pageIds.add(pageId);
+  }
+
+  const selectedGeneratePresets = selectedSections.has("generatePresets") ? generatePresets : [];
+  if (selectedGeneratePresets.length > 0) {
+    const presetPackIds = new Set(
+      selectedGeneratePresets
+        .map((preset) => preset.packTemplateId)
+        .filter((packId): packId is string => Boolean(packId)),
+    );
+    const presetPacks = packTemplates.filter((pack) => presetPackIds.has(pack.packTemplateId));
+    for (const pack of presetPacks) packMap.set(pack.packTemplateId, pack);
+    for (const pageId of pageIdsForPacks(presetPacks)) pageIds.add(pageId);
+    for (const preset of selectedGeneratePresets) {
+      for (const pageId of preset.pageTemplateIds) pageIds.add(pageId);
+    }
+  }
+
+  const selectedProjects = includeSystemData ? projects : [];
+  const selectedEntities = includeSystemData ? entities : [];
+  const selectedAssets = includeSystemData ? assets : [];
+  const selectedAssetLibrary = includeSystemData ? assetLibrary : [];
+  const selectedBrandKits = includeSystemData ? brandKits : [];
+  const selectedDesignDocuments = includeSystemData ? designDocuments : [];
+  const selectedFontAssets = includeSystemData ? fontAssets : [];
+  const selectedPageTemplates = pageTemplates.filter((page) => pageIds.has(page.pageTemplateId));
+  const selectedPackTemplates = Array.from(packMap.values());
+  const selectedJobs = includeSystemData ? jobs : [];
+  const selectedOverrides = includeSystemData ? overrides : [];
+  const selectedAnalyses = includeSystemData ? analyses : [];
+  const selectedSettings = includeSystemData ? settings : [];
+
   const manifest: SystemBackupManifestV1 = {
     app: "genposter",
     kind: "system-backup",
     version: 1,
+    scope,
+    sections,
+    includesImages: includeImages,
     exportedAt: Date.now(),
-    projects,
-    entities,
-    assets,
-    assetLibrary,
-    brandKits,
-    designDocuments,
-    fontAssets,
-    pageTemplates,
-    packTemplates,
-    jobs,
-    overrides,
-    generatePresets,
-    analyses,
-    settings,
-    blobs: blobRecords.map((record) => ({
+    projects: selectedProjects,
+    entities: selectedEntities,
+    assets: selectedAssets,
+    assetLibrary: selectedAssetLibrary,
+    brandKits: selectedBrandKits,
+    designDocuments: selectedDesignDocuments,
+    fontAssets: selectedFontAssets,
+    pageTemplates: selectedPageTemplates,
+    packTemplates: selectedPackTemplates,
+    jobs: selectedJobs,
+    overrides: selectedOverrides,
+    generatePresets: selectedGeneratePresets,
+    analyses: selectedAnalyses,
+    settings: selectedSettings,
+    blobs: [],
+  };
+
+  const manifestBlobKeys = includeImages && scope !== "all" ? collectManifestBlobKeys(manifest) : null;
+  const selectedBlobRecords = includeImages
+    ? scope === "all"
+      ? blobRecords
+      : blobRecords.filter((record) => manifestBlobKeys?.has(record.blobKey))
+    : [];
+
+  manifest.blobs = selectedBlobRecords.map((record) => ({
       blobKey: record.blobKey,
       mime: record.mime,
       createdAt: record.createdAt,
       path: blobPath(record.blobKey),
       size: record.blob.size,
-    })),
-  };
+    }));
 
-  return { manifest, blobRecords };
+  return { manifest, blobRecords: selectedBlobRecords };
 }
 
-export function getSystemBackupFileName(now = Date.now()) {
+function backupScopeFileLabel(scope: SystemBackupScope) {
+  if (scope === "packTemplates") return "pack-template";
+  if (scope === "generatePresets") return "khuon-do-du-lieu";
+  if (scope === "custom") return "custom";
+  return "full";
+}
+
+export function getSystemBackupFileName(
+  now = Date.now(),
+  scope: SystemBackupScope = "all",
+  includeImages = true,
+) {
   const stamp = new Date(now).toISOString().replace(/[:.]/g, "-");
-  return `genposter-backup-${stamp}.zip`;
+  return `genposter-backup-${backupScopeFileLabel(scope)}-${includeImages ? "with-images" : "no-images"}-${stamp}.zip`;
 }
 
-export async function createSystemBackupZip(): Promise<Blob> {
-  const { manifest, blobRecords } = await readCurrentManifest();
+export async function createSystemBackupZip(options: SystemBackupExportOptions = {}): Promise<Blob> {
+  const { manifest, blobRecords } = await readCurrentManifest(options);
   const zip = new JSZip();
   zip.file("manifest.json", JSON.stringify(manifest, null, 2));
   for (const record of blobRecords) {
@@ -296,8 +451,18 @@ export async function importSystemBackupFile(
 
   const { manifest, blobRecords } = await readBackupZip(file);
   await restoreSystemBackup(manifest, blobRecords, mode);
+  const message =
+    manifest.scope === "packTemplates"
+      ? `Đã khôi phục ${manifest.packTemplates.length} bộ khuôn, ${manifest.pageTemplates.length} trang khuôn và ${blobRecords.length} ảnh.`
+      : manifest.scope === "generatePresets"
+        ? `Đã khôi phục ${manifest.generatePresets.length} khuôn đổ dữ liệu, ${manifest.packTemplates.length} bộ khuôn, ${manifest.pageTemplates.length} trang khuôn và ${blobRecords.length} ảnh.`
+        : `Đã khôi phục backup gồm ${manifest.entities.length} dòng dữ liệu, ${manifest.assets.length} asset và ${blobRecords.length} ảnh.`;
   return {
     kind: "system-backup",
-    message: `Đã khôi phục backup gồm ${manifest.entities.length} dòng dữ liệu, ${manifest.assets.length} asset và ${blobRecords.length} ảnh.`,
+    message,
+    warning:
+      manifest.includesImages === false
+        ? "Backup này không chứa ảnh local, các ảnh lưu trong IndexedDB sẽ không được khôi phục."
+        : undefined,
   };
 }

@@ -22,6 +22,7 @@ import {
 import { LayoutGuides } from "@/features/render/LayoutGuides";
 import { useResolvedImageSrc } from "@/storage/imageSrc";
 import { expandPageWithCardGroups } from "@/engines/binding/cardRepeater";
+import { renderRichTextRuns } from "@/features/editor/richText";
 
 const IMAGE_PLACEHOLDER_BACKGROUND =
   "repeating-linear-gradient(135deg, rgba(99,102,241,0.035) 0, rgba(99,102,241,0.035) 12px, rgba(248,250,252,0.28) 12px, rgba(248,250,252,0.28) 24px)";
@@ -122,6 +123,7 @@ export function BindCanvas({
         assets,
         resolveEntityForSlot,
         seedKey ?? template.pageTemplateId,
+        imageResolveEntities,
       ),
     [
       expanded.slots,
@@ -131,6 +133,7 @@ export function BindCanvas({
       entity,
       seedKey,
       template.pageTemplateId,
+      imageResolveEntities,
     ],
   );
 
@@ -284,7 +287,13 @@ export function BindCanvas({
             scale={scale}
             selected={selectedSlotIds.includes(slot.slotId)}
             onSelect={(mode) =>
-              onSelectSlot(slot.slotId, mode, getRelatedSlotIds(slot, visiblePrimarySlots))
+              onSelectSlot(
+                slot.slotId,
+                mode,
+                mode === "replace"
+                  ? getDataGroupSlotIds(slot, visiblePrimarySlots)
+                  : getRelatedSlotIds(slot, visiblePrimarySlots),
+              )
             }
             entity={resolvedEntity}
             entityPool={entityPool}
@@ -306,7 +315,13 @@ export function BindCanvas({
           selected={selectedSlotIds.includes(slot.slotId)}
           flatPreview={flatPreview}
           onSelect={(mode) =>
-            onSelectSlot(slot.slotId, mode, getRelatedSlotIds(slot, visiblePrimarySlots))
+            onSelectSlot(
+              slot.slotId,
+              mode,
+              mode === "replace"
+                ? getDataGroupSlotIds(slot, visiblePrimarySlots)
+                : getRelatedSlotIds(slot, visiblePrimarySlots),
+            )
           }
         />
       ))}
@@ -365,7 +380,19 @@ function rectIntersectsSlot(rect: SelectionRect, slot: Slot): boolean {
   return rect.left <= slotRight && right >= slot.x && rect.top <= slotBottom && bottom >= slot.y;
 }
 
+function getDataGroupSlotIds(slot: Slot, slots: Array<Slot & { cardIndex: number }>): string[] {
+  if (slot.dataGroupId) {
+    const dataGroupIds = slots
+      .filter((item) => item.dataGroupId === slot.dataGroupId)
+      .map((item) => item.slotId);
+    if (dataGroupIds.length > 1) return dataGroupIds;
+  }
+  return [slot.slotId];
+}
+
 function getRelatedSlotIds(slot: Slot, slots: Array<Slot & { cardIndex: number }>): string[] {
+  const dataGroupIds = getDataGroupSlotIds(slot, slots);
+  if (dataGroupIds.length > 1) return dataGroupIds;
   if (slot.groupId) {
     const groupIds = slots
       .filter((item) => item.groupId === slot.groupId)
@@ -914,7 +941,12 @@ function BindSlot({
           ...textCss,
         }}
       >
-        {text}
+        {renderRichTextRuns({
+          text,
+          runs: slot.bindingPath ? undefined : slot.textRuns,
+          baseStyle: slot.style,
+          scale,
+        })}
         {selected && cardBadge && <CardBadge label={cardBadge} />}
       </div>
     );

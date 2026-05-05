@@ -40,10 +40,33 @@ class DriveFetchError extends Error {
 const IMAGE_EXT_RE = /\.(png|jpe?g|webp|gif|bmp|avif)$/i;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const DEFAULT_MAX_FILES = 20;
+const DRIVE_FILE_CONCURRENCY = 4;
 const MAX_FOLDER_SEARCH_DEPTH = 4;
 const MAX_NESTED_IMAGE_DEPTH = 2;
 const FOLDER_LIST_CACHE_TTL_MS = 2 * 60 * 1000;
 const folderListCache = new Map<string, CachedFolderList>();
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  const workerCount = Math.max(1, Math.min(concurrency, items.length));
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (cursor < items.length) {
+        const index = cursor;
+        cursor += 1;
+        results[index] = await worker(items[index], index);
+      }
+    }),
+  );
+
+  return results;
+}
 
 function validateDriveInput(input: DriveFetchInput) {
   if (!input || typeof input.reference !== "string" || input.reference.trim().length === 0) {
@@ -623,20 +646,30 @@ export const fetchDriveImagesServer = createServerFn({ method: "POST" })
         };
       }
 
-      const downloaded = [];
-      const errors: Array<{ message: string; code: DriveFetchErrorCode }> = [];
       const filesToDownload = files.slice(0, maxFiles);
-      for (const file of filesToDownload) {
+      const downloadResults = await mapWithConcurrency(filesToDownload, DRIVE_FILE_CONCURRENCY, async (file) => {
         try {
-          downloaded.push(await downloadFile(file.id, file.name));
+          return {
+            ok: true as const,
+            file: await downloadFile(file.id, file.name),
+          };
         } catch (error) {
           const driveError =
             error instanceof DriveFetchError
               ? error
               : new DriveFetchError(error instanceof Error ? error.message : String(error));
-          errors.push({ message: driveError.message, code: driveError.code });
+          return {
+            ok: false as const,
+            error: { message: driveError.message, code: driveError.code },
+          };
         }
-      }
+      });
+      const downloaded = downloadResults
+        .filter((result): result is Extract<(typeof downloadResults)[number], { ok: true }> => result.ok)
+        .map((result) => result.file);
+      const errors = downloadResults
+        .filter((result): result is Extract<(typeof downloadResults)[number], { ok: false }> => !result.ok)
+        .map((result) => result.error);
 
       if (downloaded.length === 0) {
         const firstError = errors[0];

@@ -1,5 +1,6 @@
 import type { Entity, GenerationJob, PackTemplate, PageTemplate, RenderedPage } from "@/models";
 import { slugify } from "@/engines/selection/generate";
+import { formatTemplateDisplayName } from "@/lib/templateNames";
 
 export interface BundlePageMeta {
   page: RenderedPage;
@@ -54,7 +55,7 @@ export function buildBundlePageMeta(
       bundleIndex,
       bundleLabel,
       pageOrderInBundle,
-      displayPageName: `${slugify(pack.name)}-${slugify(pageTemplate?.name ?? page.pageTemplateId)}-bo${bundleIndex}.png`,
+      displayPageName: `${slugify(formatTemplateDisplayName(pack.name, "bo-khuon"))}-${slugify(formatTemplateDisplayName(pageTemplate?.name ?? page.pageTemplateId, "trang"))}-bo${bundleIndex}.png`,
       hasPartnerExposure: partnerEntityIds.length > 0,
       partnerEntityIds,
     };

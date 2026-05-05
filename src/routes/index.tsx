@@ -123,8 +123,8 @@ function Dashboard() {
     }
     if (packTemplates.length === 0 || pageTemplates.length === 0) {
       issues.push({
-        label: "Chưa có template",
-        detail: "Cần pack template và page template để generate.",
+        label: "Chưa có khuôn mẫu",
+        detail: "Cần bộ khuôn và trang khuôn để tạo nội dung.",
         to: "/templates",
         tone: "danger",
       });
@@ -134,16 +134,16 @@ function Dashboard() {
         label: "Chưa có ảnh",
         detail:
           driveDownloadCandidateCount > 0
-            ? `Có ${driveDownloadCandidateCount} quán có link ảnh trong sheet, cần tải ảnh Drive.`
-            : "Dữ liệu có thể đã nhập nhưng chưa có asset ảnh.",
+            ? `Có ${driveDownloadCandidateCount} quán có link ảnh trong bảng, cần tải ảnh Drive.`
+            : "Dữ liệu có thể đã nhập nhưng chưa có ảnh.",
         to: "/data",
         search: driveDownloadCandidateCount > 0 ? { tab: "images" } : undefined,
         tone: "danger",
       });
     } else if (linkAssets > 0) {
       issues.push({
-        label: "Ảnh link chưa tải local",
-        detail: `${linkAssets} ảnh đang là link, nên tải về để backup đủ ảnh.`,
+        label: "Ảnh link chưa tải về",
+        detail: `${linkAssets} ảnh đang là đường dẫn, nên tải về để sao lưu đủ ảnh.`,
         to: "/data",
         tone: "warning",
       });
@@ -151,7 +151,7 @@ function Dashboard() {
     if (entitiesWithoutAssets > 0) {
       issues.push({
         label: "Quán thiếu ảnh",
-        detail: `${entitiesWithoutAssets} quán chưa có asset gắn trực tiếp.`,
+        detail: `${entitiesWithoutAssets} quán chưa có ảnh gắn trực tiếp.`,
         to: "/data",
         search: driveDownloadCandidateCount > 0 ? { tab: "images" } : undefined,
         tone: assets.length === 0 ? "danger" : "warning",
@@ -160,7 +160,7 @@ function Dashboard() {
     if (brokenAssets > 0 || missingAssets > 0) {
       issues.push({
         label: "Ảnh lỗi",
-        detail: `${brokenAssets + missingAssets} asset đang lỗi hoặc thiếu nguồn.`,
+        detail: `${brokenAssets + missingAssets} ảnh đang lỗi hoặc thiếu nguồn.`,
         to: "/data",
         tone: "danger",
       });
@@ -175,7 +175,7 @@ function Dashboard() {
     }
     if (latestJobWarnings > 0) {
       issues.push({
-        label: "Job gần nhất có cảnh báo",
+        label: "Lần tạo gần nhất có cảnh báo",
         detail: `${latestJobWarnings} cảnh báo trong lần tạo gần nhất.`,
         to: "/history",
         tone: "warning",
@@ -219,9 +219,9 @@ function Dashboard() {
     <PageContainer className="space-y-5">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Bảng tổng quan</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Trạng thái dữ liệu, ảnh, template và lịch sử tạo nội dung.
+            Trạng thái dữ liệu, ảnh, khuôn mẫu và lịch sử tạo nội dung.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -259,14 +259,14 @@ function Dashboard() {
             </div>
             <Progress value={readiness} className="mt-3 max-w-xl" />
             <p className="mt-2 text-sm text-muted-foreground">
-              Đủ dữ liệu, template, ảnh và AI thì có thể generate ổn định hơn.
+              Đủ dữ liệu, khuôn mẫu, ảnh và AI thì có thể tạo nội dung ổn định hơn.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-2 text-sm md:min-w-72">
             <ReadinessChip active={(dashboard?.entities ?? 0) > 0} label="Dữ liệu" />
             <ReadinessChip
               active={(dashboard?.packTemplates ?? 0) > 0 && (dashboard?.pageTemplates ?? 0) > 0}
-              label="Template"
+              label="Khuôn mẫu"
             />
             <ReadinessChip
               active={(dashboard?.localAssets ?? 0) > 0 || (dashboard?.linkAssets ?? 0) > 0}
@@ -279,33 +279,33 @@ function Dashboard() {
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
-          label="Pack Templates"
+          label="Khuôn mẫu"
           value={dashboard?.packTemplates ?? 0}
-          detail={`${dashboard?.pageTemplates ?? 0} page template`}
+          detail={`${dashboard?.pageTemplates ?? 0} trang khuôn`}
           icon={Package}
           color="teal"
           to="/templates"
         />
         <StatCard
-          label="Entities"
+          label="Dữ liệu"
           value={dashboard?.entities ?? 0}
-          detail={`${dashboard?.sheetCount ?? 0} sheet, ${dashboard?.activeEntities ?? 0} active`}
+          detail={`${dashboard?.sheetCount ?? 0} bảng, ${dashboard?.activeEntities ?? 0} đang dùng`}
           icon={Database}
           color="amber"
           to="/data"
         />
         <StatCard
-          label="Assets"
+          label="Ảnh"
           value={dashboard?.assets ?? 0}
-          detail={`${dashboard?.localAssets ?? 0} local, ${dashboard?.linkAssets ?? 0} link`}
+          detail={`${dashboard?.localAssets ?? 0} trong máy, ${dashboard?.linkAssets ?? 0} bằng link`}
           icon={ImageIcon}
           color="rose"
           to="/data"
         />
         <StatCard
-          label="Jobs đã tạo"
+          label="Lượt tạo"
           value={dashboard?.jobs ?? 0}
-          detail={`${dashboard?.renderedPages ?? 0} trang, ${dashboard?.exportedJobs ?? 0} đã export`}
+          detail={`${dashboard?.renderedPages ?? 0} trang, ${dashboard?.exportedJobs ?? 0} đã xuất`}
           icon={FileText}
           color="slate"
           to="/history"
@@ -318,10 +318,10 @@ function Dashboard() {
           icon={Database}
           tone={(dashboard?.entities ?? 0) > 0 ? "good" : "danger"}
           rows={[
-            ["Tổng entity", dashboard?.entities ?? 0],
-            ["Đang active", dashboard?.activeEntities ?? 0],
-            ["Partner", dashboard?.partnerEntities ?? 0],
-            ["Sheet", dashboard?.sheetCount ?? 0],
+            ["Tổng dòng", dashboard?.entities ?? 0],
+            ["Đang dùng", dashboard?.activeEntities ?? 0],
+            ["Đối tác", dashboard?.partnerEntities ?? 0],
+            ["Bảng", dashboard?.sheetCount ?? 0],
           ]}
           actionTo="/data"
           actionLabel="Mở dữ liệu"
@@ -337,9 +337,9 @@ function Dashboard() {
                 : "good"
           }
           rows={[
-            ["Asset", dashboard?.assets ?? 0],
-            ["Blob local", dashboard?.blobCount ?? 0],
-            ["Link chưa tải", dashboard?.linkAssets ?? 0],
+            ["Ảnh", dashboard?.assets ?? 0],
+            ["Ảnh trong máy", dashboard?.blobCount ?? 0],
+            ["Ảnh dạng link", dashboard?.linkAssets ?? 0],
             ["Quán thiếu ảnh", dashboard?.entitiesWithoutAssets ?? 0],
           ]}
           actionTo="/data"
@@ -349,26 +349,26 @@ function Dashboard() {
           }
         />
         <StatusCard
-          title="Template"
+          title="Khuôn mẫu"
           icon={Package}
           tone={(dashboard?.packTemplates ?? 0) > 0 ? "good" : "danger"}
           rows={[
-            ["Pack", dashboard?.packTemplates ?? 0],
-            ["Page", dashboard?.pageTemplates ?? 0],
-            ["Slot đã map", `${dashboard?.mappedSlots ?? 0}/${dashboard?.totalSlots ?? 0}`],
-            ["Preset", dashboard?.presetCount ?? 0],
+            ["Bộ khuôn", dashboard?.packTemplates ?? 0],
+            ["Trang khuôn", dashboard?.pageTemplates ?? 0],
+            ["Ô đã gắn dữ liệu", `${dashboard?.mappedSlots ?? 0}/${dashboard?.totalSlots ?? 0}`],
+            ["Khuôn đổ dữ liệu", dashboard?.presetCount ?? 0],
           ]}
           actionTo="/templates"
-          actionLabel="Mở template"
+          actionLabel="Mở khuôn"
         />
         <StatusCard
           title="Tạo nội dung"
           icon={Sparkles}
           tone={(dashboard?.latestJobWarnings ?? 0) > 0 ? "warning" : "neutral"}
           rows={[
-            ["Job", dashboard?.jobs ?? 0],
-            ["Trang render", dashboard?.renderedPages ?? 0],
-            ["Cảnh báo job mới", dashboard?.latestJobWarnings ?? 0],
+            ["Lượt tạo", dashboard?.jobs ?? 0],
+            ["Trang đã dựng", dashboard?.renderedPages ?? 0],
+            ["Cảnh báo lượt mới", dashboard?.latestJobWarnings ?? 0],
             ["Phân tích AI", dashboard?.analysisCount ?? 0],
           ]}
           actionTo="/generate"

@@ -200,8 +200,27 @@
   }
 
   .design-stage-scroll {
+    background: linear-gradient(
+      180deg,
+      color-mix(in oklch, var(--muted) 34%, var(--background)) 0%,
+      color-mix(in oklch, var(--muted) 58%, var(--background)) 100%
+    );
+    overflow-anchor: none;
     scrollbar-width: thin;
     scrollbar-color: color-mix(in oklch, var(--primary) 66%, var(--background)) transparent;
+  }
+
+  .design-stage-center {
+    align-items: safe center;
+    justify-content: safe center;
+  }
+
+  .design-canvas-page {
+    border-radius: 2px;
+    box-shadow:
+      0 24px 64px color-mix(in oklch, var(--foreground) 12%, transparent),
+      0 4px 16px color-mix(in oklch, var(--foreground) 8%, transparent),
+      0 0 0 1px color-mix(in oklch, var(--border) 76%, transparent);
   }
 
   .design-stage-scroll::-webkit-scrollbar {

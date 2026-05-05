@@ -31,6 +31,7 @@ import {
 import { getAssetImageSource } from "@/engines/binding/assetImage";
 import { useResolvedImageSrc } from "@/storage/imageSrc";
 import { expandPageWithCardGroups } from "@/engines/binding/cardRepeater";
+import { renderRichTextRuns } from "@/features/editor/richText";
 
 const IMAGE_PLACEHOLDER_BACKGROUND =
   "repeating-linear-gradient(135deg, rgba(59,130,246,0.08) 0, rgba(59,130,246,0.08) 14px, #f8fafc 14px, #f8fafc 28px)";
@@ -48,6 +49,7 @@ interface Props {
   slotItems?: RenderedItem[];
   seedKey?: string;
   showSlotBounds?: boolean;
+  hideImagePlaceholderText?: boolean;
 }
 
 function isGeneratedCoverBackgroundSlot(slot: Slot, template: PageTemplate) {
@@ -78,6 +80,7 @@ export function PageRenderer({
   slotItems,
   seedKey,
   showSlotBounds = false,
+  hideImagePlaceholderText = false,
 }: Props) {
   const entityMap = useMemo(
     () => new Map(entities.map((item) => [item.entityId, item])),
@@ -146,8 +149,15 @@ export function PageRenderer({
 
   const imageSeedKey = seedKey ?? `${template.pageTemplateId}:${page?.pageIndex ?? "preview"}`;
   const imagePlan: SlotImagePlan = useMemo(
-    () => buildExpandedSlotImagePlan(expanded.slots, assets, resolveEntityForSlot, imageSeedKey),
-    [expanded.slots, assets, resolveEntityForSlot, imageSeedKey],
+    () =>
+      buildExpandedSlotImagePlan(
+        expanded.slots,
+        assets,
+        resolveEntityForSlot,
+        imageSeedKey,
+        entities,
+      ),
+    [expanded.slots, assets, resolveEntityForSlot, imageSeedKey, entities],
   );
 
   return (
@@ -192,6 +202,7 @@ export function PageRenderer({
             seedKey={imageSeedKey}
             debug={debug}
             showSlotBounds={showSlotBounds}
+            hideImagePlaceholderText={hideImagePlaceholderText}
             renderGeneratedOverlay={
               assets.length > 0 || !!entity || !!entityPool?.length || effectiveSlotItems.length > 0
             }
@@ -203,6 +214,7 @@ export function PageRenderer({
 
 function displayRenderedText(text: string | undefined): string {
   const raw = String(text ?? "");
+  if (raw.trim() === "Text mới") return "Chữ mới";
   const token = raw.trim().match(/^\{\{([a-z0-9_]+)\}\}$/i)?.[1];
   if (!token) return raw;
   const base = token.replace(/_\d+$/g, "");
@@ -222,7 +234,7 @@ function displayRenderedText(text: string | undefined): string {
     subcategory: "Nhóm phụ",
     signature_dish: "Món nổi bật",
     description: "Mô tả",
-    text: "Text mới",
+    text: "Chữ mới",
   };
   if (base.startsWith("title")) return "Tiêu đề";
   if (base.startsWith("item")) return "Mục";
@@ -246,6 +258,7 @@ function SlotRenderer({
   seedKey,
   debug,
   showSlotBounds,
+  hideImagePlaceholderText,
   renderGeneratedOverlay,
 }: {
   slot: Slot;
@@ -263,6 +276,7 @@ function SlotRenderer({
   seedKey: string;
   debug?: boolean;
   showSlotBounds?: boolean;
+  hideImagePlaceholderText?: boolean;
   renderGeneratedOverlay?: boolean;
 }) {
   const flip = buildFlipTransform(slot.style);
@@ -503,7 +517,7 @@ function SlotRenderer({
               fontSize: 10 * scale,
             }}
           >
-            (chưa có ảnh)
+            {hideImagePlaceholderText ? null : "(chưa có ảnh)"}
           </div>
         )}
         {slot.style?.overlayColor && (
@@ -539,7 +553,13 @@ function SlotRenderer({
           ...textCss,
         }}
       >
-        {displayRenderedText(text)}
+        {renderRichTextRuns({
+          text,
+          runs: slot.bindingPath ? undefined : slot.textRuns,
+          baseStyle: slot.style,
+          scale,
+          fallback: displayRenderedText(text),
+        })}
         <DebugBadge debug={debug} text="text" />
       </div>
     );

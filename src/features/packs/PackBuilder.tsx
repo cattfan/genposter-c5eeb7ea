@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { formatTemplateDisplayName } from "@/lib/templateNames";
 import type { PackTemplate, PageTemplate } from "@/models";
 import { PackPagePreview } from "./PackPagePreview";
 
@@ -165,7 +166,7 @@ function SortablePageCard({
                     setRenaming(false);
                   }
                 }}
-                aria-label="Đổi tên page"
+                aria-label="Đổi tên trang"
               />
             ) : (
               <button
@@ -175,9 +176,9 @@ function SortablePageCard({
                   if (tpl) setRenaming(true);
                 }}
                 disabled={!tpl}
-                title="Double-click để đổi tên"
+                title="Bấm đúp để đổi tên"
               >
-                {tpl?.name ?? "Template không tồn tại"}
+                {tpl ? formatTemplateDisplayName(tpl.name, "Trang") : "Trang khuôn không tồn tại"}
               </button>
             )}
           </div>
@@ -190,8 +191,8 @@ function SortablePageCard({
             className="size-8 text-destructive hover:text-destructive"
             onClick={onDelete}
             disabled={!tpl || !onDelete}
-            title="Xóa page"
-            aria-label="Xóa page"
+            title="Xóa trang"
+            aria-label="Xóa trang"
           >
             <Trash2 />
           </Button>
@@ -224,8 +225,8 @@ function SortablePageCard({
             className="size-8 shadow-sm"
             onClick={onDuplicate}
             disabled={!tpl || !onDuplicate}
-            title="Nhân bản page"
-            aria-label="Nhân bản page"
+            title="Nhân bản trang"
+            aria-label="Nhân bản trang"
           >
             <Copy />
           </Button>
@@ -289,8 +290,8 @@ export function PackBuilder({
                 size="icon"
                 className="size-10 shrink-0 shadow-sm"
                 onClick={onCollapse}
-                title="Thu nhỏ pack"
-                aria-label="Thu nhỏ pack"
+                title="Thu gọn bộ khuôn"
+                aria-label="Thu gọn bộ khuôn"
               >
                 <ArrowLeft />
               </Button>
@@ -299,14 +300,14 @@ export function PackBuilder({
                   className="h-10 max-w-xl bg-background text-base font-semibold"
                   value={pack.name}
                   onChange={(event) => onChange({ ...pack, name: event.target.value })}
-                  aria-label="Tên pack"
+                  aria-label="Tên bộ khuôn"
                 />
               </div>
             </div>
             <div className="flex shrink-0 flex-wrap gap-2">
               <Button variant="outline" size="sm" onClick={onDuplicate}>
                 <Copy data-icon="inline-start" />
-                Duplicate
+                Nhân bản
               </Button>
               {onCreateAiPage ? (
                 <Button variant="outline" size="sm" onClick={onCreateAiPage}>
@@ -317,7 +318,7 @@ export function PackBuilder({
               {onCreatePage ? (
                 <Button variant="outline" size="sm" onClick={onCreatePage}>
                   <FilePlus2 data-icon="inline-start" />
-                  Page mới
+                  Trang mới
                 </Button>
               ) : null}
               {onDeletePack ? (
@@ -325,8 +326,8 @@ export function PackBuilder({
                   variant="ghost"
                   size="icon"
                   onClick={onDeletePack}
-                  title="Xóa pack"
-                  aria-label="Xóa pack"
+                  title="Xóa bộ khuôn"
+                  aria-label="Xóa bộ khuôn"
                   className="text-destructive hover:text-destructive"
                 >
                   <Trash2 />
@@ -349,7 +350,7 @@ export function PackBuilder({
                 >
                   {orderedItems.length === 0 ? (
                     <div className="rounded-lg border border-dashed bg-background p-8 text-center text-sm text-muted-foreground">
-                      Pack chưa có page. Bấm Page mới để bắt đầu.
+                      Bộ khuôn chưa có trang. Bấm Trang mới để bắt đầu.
                     </div>
                   ) : null}
                   <div className="flex min-w-full gap-3">

@@ -12,6 +12,7 @@ import {
 } from "@/engines/binding/dataBinding";
 import { useResolvedImageSrc } from "@/storage/imageSrc";
 import { getHeroiconComponent } from "./designAssets";
+import { renderRichTextRuns } from "./richText";
 
 export function DesignRenderer({
   page,
@@ -21,6 +22,8 @@ export function DesignRenderer({
   innerRef,
   suppressElementIds = [],
   showGuides = false,
+  showGrid = false,
+  gridSize = 8,
 }: {
   page: DesignPage;
   elements: DesignElement[];
@@ -29,11 +32,42 @@ export function DesignRenderer({
   innerRef?: Ref<HTMLDivElement>;
   suppressElementIds?: string[];
   showGuides?: boolean;
+  showGrid?: boolean;
+  gridSize?: number;
 }) {
   const ordered = elements
     .filter((element) => !element.hidden && !suppressElementIds.includes(element.elementId))
     .slice()
     .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+  const minorGridSize = Math.max(6, gridSize * scale);
+  const majorGridSize = minorGridSize * 5;
+  const gridBackground = showGrid
+    ? [
+        "linear-gradient(to right, rgba(15,23,42,0.18) 1px, transparent 1px)",
+        "linear-gradient(to bottom, rgba(15,23,42,0.18) 1px, transparent 1px)",
+        "linear-gradient(to right, rgba(15,23,42,0.08) 1px, transparent 1px)",
+        "linear-gradient(to bottom, rgba(15,23,42,0.08) 1px, transparent 1px)",
+      ]
+    : [];
+  const imageBackground = page.backgroundImage ? [`url(${page.backgroundImage})`] : [];
+  const backgroundImages = [...gridBackground, ...imageBackground].join(", ") || undefined;
+  const backgroundSizes =
+    [
+      ...(showGrid
+        ? [
+            `${majorGridSize}px ${majorGridSize}px`,
+            `${majorGridSize}px ${majorGridSize}px`,
+            `${minorGridSize}px ${minorGridSize}px`,
+            `${minorGridSize}px ${minorGridSize}px`,
+          ]
+        : []),
+      ...(page.backgroundImage ? ["cover"] : []),
+    ].join(", ") || undefined;
+  const backgroundPositions =
+    [
+      ...(showGrid ? ["0 0", "0 0", "0 0", "0 0"] : []),
+      ...(page.backgroundImage ? ["center"] : []),
+    ].join(", ") || undefined;
 
   return (
     <div
@@ -45,9 +79,9 @@ export function DesignRenderer({
         height: page.height * scale,
         background: page.background ?? "#ffffff",
         overflow: "hidden",
-        backgroundImage: page.backgroundImage ? `url(${page.backgroundImage})` : undefined,
-        backgroundSize: "cover",
-        backgroundPosition: "center",
+        backgroundImage: backgroundImages,
+        backgroundSize: backgroundSizes,
+        backgroundPosition: backgroundPositions,
       }}
     >
       {ordered.map((element) => (
@@ -78,6 +112,7 @@ function baseElementStyle(element: DesignElement, scale: number): CSSProperties 
     opacity: element.style?.opacity ?? 1,
     boxShadow: buildBoxShadow(element.style, scale),
     contain: "layout paint style",
+    zIndex: element.zIndex ?? 0,
   };
 }
 
@@ -89,6 +124,7 @@ function resolveAssetSrc(src: string | undefined): string | undefined {
 
 function displayEditorText(text: string | undefined): string {
   const raw = String(text ?? "");
+  if (raw.trim() === "Text mới") return "Chữ mới";
   const token = raw.trim().match(/^\{\{([a-z0-9_]+)\}\}$/i)?.[1];
   if (!token) return raw;
   const base = token.replace(/_\d+$/g, "");
@@ -108,7 +144,7 @@ function displayEditorText(text: string | undefined): string {
     subcategory: "Nhóm phụ",
     signature_dish: "Món nổi bật",
     description: "Mô tả",
-    text: "Text mới",
+    text: "Chữ mới",
   };
   if (base.startsWith("title")) return "Tiêu đề";
   if (base.startsWith("item")) return "Mục";
@@ -181,7 +217,13 @@ const DesignElementNode = memo(
             ...textStyle,
           }}
         >
-          {displayEditorText(element.text)}
+          {renderRichTextRuns({
+            text: element.text,
+            runs: element.textRuns,
+            baseStyle: element.style,
+            scale,
+            fallback: displayEditorText(element.text),
+          })}
           <EditorGuideBounds kind={element.kind} show={showGuides} />
         </div>
       );

@@ -296,10 +296,25 @@ function autoClusterSlots(
   });
   if (bindable.length === 0) return [];
 
+  const explicitDataGroups = new Map<string, Slot[]>();
+  const explicitDataGroupSlotIds = new Set<string>();
+  for (const slot of bindable) {
+    if (!slot.dataGroupId) continue;
+    const groupSlots = explicitDataGroups.get(slot.dataGroupId) ?? [];
+    groupSlots.push(slot);
+    explicitDataGroups.set(slot.dataGroupId, groupSlots);
+    explicitDataGroupSlotIds.add(slot.slotId);
+  }
+  const explicitClusters = Array.from(explicitDataGroups.entries()).map(([groupId, groupSlots]) => ({
+    key: `dataGroup:${groupId}`,
+    slots: groupSlots,
+  }));
+  const autoBindable = bindable.filter((slot) => !explicitDataGroupSlotIds.has(slot.slotId));
+
   // Bước 1: nhóm theo groupId nếu có
   const byGroup = new Map<string, Slot[]>();
   const noGroup: Slot[] = [];
-  for (const s of bindable) {
+  for (const s of autoBindable) {
     if (s.groupId) {
       const arr = byGroup.get(s.groupId) ?? [];
       arr.push(s);
@@ -342,7 +357,10 @@ function autoClusterSlots(
     byGroup.set(key, value);
   }
 
-  const clusters = Array.from(byGroup.entries()).map(([key, ss]) => ({
+  const clusters = [
+    ...explicitClusters,
+    ...Array.from(byGroup.entries()).map(([key, slots]) => ({ key, slots })),
+  ].map(({ key, slots: ss }) => ({
     key,
     slots: ss,
     minY: Math.min(...ss.map((s) => s.y)),

@@ -59,6 +59,7 @@ interface DriveFailure {
 const PREVIEW_PAGE_SIZE = 80;
 const PREVIEW_INCREMENT = 80;
 const DEFAULT_FUZZY_THRESHOLD = 0.78;
+const DRIVE_ENTITY_CONCURRENCY = 4;
 const EMPTY_ENTITIES: Entity[] = [];
 const EMPTY_ASSETS: Asset[] = [];
 const DRIVE_FAILURE_FILTERS: DriveFailureFilter[] = [
@@ -82,6 +83,28 @@ function isImageFile(file: File): boolean {
 
 async function yieldToBrowser(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  const workerCount = Math.max(1, Math.min(concurrency, items.length));
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (cursor < items.length) {
+        const index = cursor;
+        cursor += 1;
+        results[index] = await worker(items[index], index);
+      }
+    }),
+  );
+
+  return results;
 }
 
 function base64ToBlob(base64: string, mimeType: string) {
@@ -482,10 +505,10 @@ export function BulkImageUpload() {
     setDriveBusy(true);
     setDriveFailures([]);
     const toastId = "drive-image-import";
-    const total = driveImportCandidates.length;
+    const candidates = driveImportCandidates.slice();
+    const total = candidates.length;
     let done = 0;
     let imported = 0;
-    const failed: DriveFailure[] = [];
     const coverCount: Record<string, number> = {};
 
     for (const asset of allAssets) {
@@ -504,67 +527,80 @@ export function BulkImageUpload() {
         await saveSettings({ ...settings, driveRootFolderUrl: rootUrl });
       }
 
-      for (const entity of driveImportCandidates) {
-        toast.loading(<DriveImportToast done={done} total={total} current={entity.name} />, {
-          id: toastId,
-          duration: Infinity,
-        });
-
+      const results = await mapWithConcurrency(candidates, DRIVE_ENTITY_CONCURRENCY, async (entity) => {
         const entityAssets: Asset[] = [];
-        for (const reference of getEntityImageReferences(entity)) {
-          const result = await fetchDriveImagesServer({
-            data: {
-              reference,
-              rootFolderUrl: rootUrl || undefined,
-              searchContext: entity.sheetName,
-              maxFiles: 20,
-            },
+        const entityFailures: DriveFailure[] = [];
+
+        try {
+          for (const reference of getEntityImageReferences(entity)) {
+            const result = await fetchDriveImagesServer({
+              data: {
+                reference,
+                rootFolderUrl: rootUrl || undefined,
+                searchContext: entity.sheetName,
+                maxFiles: 20,
+              },
+            });
+
+            if (!result.ok) {
+              const errorCode = "errorCode" in result ? result.errorCode : undefined;
+              entityFailures.push({
+                entityId: entity.entityId,
+                entityName: entity.name,
+                reference,
+                error: result.error,
+                type: classifyDriveFailure(result.error, errorCode),
+              });
+              continue;
+            }
+
+            for (const file of result.files) {
+              const blob = base64ToBlob(file.base64, file.mimeType);
+              const blobKey = await saveBlob(blob);
+              const isCover = (coverCount[entity.entityId] ?? 0) === 0 && entityAssets.length === 0;
+              if (isCover) coverCount[entity.entityId] = 1;
+
+              entityAssets.push({
+                assetId: nanoid(),
+                entityId: entity.entityId,
+                sourceType: "local",
+                sourceValue: makeIdbSrc(blobKey),
+                blobKey,
+                role: isCover ? "cover" : "generic",
+                isCover,
+                qualityScore: 80,
+                status: "ok",
+              });
+            }
+          }
+
+          if (entityAssets.length) await db.assets.bulkPut(entityAssets);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          entityFailures.push({
+            entityId: entity.entityId,
+            entityName: entity.name,
+            reference: getEntityImageReferences(entity)[0] ?? entity.name,
+            error: message,
+            type: classifyDriveFailure(message),
           });
-
-          if (!result.ok) {
-            const errorCode = "errorCode" in result ? result.errorCode : undefined;
-            failed.push({
-              entityId: entity.entityId,
-              entityName: entity.name,
-              reference,
-              error: result.error,
-              type: classifyDriveFailure(result.error, errorCode),
-            });
-            continue;
-          }
-
-          for (const file of result.files) {
-            const blob = base64ToBlob(file.base64, file.mimeType);
-            const blobKey = await saveBlob(blob);
-            const isCover = (coverCount[entity.entityId] ?? 0) === 0 && entityAssets.length === 0;
-            if (isCover) coverCount[entity.entityId] = 1;
-
-            entityAssets.push({
-              assetId: nanoid(),
-              entityId: entity.entityId,
-              sourceType: "local",
-              sourceValue: makeIdbSrc(blobKey),
-              blobKey,
-              role: isCover ? "cover" : "generic",
-              isCover,
-              qualityScore: 80,
-              status: "ok",
-            });
-          }
-        }
-
-        if (entityAssets.length) {
-          await db.assets.bulkPut(entityAssets);
-          imported += entityAssets.length;
         }
 
         done += 1;
+        imported += entityAssets.length;
         toast.loading(<DriveImportToast done={done} total={total} current={entity.name} />, {
           id: toastId,
           duration: Infinity,
         });
         await yieldToBrowser();
-      }
+
+        return {
+          imported: entityAssets.length,
+          failures: entityFailures,
+        };
+      });
+
+      const failed = results.flatMap((result) => result.failures);
 
       setDriveFailures(failed);
       if (failed.some((item) => item.type === "private")) {

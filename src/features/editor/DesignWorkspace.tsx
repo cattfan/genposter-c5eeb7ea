@@ -9,21 +9,24 @@ import {
 } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
-  AlignCenter,
+  AlignCenterHorizontal,
+  AlignCenterVertical,
   AlignEndHorizontal,
-  AlignHorizontalJustifyCenter,
+  AlignEndVertical,
+  AlignHorizontalSpaceBetween,
   AlignStartHorizontal,
+  AlignStartVertical,
+  AlignVerticalSpaceBetween,
   FlipHorizontal,
   FlipVertical,
-  AlignVerticalJustifyCenter,
   ChevronDown,
   ClipboardPaste,
   Copy,
   Download,
   Eye,
   EyeOff,
-  Frame,
   Grid2X2,
+  Grid3X3,
   Group,
   Hand,
   Image as ImageIcon,
@@ -33,16 +36,18 @@ import {
   LockOpen,
   Minus,
   MousePointer2,
-  MoveDown,
-  MoveUp,
   PanelLeft,
   PanelRight,
+  Palette,
   Plus,
   RotateCcw,
   RotateCw,
-  Ruler,
+  ScanLine,
   Save,
+  Settings2,
   Shapes,
+  SquareDashed,
+  SlidersHorizontal,
   Table2,
   Trash2,
   Type,
@@ -105,6 +110,7 @@ import type {
   DesignElement,
   DesignPage,
   DesignTextElement,
+  DesignTextRun,
   EditorMode,
   ElementStyle,
   FontAsset,
@@ -123,6 +129,12 @@ import {
 } from "./designAssets";
 import { useDesignEditor } from "./designStore";
 import { TextToolbar } from "./TextToolbar";
+import {
+  applyTextRunStyle,
+  parseRichTextEditorContent,
+  richTextToHtml,
+  type TextSelectionRange,
+} from "./richText";
 import { CropOverlay } from "./CropOverlay";
 import { CanvasRuler } from "./CanvasRuler";
 import { SmartSpacing, computeSpacingLines } from "./SmartSpacing";
@@ -138,6 +150,19 @@ const EMPTY_FONT_ASSETS: FontAsset[] = [];
 const EMPTY_PAGE_TEMPLATES: PageTemplate[] = [];
 const AUTOSAVE_DELAY_MS = 500;
 const ICON_PICKER_RESULT_LIMIT = 360;
+const LETTER_SPACING_MIN = -5;
+const LETTER_SPACING_MAX = 32;
+const LETTER_SPACING_STEP = 0.5;
+const TEXT_RUN_STYLE_KEYS = [
+  "fontFamily",
+  "fontSize",
+  "fontWeight",
+  "fontStyle",
+  "textDecoration",
+  "color",
+  "lineHeight",
+  "letterSpacing",
+] as const;
 
 type MovePayload = {
   elementId: string;
@@ -469,19 +494,98 @@ function getNextZoom(current: number, direction: 1 | -1) {
   return Math.min(3, Math.max(0.1, current * factor));
 }
 
-function zoomAtPoint(params: {
+type StagePoint = { x: number; y: number };
+
+function getDesignCanvasElement(container: HTMLElement | null) {
+  return container?.querySelector<HTMLElement>("[data-design-canvas]") ?? null;
+}
+
+function getStageClientPoint(container: HTMLElement, point: StagePoint | null) {
+  const rect = container.getBoundingClientRect();
+  const x = point ? clamp(point.x, 0, rect.width) : rect.width / 2;
+  const y = point ? clamp(point.y, 0, rect.height) : rect.height / 2;
+  return {
+    clientX: rect.left + x,
+    clientY: rect.top + y,
+  };
+}
+
+function readCssPx(value: string) {
+  return Number.parseFloat(value) || 0;
+}
+
+function getStageContentBox(container: HTMLElement) {
+  const styles = window.getComputedStyle(container);
+  const paddingLeft = readCssPx(styles.paddingLeft);
+  const paddingRight = readCssPx(styles.paddingRight);
+  const paddingTop = readCssPx(styles.paddingTop);
+  const paddingBottom = readCssPx(styles.paddingBottom);
+  return {
+    paddingLeft,
+    paddingTop,
+    contentWidth: Math.max(0, container.clientWidth - paddingLeft - paddingRight),
+    contentHeight: Math.max(0, container.clientHeight - paddingTop - paddingBottom),
+  };
+}
+
+function getStageBaseOffset(page: DesignPage, container: HTMLElement, zoom: number) {
+  const { paddingLeft, paddingTop, contentWidth, contentHeight } = getStageContentBox(container);
+  const pageWidth = page.width * zoom;
+  const pageHeight = page.height * zoom;
+  return {
+    x: paddingLeft + Math.max((contentWidth - pageWidth) / 2, 0),
+    y: paddingTop + Math.max((contentHeight - pageHeight) / 2, 0),
+  };
+}
+
+function getZoomPanAtClientPoint(params: {
+  container: HTMLElement;
+  canvas: HTMLElement | null;
+  page: DesignPage;
   currentZoom: number;
   nextZoom: number;
   panX: number;
   panY: number;
-  pointX: number;
-  pointY: number;
+  clientX: number;
+  clientY: number;
 }) {
-  const contentX = (params.pointX - params.panX) / params.currentZoom;
-  const contentY = (params.pointY - params.panY) / params.currentZoom;
+  const containerRect = params.container.getBoundingClientRect();
+  const pointX = params.clientX - containerRect.left + params.container.scrollLeft;
+  const pointY = params.clientY - containerRect.top + params.container.scrollTop;
+  const canvasRect = params.canvas?.getBoundingClientRect();
+  const currentBase = getStageBaseOffset(params.page, params.container, params.currentZoom);
+  const contentX =
+    canvasRect && params.currentZoom > 0
+      ? (params.clientX - canvasRect.left) / params.currentZoom
+      : (pointX - currentBase.x - params.panX) / params.currentZoom;
+  const contentY =
+    canvasRect && params.currentZoom > 0
+      ? (params.clientY - canvasRect.top) / params.currentZoom
+      : (pointY - currentBase.y - params.panY) / params.currentZoom;
+  const nextBase = getStageBaseOffset(params.page, params.container, params.nextZoom);
   return {
-    panX: params.pointX - contentX * params.nextZoom,
-    panY: params.pointY - contentY * params.nextZoom,
+    panX: pointX - nextBase.x - contentX * params.nextZoom,
+    panY: pointY - nextBase.y - contentY * params.nextZoom,
+  };
+}
+
+function getFitPageZoom(page: DesignPage, container: HTMLElement, maxZoom: number) {
+  const { contentWidth, contentHeight } = getStageContentBox(container);
+  const margin = 96;
+  const availW = Math.max(1, contentWidth - margin);
+  const availH = Math.max(1, contentHeight - margin);
+  return Math.min(maxZoom, 3, Math.max(0.1, Math.min(availW / page.width, availH / page.height)));
+}
+
+function getCenteredPagePan(page: DesignPage, container: HTMLElement, zoom: number) {
+  const { paddingLeft, paddingTop, contentWidth, contentHeight } = getStageContentBox(container);
+  const pageWidth = page.width * zoom;
+  const pageHeight = page.height * zoom;
+  const baseX = paddingLeft + Math.max((contentWidth - pageWidth) / 2, 0);
+  const baseY = paddingTop + Math.max((contentHeight - pageHeight) / 2, 0);
+  return {
+    panX: container.scrollLeft + paddingLeft + contentWidth / 2 - baseX - pageWidth / 2,
+    panY: container.scrollTop + paddingTop + contentHeight / 2 - baseY - pageHeight / 2,
   };
 }
 
@@ -505,23 +609,41 @@ function getCanvasCursor(elementLocked: boolean, tool: DesignTool, spacePressed:
   return elementLocked ? "default" : "move";
 }
 
-function zoomByStep(editor: ReturnType<typeof useDesignEditor>, zoom: number, direction: 1 | -1) {
-  editor.setZoom(getNextZoom(zoom, direction));
+function pickTextRunStylePatch(patch: Partial<ElementStyle>): Partial<ElementStyle> {
+  const picked: Record<string, unknown> = {};
+  for (const key of TEXT_RUN_STYLE_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(patch, key)) {
+      picked[key] = patch[key];
+    }
+  }
+  return picked as Partial<ElementStyle>;
 }
 
-function zoomToFit(editor: ReturnType<typeof useDesignEditor>, container: HTMLElement | null) {
-  const page = editor.activePage;
-  if (!page || !container) return;
-  const rect = container.getBoundingClientRect();
-  const padding = 48;
-  const availW = rect.width - padding * 2;
-  const availH = rect.height - padding * 2;
-  if (availW <= 0 || availH <= 0) return;
-  const scale = Math.min(availW / page.width, availH / page.height, 3);
-  const panX = (rect.width - page.width * scale) / 2;
-  const panY = (rect.height - page.height * scale) / 2;
-  editor.setZoom(scale);
-  editor.setPan(panX, panY);
+function buildElementStylePatch(
+  element: DesignElement,
+  patch: Partial<ElementStyle>,
+): Partial<DesignElement> {
+  const next: Partial<DesignElement> = {
+    style: {
+      ...(element.style ?? {}),
+      ...patch,
+    },
+  } as Partial<DesignElement>;
+  const textRunPatch = pickTextRunStylePatch(patch);
+  if (
+    element.kind === "text" &&
+    element.text.length > 0 &&
+    element.textRuns?.length &&
+    Object.keys(textRunPatch).length > 0
+  ) {
+    (next as Partial<DesignTextElement>).textRuns = applyTextRunStyle(
+      element.text,
+      element.textRuns,
+      { start: 0, end: element.text.length },
+      textRunPatch,
+    );
+  }
+  return next;
 }
 
 const RESIZE_HANDLES = [
@@ -838,20 +960,6 @@ async function registerFontAsset(fontAsset: FontAsset) {
   document.fonts.add(font);
 }
 
-function layerTree(
-  elements: DesignElement[],
-  parentId?: string,
-  depth = 0,
-): Array<{ element: DesignElement; depth: number }> {
-  return elements
-    .filter((element) => element.parentId === parentId)
-    .sort((a, b) => (b.zIndex ?? 0) - (a.zIndex ?? 0))
-    .flatMap((element) => [
-      { element, depth },
-      ...layerTree(elements, element.elementId, depth + 1),
-    ]);
-}
-
 function IconAssetGlyph({ asset, className }: { asset: HeroiconAsset; className?: string }) {
   const IconComponent = asset.component;
   if (IconComponent) return <IconComponent className={className} />;
@@ -867,6 +975,8 @@ export function DesignWorkspace({
   contextTitle,
   onSave,
   onClose,
+  showCloseButton = false,
+  headerLeading,
   allowMultiplePages = true,
   autosave = false,
   packPages = EMPTY_PAGE_TEMPLATES,
@@ -878,6 +988,8 @@ export function DesignWorkspace({
   contextTitle?: string;
   onSave?: (document: DesignDocument) => void | Promise<void>;
   onClose?: () => void;
+  showCloseButton?: boolean;
+  headerLeading?: ReactNode;
   allowMultiplePages?: boolean;
   autosave?: boolean;
   packPages?: PageTemplate[];
@@ -893,7 +1005,7 @@ export function DesignWorkspace({
   );
   const editor = useDesignEditor(workspaceDocument);
   const [leftOpen, setLeftOpen] = useState(true);
-  const [rightOpen, setRightOpen] = useState(true);
+  const [rightOpen, setRightOpen] = useState(false);
   const [leftTab, setLeftTab] = useState("insert");
   const [rightTab, setRightTab] = useState("properties");
   const [assetSearch, setAssetSearch] = useState("");
@@ -916,6 +1028,7 @@ export function DesignWorkspace({
   } | null>(null);
   const stageWrapRef = useRef<HTMLDivElement | null>(null);
   const stagePanLayerRef = useRef<HTMLDivElement | null>(null);
+  const lastStagePointerRef = useRef<StagePoint | null>(null);
   const panPreviewRef = useRef<{
     startX: number;
     startY: number;
@@ -1206,13 +1319,13 @@ export function DesignWorkspace({
       elementId,
       pageId: activePage.pageId,
       kind: "text",
-      name: "Text",
+      name: "Chữ",
       x: 120,
       y: 120,
       width: 420,
       height: 120,
       zIndex: editor.activeElements.length,
-      text: "Text mới",
+      text: "Chữ mới",
       style: {
         fontFamily: currentBrandKit?.fontAssetIds.length
           ? (fontAssets.find((item) => item.fontAssetId === currentBrandKit.fontAssetIds[0])
@@ -1233,7 +1346,7 @@ export function DesignWorkspace({
       elementId: nanoid(),
       pageId: activePage.pageId,
       kind: "shape",
-      name: "Shape",
+      name: "Hình",
       x: 160,
       y: 180,
       width: shapeKind === "line" ? 320 : 240,
@@ -1255,7 +1368,7 @@ export function DesignWorkspace({
       elementId: nanoid(),
       pageId: activePage.pageId,
       kind: "table",
-      name: "Table",
+      name: "Bảng",
       x: 120,
       y: 220,
       width: 560,
@@ -1265,7 +1378,7 @@ export function DesignWorkspace({
       rows: 4,
       cells: Array.from({ length: 12 }, (_, index) => ({
         cellId: `cell-${index}`,
-        text: index < 3 ? `Header ${index + 1}` : "",
+        text: index < 3 ? `Tiêu đề ${index + 1}` : "",
       })),
       style: {
         fill: "#ffffff",
@@ -1281,7 +1394,7 @@ export function DesignWorkspace({
       elementId: nanoid(),
       pageId: activePage.pageId,
       kind: "image",
-      name: "Image",
+      name: "Ảnh",
       x: 140,
       y: 160,
       width: 320,
@@ -1422,7 +1535,7 @@ export function DesignWorkspace({
   const createBrandKit = async () => {
     const brandKit: BrandKit = {
       brandKitId: nanoid(),
-      name: `Brand Kit ${brandKits.length + 1}`,
+      name: `Bộ thương hiệu ${brandKits.length + 1}`,
       colors: ["#0f172a", "#f97316", "#f8fafc"],
       logoAssetIds: [],
       fontAssetIds: [],
@@ -1432,7 +1545,7 @@ export function DesignWorkspace({
     };
     await db.brandKits.put(brandKit);
     await persistBrandKitSelection(brandKit.brandKitId);
-    toast.success("Đã tạo Brand Kit");
+    toast.success("Đã tạo bộ thương hiệu");
   };
 
   const updateBrandKit = async (patch: Partial<BrandKit>) => {
@@ -1455,19 +1568,21 @@ export function DesignWorkspace({
     setRightTab("properties");
   };
 
-  const getSelectionActionIds = () => {
-    const ids = new Set<string>(editor.state.selection.ids);
-    selected.forEach((element) => {
+  const getSelectionActionIds = (ids = editor.state.selection.ids) => {
+    const actionIds = new Set<string>(ids);
+    getSelectedElementsByIds(editor.activeElements, ids).forEach((element) => {
       if (element.kind !== "group") return;
-      getDescendantIds(editor.activeElements, element.elementId).forEach((id) => ids.add(id));
+      getDescendantIds(editor.activeElements, element.elementId).forEach((id) =>
+        actionIds.add(id),
+      );
     });
-    return Array.from(ids);
+    return Array.from(actionIds);
   };
 
-  const moveSelectionBy = (dx: number, dy: number) => {
-    const ids = getSelectionActionIds();
-    if (ids.length === 0) return;
-    editor.updateElements(ids, (element) => ({
+  const moveSelectionBy = (dx: number, dy: number, ids?: string[]) => {
+    const actionIds = getSelectionActionIds(ids);
+    if (actionIds.length === 0) return;
+    editor.updateElements(actionIds, (element) => ({
       x: Math.round(element.x + dx),
       y: Math.round(element.y + dy),
     }));
@@ -1475,9 +1590,11 @@ export function DesignWorkspace({
 
   const alignSelectionToPage = (
     mode: "left" | "center" | "right" | "top" | "middle" | "bottom",
+    ids = editor.state.selection.ids,
   ) => {
-    if (!activePage || selected.length === 0) return;
-    const bounds = getSelectionBounds(selected);
+    const targets = getSelectedElementsByIds(editor.activeElements, ids);
+    if (!activePage || targets.length === 0) return;
+    const bounds = getSelectionBounds(targets);
     if (!bounds) return;
     let dx = 0;
     let dy = 0;
@@ -1487,7 +1604,7 @@ export function DesignWorkspace({
     if (mode === "top") dy = -bounds.y;
     if (mode === "middle") dy = activePage.height / 2 - (bounds.y + bounds.height / 2);
     if (mode === "bottom") dy = activePage.height - (bounds.y + bounds.height);
-    moveSelectionBy(dx, dy);
+    moveSelectionBy(dx, dy, ids);
   };
 
   const alignSelectionFromToolbar = (
@@ -1506,6 +1623,24 @@ export function DesignWorkspace({
     openPropertiesPanel();
   };
 
+  const updatePrimaryElement = (patch: Partial<DesignElement>) => {
+    if (!primary) return;
+    editor.updateElements([primary.elementId], patch, { history: false });
+  };
+
+  const updateElementStyle = (elementId: string, patch: Partial<ElementStyle>) => {
+    editor.updateElements(
+      [elementId],
+      (element) => buildElementStylePatch(element, patch),
+      { history: false },
+    );
+  };
+
+  const updatePrimaryStyle = (patch: Partial<ElementStyle>) => {
+    if (!primary) return;
+    updateElementStyle(primary.elementId, patch);
+  };
+
   const startInlineTextEdit = (elementId: string) => {
     const element = editor.activeElements.find((item) => item.elementId === elementId);
     if (!element || element.kind !== "text") return;
@@ -1514,10 +1649,32 @@ export function DesignWorkspace({
     setEditingTextValue(element.text);
   };
 
-  const commitInlineTextEdit = () => {
+  const commitInlineTextEdit = (textValue = editingTextValue, textRuns?: DesignTextRun[]) => {
     if (!editingTextId) return;
-    editor.updateElements([editingTextId], { text: editingTextValue }, { history: false });
+    editor.updateElements(
+      [editingTextId],
+      { text: textValue, ...(textRuns ? { textRuns } : {}) } as Partial<DesignElement>,
+      { history: false },
+    );
     setEditingTextId(null);
+    setEditingTextValue("");
+  };
+
+  const updateTextRunStyle = (
+    elementId: string,
+    range: TextSelectionRange,
+    patch: Partial<ElementStyle>,
+  ) => {
+    editor.updateElements(
+      [elementId],
+      (element) => {
+        if (element.kind !== "text") return {};
+        return {
+          textRuns: applyTextRunStyle(element.text, element.textRuns, range, patch),
+        } as Partial<DesignElement>;
+      },
+      { history: false },
+    );
   };
 
   const cancelInlineTextEdit = () => {
@@ -1701,36 +1858,78 @@ export function DesignWorkspace({
     stageWrapRef.current.style.cursor = isPanning ? "grabbing" : getToolCursor(tool, spacePressed);
   }, [tool, spacePressed, isPanning]);
 
-  const handleZoomStep = (direction: 1 | -1) => {
-    zoomByStep(editor, zoom, direction);
-  };
-
   const viewportPanX = editor.state.viewport.panX;
   const viewportPanY = editor.state.viewport.panY;
   const setEditorPan = editor.setPan;
   const setEditorZoom = editor.setZoom;
 
+  const handleZoomStep = (direction: 1 | -1) => {
+    const container = stageWrapRef.current;
+    const page = activePage;
+    if (!container || !page) {
+      editor.setZoom(getNextZoom(zoom, direction));
+      return;
+    }
+    const currentZoom = zoom;
+    const nextZoom = getNextZoom(currentZoom, direction);
+    const point = getStageClientPoint(container, lastStagePointerRef.current);
+    const nextPan = getZoomPanAtClientPoint({
+      container,
+      canvas: getDesignCanvasElement(container),
+      page,
+      currentZoom,
+      nextZoom,
+      panX: viewportPanX,
+      panY: viewportPanY,
+      clientX: point.clientX,
+      clientY: point.clientY,
+    });
+    editor.setPan(nextPan.panX, nextPan.panY);
+    editor.setZoom(nextZoom);
+  };
+
+  const handleResetZoom = () => {
+    const page = activePage;
+    const container = stageWrapRef.current;
+    if (!page || !container) {
+      editor.setZoom(1);
+      return;
+    }
+    const nextZoom = getFitPageZoom(page, container, 1);
+    const nextPan = getCenteredPagePan(page, container, nextZoom);
+    editor.setZoom(nextZoom);
+    editor.setPan(nextPan.panX, nextPan.panY);
+  };
+
   const handleCanvasWheel = useCallback(
     (event: WheelEvent) => {
       if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
+      const container = stageWrapRef.current;
+      const page = activePage;
+      if (!container || !page) return;
       const currentZoom = zoom;
       const nextZoom = getNextZoom(currentZoom, event.deltaY < 0 ? 1 : -1);
-      const wrapRect = stageWrapRef.current?.getBoundingClientRect();
-      const pointX = event.clientX - (wrapRect?.left ?? 0);
-      const pointY = event.clientY - (wrapRect?.top ?? 0);
-      const nextPan = zoomAtPoint({
+      const wrapRect = container.getBoundingClientRect();
+      lastStagePointerRef.current = {
+        x: event.clientX - wrapRect.left,
+        y: event.clientY - wrapRect.top,
+      };
+      const nextPan = getZoomPanAtClientPoint({
+        container,
+        canvas: getDesignCanvasElement(container),
+        page,
         currentZoom,
         nextZoom,
         panX: viewportPanX,
         panY: viewportPanY,
-        pointX,
-        pointY,
+        clientX: event.clientX,
+        clientY: event.clientY,
       });
       setEditorPan(nextPan.panX, nextPan.panY);
       setEditorZoom(nextZoom);
     },
-    [setEditorPan, setEditorZoom, viewportPanX, viewportPanY, zoom],
+    [activePage, setEditorPan, setEditorZoom, viewportPanX, viewportPanY, zoom],
   );
 
   useEffect(() => {
@@ -1861,16 +2060,43 @@ export function DesignWorkspace({
     setMarqueeRect(null);
   };
 
+  const handleStageWrapMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    lastStagePointerRef.current = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+  };
+
   const selectedBounds = getSelectionBounds(selected);
   const stageCursor = isPanning ? panCursor : getToolCursor(tool, spacePressed);
 
   const renderElementContextMenu = (element: DesignElement) => {
-    const hasSelection = selected.length > 0;
-    const canGroup = selected.length > 1;
-    const canUngroup = selected.some((item) => item.kind === "group");
+    const contextIds = editor.state.selection.ids.includes(element.elementId)
+      ? editor.state.selection.ids
+      : [element.elementId];
+    const contextElements = getSelectedElementsByIds(editor.activeElements, contextIds);
+    const hasContextSelection = contextElements.length > 0;
+    const canGroup = contextElements.length > 1;
+    const canUngroup = contextElements.some((item) => item.kind === "group");
+    const showContextInfo = () => {
+      const bounds = getSelectionBounds(contextElements.length ? contextElements : [element]);
+      const label =
+        contextElements.length > 1
+          ? `${contextElements.length} thành phần`
+          : (element.name ?? element.kind);
+      const info = bounds
+        ? `${label} · ${Math.round(bounds.width)}×${Math.round(bounds.height)}`
+        : label;
+      toast.message(info);
+      openPropertiesPanel();
+    };
     return (
       <ContextMenuContent className="w-72">
-        <ContextMenuItem onSelect={() => editor.copySelection()} disabled={!hasSelection}>
+        <ContextMenuItem
+          onSelect={() => editor.copySelection(contextIds)}
+          disabled={!hasContextSelection}
+        >
           <Copy className="mr-2 size-4" />
           Sao chép
           <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
@@ -1883,33 +2109,48 @@ export function DesignWorkspace({
           Dán
           <ContextMenuShortcut>Ctrl+V</ContextMenuShortcut>
         </ContextMenuItem>
-        <ContextMenuItem onSelect={() => editor.duplicateSelection()} disabled={!hasSelection}>
+        <ContextMenuItem
+          onSelect={() => editor.duplicateSelection(contextIds)}
+          disabled={!hasContextSelection}
+        >
           <Layers className="mr-2 size-4" />
           Tạo bản sao
           <ContextMenuShortcut>Ctrl+D</ContextMenuShortcut>
         </ContextMenuItem>
-        <ContextMenuItem onSelect={() => editor.deleteSelection()} disabled={!hasSelection}>
+        <ContextMenuItem
+          onSelect={() => editor.deleteSelection(contextIds)}
+          disabled={!hasContextSelection}
+        >
           <Trash2 className="mr-2 size-4" />
           Xóa
           <ContextMenuShortcut>Del</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onSelect={() => editor.orderSelection("front")} disabled={!hasSelection}>
+        <ContextMenuItem
+          onSelect={() => editor.orderSelection("front", contextIds)}
+          disabled={!hasContextSelection}
+        >
           Lên trên cùng
           <ContextMenuShortcut>Ctrl+Alt+]</ContextMenuShortcut>
         </ContextMenuItem>
-        <ContextMenuItem onSelect={() => editor.orderSelection("forward")} disabled={!hasSelection}>
+        <ContextMenuItem
+          onSelect={() => editor.orderSelection("forward", contextIds)}
+          disabled={!hasContextSelection}
+        >
           Lên một lớp
           <ContextMenuShortcut>Ctrl+]</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem
-          onSelect={() => editor.orderSelection("backward")}
-          disabled={!hasSelection}
+          onSelect={() => editor.orderSelection("backward", contextIds)}
+          disabled={!hasContextSelection}
         >
           Xuống một lớp
           <ContextMenuShortcut>Ctrl+[</ContextMenuShortcut>
         </ContextMenuItem>
-        <ContextMenuItem onSelect={() => editor.orderSelection("back")} disabled={!hasSelection}>
+        <ContextMenuItem
+          onSelect={() => editor.orderSelection("back", contextIds)}
+          disabled={!hasContextSelection}
+        >
           Xuống dưới cùng
           <ContextMenuShortcut>Ctrl+Alt+[</ContextMenuShortcut>
         </ContextMenuItem>
@@ -1917,32 +2158,34 @@ export function DesignWorkspace({
         <ContextMenuSub>
           <ContextMenuSubTrigger>Căn chỉnh theo trang</ContextMenuSubTrigger>
           <ContextMenuSubContent className="w-52">
-            <ContextMenuItem onSelect={() => alignSelectionToPage("left")}>
+            <ContextMenuItem onSelect={() => alignSelectionToPage("left", contextIds)}>
               Căn trái
             </ContextMenuItem>
-            <ContextMenuItem onSelect={() => alignSelectionToPage("center")}>
+            <ContextMenuItem onSelect={() => alignSelectionToPage("center", contextIds)}>
               Căn giữa ngang
             </ContextMenuItem>
-            <ContextMenuItem onSelect={() => alignSelectionToPage("right")}>
+            <ContextMenuItem onSelect={() => alignSelectionToPage("right", contextIds)}>
               Căn phải
             </ContextMenuItem>
             <ContextMenuSeparator />
-            <ContextMenuItem onSelect={() => alignSelectionToPage("top")}>Căn trên</ContextMenuItem>
-            <ContextMenuItem onSelect={() => alignSelectionToPage("middle")}>
+            <ContextMenuItem onSelect={() => alignSelectionToPage("top", contextIds)}>
+              Căn trên
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => alignSelectionToPage("middle", contextIds)}>
               Căn giữa dọc
             </ContextMenuItem>
-            <ContextMenuItem onSelect={() => alignSelectionToPage("bottom")}>
+            <ContextMenuItem onSelect={() => alignSelectionToPage("bottom", contextIds)}>
               Căn dưới
             </ContextMenuItem>
           </ContextMenuSubContent>
         </ContextMenuSub>
         <ContextMenuSeparator />
-        <ContextMenuItem onSelect={() => editor.groupSelection()} disabled={!canGroup}>
+        <ContextMenuItem onSelect={() => editor.groupSelection(contextIds)} disabled={!canGroup}>
           <Group className="mr-2 size-4" />
           Tạo thành phần
           <ContextMenuShortcut>Ctrl+G</ContextMenuShortcut>
         </ContextMenuItem>
-        <ContextMenuItem onSelect={() => editor.ungroupSelection()} disabled={!canUngroup}>
+        <ContextMenuItem onSelect={() => editor.ungroupSelection(contextIds)} disabled={!canUngroup}>
           <Ungroup className="mr-2 size-4" />
           Bỏ nhóm
           <ContextMenuShortcut>Ctrl+Shift+G</ContextMenuShortcut>
@@ -2011,7 +2254,7 @@ export function DesignWorkspace({
           <PanelRight className="mr-2 size-4" />
           Mở thuộc tính
         </ContextMenuItem>
-        <ContextMenuItem onSelect={showSelectionInfo}>
+        <ContextMenuItem onSelect={showContextInfo}>
           <Info className="mr-2 size-4" />
           Thông tin
         </ContextMenuItem>
@@ -2021,7 +2264,7 @@ export function DesignWorkspace({
 
   const renderCanvasContextMenu = () => (
     <ContextMenuContent className="w-64">
-      <ContextMenuLabel>Canvas</ContextMenuLabel>
+      <ContextMenuLabel>Vùng thiết kế</ContextMenuLabel>
       <ContextMenuItem
         onSelect={() => editor.pasteClipboard()}
         disabled={!editor.state.clipboard?.length}
@@ -2053,22 +2296,205 @@ export function DesignWorkspace({
     </ContextMenuContent>
   );
 
+  const renderViewToggleGroup = (className = "") => (
+    <div className={`flex shrink-0 items-center rounded-md border bg-background p-0.5 ${className}`}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="icon"
+            variant="ghost"
+            className={`size-8 ${
+              editor.state.documentSettings.showSafeZone
+                ? "bg-primary/10 text-primary hover:bg-primary/15"
+                : ""
+            }`}
+            onClick={toggleSafeZone}
+            aria-label="Bật tắt vùng an toàn"
+            aria-pressed={editor.state.documentSettings.showSafeZone}
+          >
+            <SquareDashed className="size-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Vùng an toàn</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="icon"
+            variant="ghost"
+            className={`size-8 ${
+              editor.state.documentSettings.showGrid
+                ? "bg-primary/10 text-primary hover:bg-primary/15"
+                : ""
+            }`}
+            onClick={() =>
+              editor.updateDocumentSettings({
+                showGrid: !editor.state.documentSettings.showGrid,
+              })
+            }
+            aria-label="Bật tắt lưới"
+            aria-pressed={editor.state.documentSettings.showGrid}
+          >
+            <Grid3X3 className="size-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Lưới</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="icon"
+            variant="ghost"
+            className={`size-8 ${
+              editor.state.documentSettings.showGuides
+                ? "bg-primary/10 text-primary hover:bg-primary/15"
+                : ""
+            }`}
+            onClick={() =>
+              editor.updateDocumentSettings({
+                showGuides: !editor.state.documentSettings.showGuides,
+              })
+            }
+            aria-label="Bật tắt đường căn"
+            aria-pressed={editor.state.documentSettings.showGuides}
+          >
+            <ScanLine className="size-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Đường căn</TooltipContent>
+      </Tooltip>
+    </div>
+  );
+
+  const renderWorkspaceActions = (className = "") => (
+    <div className={`flex shrink-0 items-center justify-end gap-1.5 ${className}`}>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button size="sm" variant="outline">
+            <Download className="mr-2 size-4" />
+            Tải xuống
+            <ChevronDown className="ml-1 size-3.5 opacity-60" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuLabel>Xuất thiết kế</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={() => runExport("png")}>PNG</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => runExport("jpg")}>JPG</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => runExport("svg")}>SVG</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => runExport("pdf")}>PDF</DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={() => runExport("json")}>JSON (kỹ thuật)</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <ToolbarDivider />
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="icon"
+            variant={leftOpen ? "default" : "ghost"}
+            className="size-8"
+            onClick={() => setLeftOpen((value) => !value)}
+            aria-label="Bật tắt panel trái"
+            aria-pressed={leftOpen}
+          >
+            <PanelLeft className="size-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Panel trái</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="icon"
+            variant={rightOpen ? "default" : "ghost"}
+            className="size-8"
+            onClick={() => setRightOpen((value) => !value)}
+            aria-label="Bật tắt panel phải"
+            aria-pressed={rightOpen}
+          >
+            <PanelRight className="size-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Panel phải</TooltipContent>
+      </Tooltip>
+
+      {autosave && onSave ? (
+        <span
+          className="px-1 text-xs text-muted-foreground"
+          aria-live="polite"
+          title="Editor lưu tự động khi có thay đổi"
+        >
+          {autosaveStatus === "pending" || autosaveStatus === "saving"
+            ? "Đang lưu"
+            : autosaveStatus === "error"
+              ? "Đang lưu"
+              : "Đã lưu"}
+        </span>
+      ) : null}
+
+      {!autosave && onSave ? (
+        <Button onClick={handleSave}>
+          <Save className="mr-2 size-4" />
+          Lưu
+        </Button>
+      ) : null}
+
+      {showCloseButton && onClose ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              size="icon"
+              variant="outline"
+              className="size-8 rounded-full"
+              onClick={onClose}
+              aria-label="Đóng editor"
+            >
+              <X className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Đóng editor</TooltipContent>
+        </Tooltip>
+      ) : null}
+    </div>
+  );
+
   if (!activePage) return null;
 
   return (
     <TooltipProvider delayDuration={250}>
       <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background text-foreground">
-        <div className="flex flex-wrap items-center gap-2 border-b bg-card/40 px-3 py-2">
-          <Input
-            value={editor.document.name}
-            onChange={(event) => editor.setName(event.target.value)}
-            className="h-9 max-w-[220px]"
-            aria-label="Tên design"
-          />
+        {headerLeading ? (
+          <div className="flex min-h-[60px] items-center gap-2 border-b px-4 py-3">
+            <div className="flex shrink-0 items-center">{headerLeading}</div>
+            <Input
+              value={editor.document.name}
+              onChange={(event) => editor.setName(event.target.value)}
+              className="h-8 w-[220px] shrink-0"
+              aria-label="Tên design"
+            />
+            {renderWorkspaceActions("ml-auto")}
+          </div>
+        ) : null}
+
+        <div className="flex min-h-[54px] flex-nowrap items-center gap-1.5 overflow-x-auto overflow-y-hidden whitespace-nowrap border-b bg-card/40 px-3 py-2">
+          {headerLeading ? (
+            renderViewToggleGroup()
+          ) : (
+            <Input
+              value={editor.document.name}
+              onChange={(event) => editor.setName(event.target.value)}
+              className="h-8 w-[220px] shrink-0"
+              aria-label="Tên design"
+            />
+          )}
 
           {contextTitle ? (
             <div
-              className="max-w-[320px] truncate rounded-md bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground"
+              className="max-w-[240px] shrink-0 truncate rounded-md bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground"
               title={contextTitle}
             >
               {contextTitle}
@@ -2078,7 +2504,7 @@ export function DesignWorkspace({
           <ToolbarDivider />
 
           {/* Undo / Redo */}
-          <div className="flex items-center rounded-md border bg-background p-0.5">
+          <div className="flex shrink-0 items-center rounded-md border bg-background p-0.5">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -2091,7 +2517,7 @@ export function DesignWorkspace({
                   <Undo2 className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Undo · Ctrl+Z</TooltipContent>
+              <TooltipContent>Hoàn tác · Ctrl+Z</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -2105,13 +2531,13 @@ export function DesignWorkspace({
                   <Redo2 className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Redo · Ctrl+Shift+Z</TooltipContent>
+              <TooltipContent>Làm lại · Ctrl+Shift+Z</TooltipContent>
             </Tooltip>
           </div>
 
           <ToolbarDivider />
 
-          <div className="flex items-center rounded-md border bg-background p-0.5">
+          <div className="flex shrink-0 items-center rounded-md border bg-background p-0.5">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -2119,11 +2545,12 @@ export function DesignWorkspace({
                   variant="ghost"
                   className="size-8"
                   onClick={() => handleZoomStep(-1)}
+                  aria-label="Thu nhỏ"
                 >
                   <ZoomOut className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Zoom out · Ctrl/Cmd + −</TooltipContent>
+              <TooltipContent>Thu nhỏ · Ctrl/Cmd + −</TooltipContent>
             </Tooltip>
             <div className="w-14 text-center text-xs font-medium tabular-nums">
               {formatZoom(zoom)}
@@ -2135,11 +2562,12 @@ export function DesignWorkspace({
                   variant="ghost"
                   className="size-8"
                   onClick={() => handleZoomStep(1)}
+                  aria-label="Phóng to"
                 >
                   <ZoomIn className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Zoom in · Ctrl/Cmd + +</TooltipContent>
+              <TooltipContent>Phóng to · Ctrl/Cmd + +</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -2147,18 +2575,19 @@ export function DesignWorkspace({
                   size="icon"
                   variant="ghost"
                   className="size-8"
-                  onClick={() => zoomToFit(editor, stageWrapRef.current)}
+                  onClick={handleResetZoom}
+                  aria-label="Đặt lại khung nhìn"
                 >
-                  <Frame className="size-4" />
+                  <RotateCcw className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Fit to screen</TooltipContent>
+              <TooltipContent>Đặt lại khung nhìn</TooltipContent>
             </Tooltip>
           </div>
 
           <ToolbarDivider />
 
-          <div className="flex items-center rounded-md border bg-background p-0.5">
+          <div className="flex shrink-0 items-center rounded-md border bg-background p-0.5">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -2166,13 +2595,13 @@ export function DesignWorkspace({
                   variant={tool === "select" ? "default" : "ghost"}
                   className="size-8"
                   onClick={() => setTool("select")}
-                  aria-label="Select"
+                  aria-label="Chọn"
                   aria-pressed={tool === "select"}
                 >
                   <MousePointer2 className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Select · V</TooltipContent>
+              <TooltipContent>Chọn · V</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -2181,77 +2610,91 @@ export function DesignWorkspace({
                   variant={tool === "pan" || spacePressed ? "default" : "ghost"}
                   className="size-8"
                   onClick={() => setTool("pan")}
-                  aria-label="Pan"
+                  aria-label="Di chuyển khung nhìn"
                   aria-pressed={tool === "pan"}
                 >
                   <Hand className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Pan · H / Space</TooltipContent>
+              <TooltipContent>Di chuyển khung nhìn · H / Space</TooltipContent>
             </Tooltip>
           </div>
 
           <ToolbarDivider />
 
-          <div className="flex items-center rounded-md border bg-background p-0.5">
+          {headerLeading ? null : (
+            <div className="flex shrink-0 items-center rounded-md border bg-background p-0.5">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   size="icon"
-                  variant={editor.state.documentSettings.showSafeZone ? "default" : "ghost"}
-                  className="size-8"
+                  variant="ghost"
+                  className={`size-8 ${
+                    editor.state.documentSettings.showSafeZone
+                      ? "bg-primary/10 text-primary hover:bg-primary/15"
+                      : ""
+                  }`}
                   onClick={toggleSafeZone}
-                  aria-label="Toggle khung an toàn"
+                  aria-label="Bật tắt vùng an toàn"
                   aria-pressed={editor.state.documentSettings.showSafeZone}
                 >
-                  <Frame className="size-4" />
+                  <SquareDashed className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Khung an toàn</TooltipContent>
+              <TooltipContent>Vùng an toàn</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   size="icon"
-                  variant={editor.state.documentSettings.showGrid ? "default" : "ghost"}
-                  className="size-8"
+                  variant="ghost"
+                  className={`size-8 ${
+                    editor.state.documentSettings.showGrid
+                      ? "bg-primary/10 text-primary hover:bg-primary/15"
+                      : ""
+                  }`}
                   onClick={() =>
                     editor.updateDocumentSettings({
                       showGrid: !editor.state.documentSettings.showGrid,
                     })
                   }
-                  aria-label="Toggle grid"
+                  aria-label="Bật tắt lưới"
                   aria-pressed={editor.state.documentSettings.showGrid}
                 >
-                  <Grid2X2 className="size-4" />
+                  <Grid3X3 className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Grid</TooltipContent>
+              <TooltipContent>Lưới</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   size="icon"
-                  variant={editor.state.documentSettings.showGuides ? "default" : "ghost"}
-                  className="size-8"
+                  variant="ghost"
+                  className={`size-8 ${
+                    editor.state.documentSettings.showGuides
+                      ? "bg-primary/10 text-primary hover:bg-primary/15"
+                      : ""
+                  }`}
                   onClick={() =>
                     editor.updateDocumentSettings({
                       showGuides: !editor.state.documentSettings.showGuides,
                     })
                   }
-                  aria-label="Toggle guides"
+                  aria-label="Bật tắt đường căn"
                   aria-pressed={editor.state.documentSettings.showGuides}
                 >
-                  <Ruler className="size-4" />
+                  <ScanLine className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Guides</TooltipContent>
+              <TooltipContent>Đường căn</TooltipContent>
             </Tooltip>
-          </div>
+            </div>
+          )}
 
           <ToolbarDivider />
 
-          <div className="flex items-center rounded-md border bg-background p-0.5">
+          <div className="flex shrink-0 items-center rounded-md border bg-background p-0.5">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -2260,10 +2703,10 @@ export function DesignWorkspace({
                   className="size-8"
                   onClick={() => alignSelectionFromToolbar("left")}
                 >
-                  <AlignStartHorizontal className="size-4" />
+                  <AlignStartVertical className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Align left</TooltipContent>
+              <TooltipContent>Căn trái</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -2273,10 +2716,10 @@ export function DesignWorkspace({
                   className="size-8"
                   onClick={() => alignSelectionFromToolbar("center")}
                 >
-                  <AlignCenter className="size-4" />
+                  <AlignCenterVertical className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Align horizontal center</TooltipContent>
+              <TooltipContent>Căn giữa ngang</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -2286,10 +2729,10 @@ export function DesignWorkspace({
                   className="size-8"
                   onClick={() => alignSelectionFromToolbar("right")}
                 >
-                  <AlignEndHorizontal className="size-4" />
+                  <AlignEndVertical className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Align right</TooltipContent>
+              <TooltipContent>Căn phải</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -2299,10 +2742,10 @@ export function DesignWorkspace({
                   className="size-8"
                   onClick={() => alignSelectionFromToolbar("top")}
                 >
-                  <MoveUp className="size-4" />
+                  <AlignStartHorizontal className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Align top</TooltipContent>
+              <TooltipContent>Căn trên</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -2312,10 +2755,10 @@ export function DesignWorkspace({
                   className="size-8"
                   onClick={() => alignSelectionFromToolbar("middle")}
                 >
-                  <AlignVerticalJustifyCenter className="size-4" />
+                  <AlignCenterHorizontal className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Align vertical middle</TooltipContent>
+              <TooltipContent>Căn giữa dọc</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -2325,10 +2768,10 @@ export function DesignWorkspace({
                   className="size-8"
                   onClick={() => alignSelectionFromToolbar("bottom")}
                 >
-                  <MoveDown className="size-4" />
+                  <AlignEndHorizontal className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Align bottom</TooltipContent>
+              <TooltipContent>Căn dưới</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -2338,10 +2781,10 @@ export function DesignWorkspace({
                   className="size-8"
                   onClick={() => editor.distributeSelection("horizontal")}
                 >
-                  <AlignHorizontalJustifyCenter className="size-4" />
+                  <AlignHorizontalSpaceBetween className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Distribute horizontally</TooltipContent>
+              <TooltipContent>Dàn đều ngang</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -2351,16 +2794,16 @@ export function DesignWorkspace({
                   className="size-8"
                   onClick={() => editor.distributeSelection("vertical")}
                 >
-                  <AlignVerticalJustifyCenter className="size-4" />
+                  <AlignVerticalSpaceBetween className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Distribute vertically</TooltipContent>
+              <TooltipContent>Dàn đều dọc</TooltipContent>
             </Tooltip>
           </div>
 
           <ToolbarDivider />
 
-          <div className="flex items-center rounded-md border bg-background p-0.5">
+          <div className="flex shrink-0 items-center rounded-md border bg-background p-0.5">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -2373,7 +2816,7 @@ export function DesignWorkspace({
                   <Group className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Group · Ctrl+G</TooltipContent>
+              <TooltipContent>Nhóm · Ctrl+G</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -2387,103 +2830,652 @@ export function DesignWorkspace({
                   <Ungroup className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Ungroup · Ctrl+Shift+G</TooltipContent>
+              <TooltipContent>Bỏ nhóm · Ctrl+Shift+G</TooltipContent>
             </Tooltip>
           </div>
 
-          <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button size="sm" variant="outline">
-                  <Download className="mr-2 size-4" />
-                  Download
-                  <ChevronDown className="ml-1 size-3.5 opacity-60" />
+          <ToolbarDivider />
+
+          <div className="flex shrink-0 items-center rounded-md border bg-background p-0.5">
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button size="sm" variant="ghost" className="h-8 gap-1.5 px-2">
+                  <Settings2 className="size-4" />
+                  Trang
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuLabel>Xuất thiết kế</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => runExport("png")}>PNG</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => runExport("jpg")}>JPG</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => runExport("svg")}>SVG</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => runExport("pdf")}>PDF</DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => runExport("json")}>JSON (dev)</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            <ToolbarDivider />
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="icon"
-                  variant={leftOpen ? "default" : "ghost"}
-                  className="size-8"
-                  onClick={() => setLeftOpen((value) => !value)}
-                  aria-label="Toggle left panel"
-                  aria-pressed={leftOpen}
-                >
-                  <PanelLeft className="size-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Left panel</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="icon"
-                  variant={rightOpen ? "default" : "ghost"}
-                  className="size-8"
-                  onClick={() => setRightOpen((value) => !value)}
-                  aria-label="Toggle right panel"
-                  aria-pressed={rightOpen}
-                >
-                  <PanelRight className="size-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Right panel</TooltipContent>
-            </Tooltip>
-
-            {autosave && onSave ? (
-              <span
-                className="px-1 text-xs text-muted-foreground"
-                aria-live="polite"
-                title="Editor lưu tự động khi có thay đổi"
-              >
-                {autosaveStatus === "pending" || autosaveStatus === "saving"
-                  ? "Đang lưu"
-                  : autosaveStatus === "error"
-                    ? "Đang lưu"
-                    : "Đã lưu"}
-              </span>
-            ) : null}
-
-            {!autosave && onSave ? (
-              <Button onClick={handleSave}>
-                <Save className="mr-2 size-4" />
-                Lưu
-              </Button>
-            ) : null}
-
-            {onClose ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="outline"
-                    className="size-9 rounded-full"
-                    onClick={onClose}
-                    aria-label="Đóng editor"
+              </PopoverTrigger>
+              <PopoverContent align="start" className="max-h-[70vh] w-80 overflow-y-auto p-3">
+                <div className="flex flex-col gap-3">
+                  <InspectorSection
+                    title="Trang"
+                    action={
+                      <Button
+                        size="sm"
+                        variant={editor.state.documentSettings.snapToGrid ? "default" : "outline"}
+                        className="h-7 gap-1.5 px-2 text-[11px]"
+                        onClick={() =>
+                          editor.updateDocumentSettings({
+                            snapToGrid: !editor.state.documentSettings.snapToGrid,
+                          })
+                        }
+                      >
+                        <Grid2X2 className="size-3.5" />
+                        Hút lưới {editor.state.documentSettings.snapToGrid ? "Bật" : "Tắt"}
+                      </Button>
+                    }
                   >
-                    <X className="size-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Đóng editor</TooltipContent>
-              </Tooltip>
-            ) : null}
+                    <div className="grid grid-cols-2 gap-2">
+                      <NumberField
+                        label="W"
+                        value={activePage.width}
+                        onChange={(value) => editor.updatePage(activePage.pageId, { width: value })}
+                      />
+                      <NumberField
+                        label="H"
+                        value={activePage.height}
+                        onChange={(value) =>
+                          editor.updatePage(activePage.pageId, { height: value })
+                        }
+                      />
+                    </div>
+                    <CompactColorControl
+                      label="Nền"
+                      value={activePage.background ?? "#ffffff"}
+                      onChange={(color) =>
+                        editor.updatePage(activePage.pageId, { background: color })
+                      }
+                    />
+                    <div className="grid grid-cols-3 gap-2">
+                      <Button
+                        size="sm"
+                        variant={editor.state.documentSettings.showSafeZone ? "default" : "outline"}
+                        onClick={toggleSafeZone}
+                      >
+                        Vùng an toàn
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={editor.state.documentSettings.showGrid ? "default" : "outline"}
+                        onClick={() =>
+                          editor.updateDocumentSettings({
+                            showGrid: !editor.state.documentSettings.showGrid,
+                          })
+                        }
+                      >
+                        Lưới
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={editor.state.documentSettings.showGuides ? "default" : "outline"}
+                        onClick={() =>
+                          editor.updateDocumentSettings({
+                            showGuides: !editor.state.documentSettings.showGuides,
+                          })
+                        }
+                      >
+                        Đường căn
+                      </Button>
+                    </div>
+                  </InspectorSection>
+                </div>
+              </PopoverContent>
+            </Popover>
+
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  size="sm"
+                  variant={primary ? "ghost" : "outline"}
+                  className="h-8 gap-1.5 px-2"
+                  disabled={!primary}
+                >
+                  <SlidersHorizontal className="size-4" />
+                  Đối tượng
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="max-h-[70vh] w-96 overflow-y-auto p-3">
+                {primary ? (
+                  <div className="flex flex-col gap-3">
+                    <InspectorSection
+                      title="Đối tượng"
+                      action={
+                        <span className="rounded-md bg-muted px-2 py-1 text-[11px] font-medium capitalize text-muted-foreground">
+                          {selected.length > 1 ? `${selected.length} mục` : primary.kind}
+                        </span>
+                      }
+                    >
+                      <div className="flex flex-col gap-2">
+                        <Label className="text-[11px] font-medium text-muted-foreground">
+                          Tên layer
+                        </Label>
+                        <Input
+                          value={primary.name ?? ""}
+                          onChange={(event) => updatePrimaryElement({ name: event.target.value })}
+                          placeholder="Tên layer"
+                          className="h-8"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <NumberField
+                          label="X"
+                          value={primary.x}
+                          onChange={(value) =>
+                            editor.updateSelectedElements({ x: value }, { history: false })
+                          }
+                        />
+                        <NumberField
+                          label="Y"
+                          value={primary.y}
+                          onChange={(value) =>
+                            editor.updateSelectedElements({ y: value }, { history: false })
+                          }
+                        />
+                        <NumberField
+                          label="W"
+                          value={primary.width}
+                          onChange={(value) =>
+                            editor.updateSelectedElements({ width: value }, { history: false })
+                          }
+                        />
+                        <NumberField
+                          label="H"
+                          value={primary.height}
+                          onChange={(value) =>
+                            editor.updateSelectedElements({ height: value }, { history: false })
+                          }
+                        />
+                      </div>
+                      <div className="grid grid-cols-[1fr_auto_auto] items-end gap-2">
+                        <NumberField
+                          label="Xoay"
+                          value={primary.rotation ?? 0}
+                          suffix="°"
+                          onChange={(value) =>
+                            editor.updateSelectedElements({ rotation: value }, { history: false })
+                          }
+                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 w-10 px-0"
+                          onClick={() =>
+                            editor.updateSelectedElements(
+                              { rotation: (primary.rotation ?? 0) - 15 },
+                              { history: false },
+                            )
+                          }
+                        >
+                          <RotateCcw className="size-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 w-10 px-0"
+                          onClick={() =>
+                            editor.updateSelectedElements(
+                              { rotation: (primary.rotation ?? 0) + 15 },
+                              { history: false },
+                            )
+                          }
+                        >
+                          <RotateCw className="size-4" />
+                        </Button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => editor.copySelection()}
+                        >
+                          <Copy className="mr-2 size-4" /> Sao chép
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => editor.duplicateSelection()}
+                        >
+                          <Layers className="mr-2 size-4" /> Nhân bản
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant={primary.hidden ? "default" : "outline"}
+                          onClick={() => updatePrimaryElement({ hidden: !primary.hidden })}
+                        >
+                          {primary.hidden ? "Hiện" : "Ẩn"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant={primary.locked ? "default" : "outline"}
+                          onClick={() => updatePrimaryElement({ locked: !primary.locked })}
+                        >
+                          {primary.locked ? "Mở khóa" : "Khóa"}
+                        </Button>
+                      </div>
+                    </InspectorSection>
+
+                    <InspectorSection title="Thứ tự">
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="justify-start"
+                          onClick={() => editor.orderSelection("front")}
+                        >
+                          Lên cùng
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="justify-start"
+                          onClick={() => editor.orderSelection("forward")}
+                        >
+                          Lên 1 lớp
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="justify-start"
+                          onClick={() => editor.orderSelection("backward")}
+                        >
+                          Xuống 1 lớp
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="justify-start"
+                          onClick={() => editor.orderSelection("back")}
+                        >
+                          Xuống cùng
+                        </Button>
+                      </div>
+                    </InspectorSection>
+
+                    {primary.kind === "text" ? (
+                      <InspectorSection title="Chữ">
+                        <textarea
+                          value={primary.text}
+                          onChange={(event) =>
+                            updatePrimaryElement({
+                              text: event.target.value,
+                            } as Partial<DesignElement>)
+                          }
+                          className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                        />
+                        <CompactColorControl
+                          label="Màu chữ"
+                          value={primary.style?.color ?? "#0f172a"}
+                          onChange={(color) => updatePrimaryStyle({ color })}
+                        />
+                        <LetterSpacingControl
+                          value={Number(primary.style?.letterSpacing ?? 0)}
+                          onChange={(value) => updatePrimaryStyle({ letterSpacing: value })}
+                        />
+                      </InspectorSection>
+                    ) : null}
+
+                    {primary.kind === "image" || primary.kind === "shape" ? (
+                      <InspectorSection title="Hiển thị">
+                        <div className="flex flex-col gap-2">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-xs">Bo góc</Label>
+                            <span className="text-[10px] tabular-nums text-muted-foreground">
+                              {primary.style?.borderRadius ?? 0}px
+                            </span>
+                          </div>
+                          <Slider
+                            value={[Number(primary.style?.borderRadius ?? 0)]}
+                            min={0}
+                            max={160}
+                            step={2}
+                            onValueChange={([value]) => updatePrimaryStyle({ borderRadius: value })}
+                          />
+                        </div>
+                        {primary.kind === "shape" ? (
+                          <CompactColorControl
+                            label="Màu nền"
+                            value={primary.style?.fill ?? "#f97316"}
+                            onChange={(color) => updatePrimaryStyle({ fill: color })}
+                          />
+                        ) : null}
+                        {primary.kind === "image" ? (
+                          <>
+                            <div className="flex flex-col gap-2">
+                              <Label className="text-xs">Cách khớp</Label>
+                              <Select
+                                value={primary.style?.fit ?? "cover"}
+                                onValueChange={(value) =>
+                                  updatePrimaryStyle({
+                                    fit: value as "cover" | "contain" | "stretch",
+                                  })
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="cover">Phủ kín</SelectItem>
+                                  <SelectItem value="contain">Vừa khung</SelectItem>
+                                  <SelectItem value="stretch">Kéo giãn</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              {(
+                                [
+                                  ["Độ sáng", "brightness", 0, 200, 100],
+                                  ["Tương phản", "contrast", 0, 200, 100],
+                                  ["Độ bão hòa", "saturate", 0, 200, 100],
+                                  ["Làm mờ", "blur", 0, 20, 0],
+                                ] as const
+                              ).map(([label, key, min, max, fallback]) => {
+                                const raw = Number(
+                                  primary.style?.[key] ?? (key === "blur" ? 0 : 1),
+                                );
+                                const value = key === "blur" ? raw : raw * 100;
+                                return (
+                                  <div key={key} className="flex flex-col gap-2">
+                                    <div className="flex items-center justify-between">
+                                      <Label className="text-xs">{label}</Label>
+                                      <span className="text-[10px] tabular-nums text-muted-foreground">
+                                        {Math.round(value)}
+                                        {key === "blur" ? "px" : "%"}
+                                      </span>
+                                    </div>
+                                    <Slider
+                                      value={[Number.isFinite(value) ? value : fallback]}
+                                      min={min}
+                                      max={max}
+                                      step={key === "blur" ? 0.5 : 5}
+                                      onValueChange={([next]) =>
+                                        updatePrimaryStyle({
+                                          [key]: key === "blur" ? next : next / 100,
+                                        } as Partial<ElementStyle>)
+                                      }
+                                    />
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </>
+                        ) : null}
+                      </InspectorSection>
+                    ) : null}
+
+                    {primary.kind === "shape" || primary.kind === "text" ? (
+                      <InspectorSection
+                        title="Màu chuyển"
+                        action={
+                          <Button
+                            size="sm"
+                            variant={primary.style?.gradientEnabled ? "default" : "outline"}
+                            onClick={() =>
+                              updatePrimaryStyle({
+                                gradientEnabled: !primary.style?.gradientEnabled,
+                                gradientFrom: primary.style?.gradientFrom ?? "#f97316",
+                                gradientTo: primary.style?.gradientTo ?? "#ec4899",
+                                gradientAngle: primary.style?.gradientAngle ?? 90,
+                              })
+                            }
+                          >
+                            {primary.style?.gradientEnabled ? "Bật" : "Tắt"}
+                          </Button>
+                        }
+                      >
+                        <div className="grid grid-cols-2 gap-2">
+                          <CompactColorControl
+                            label="Từ"
+                            value={primary.style?.gradientFrom ?? "#f97316"}
+                            onChange={(color) =>
+                              updatePrimaryStyle({
+                                gradientEnabled: true,
+                                gradientFrom: color,
+                                gradientTo: primary.style?.gradientTo ?? "#ec4899",
+                              })
+                            }
+                          />
+                          <CompactColorControl
+                            label="Đến"
+                            value={primary.style?.gradientTo ?? "#ec4899"}
+                            onChange={(color) =>
+                              updatePrimaryStyle({
+                                gradientEnabled: true,
+                                gradientFrom: primary.style?.gradientFrom ?? "#f97316",
+                                gradientTo: color,
+                              })
+                            }
+                          />
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-xs">Góc</Label>
+                            <span className="text-[10px] tabular-nums text-muted-foreground">
+                              {primary.style?.gradientAngle ?? 90}°
+                            </span>
+                          </div>
+                          <Slider
+                            value={[primary.style?.gradientAngle ?? 90]}
+                            min={0}
+                            max={360}
+                            step={15}
+                            onValueChange={([value]) =>
+                              updatePrimaryStyle({
+                                gradientEnabled: true,
+                                gradientAngle: value,
+                                gradientFrom: primary.style?.gradientFrom ?? "#f97316",
+                                gradientTo: primary.style?.gradientTo ?? "#ec4899",
+                              })
+                            }
+                          />
+                        </div>
+                      </InspectorSection>
+                    ) : null}
+
+                    <InspectorSection
+                      title="Đổ bóng"
+                      action={
+                        <Button
+                          size="sm"
+                          variant={primary.style?.shadowColor ? "default" : "outline"}
+                          onClick={() =>
+                            updatePrimaryStyle({
+                              shadowColor: primary.style?.shadowColor ? undefined : "#000000",
+                              shadowBlur: primary.style?.shadowBlur ?? 8,
+                              shadowX: primary.style?.shadowX ?? 0,
+                              shadowY: primary.style?.shadowY ?? 4,
+                            })
+                          }
+                        >
+                          {primary.style?.shadowColor ? "Bật" : "Tắt"}
+                        </Button>
+                      }
+                    >
+                      <CompactColorControl
+                        label="Màu"
+                        value={primary.style?.shadowColor ?? "#000000"}
+                        onChange={(color) =>
+                          updatePrimaryStyle({
+                            shadowColor: color,
+                            shadowBlur: primary.style?.shadowBlur ?? 8,
+                            shadowX: primary.style?.shadowX ?? 0,
+                            shadowY: primary.style?.shadowY ?? 4,
+                          })
+                        }
+                      />
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs">Mờ</Label>
+                          <span className="text-[10px] tabular-nums text-muted-foreground">
+                            {primary.style?.shadowBlur ?? 8}px
+                          </span>
+                        </div>
+                        <Slider
+                          value={[primary.style?.shadowBlur ?? 8]}
+                          min={0}
+                          max={40}
+                          step={1}
+                          onValueChange={([value]) =>
+                            updatePrimaryStyle({
+                              shadowColor: primary.style?.shadowColor ?? "#000000",
+                              shadowBlur: value,
+                            })
+                          }
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <NumberField
+                          label="X"
+                          value={primary.style?.shadowX ?? 0}
+                          onChange={(value) =>
+                            updatePrimaryStyle({
+                              shadowColor: primary.style?.shadowColor ?? "#000000",
+                              shadowX: value,
+                            })
+                          }
+                        />
+                        <NumberField
+                          label="Y"
+                          value={primary.style?.shadowY ?? 4}
+                          onChange={(value) =>
+                            updatePrimaryStyle({
+                              shadowColor: primary.style?.shadowColor ?? "#000000",
+                              shadowY: value,
+                            })
+                          }
+                        />
+                      </div>
+                    </InspectorSection>
+                  </div>
+                ) : null}
+              </PopoverContent>
+            </Popover>
+
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button size="sm" variant="ghost" className="h-8 gap-1.5 px-2">
+                  <Palette className="size-4" />
+                  Thương hiệu
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="max-h-[70vh] w-96 overflow-y-auto p-3">
+                <div className="flex flex-col gap-3">
+                  <div className="grid grid-cols-3 gap-2">
+                    <Button variant="outline" size="sm" onClick={createBrandKit}>
+                      <Plus className="mr-2 size-4" /> Tạo mới
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={uploadFont}>
+                      <Upload className="mr-2 size-4" /> Font
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => uploadAsset("logo")}>
+                      <Upload className="mr-2 size-4" /> Logo
+                    </Button>
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <Label className="text-xs uppercase text-muted-foreground">
+                      Bộ thương hiệu hiện tại
+                    </Label>
+                    <Select
+                      value={currentBrandKit?.brandKitId ?? "__none__"}
+                      onValueChange={(value) =>
+                        persistBrandKitSelection(value === "__none__" ? undefined : value)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Chưa chọn bộ thương hiệu" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">Không dùng</SelectItem>
+                        {brandKits.map((kit) => (
+                          <SelectItem key={kit.brandKitId} value={kit.brandKitId}>
+                            {kit.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {currentBrandKit ? (
+                    <InspectorSection title="Bộ thương hiệu">
+                      <Input
+                        value={currentBrandKit.name}
+                        onChange={(event) => updateBrandKit({ name: event.target.value })}
+                      />
+                      <div className="flex flex-col gap-2">
+                        <Label className="text-xs uppercase text-muted-foreground">Bảng màu</Label>
+                        <div className="flex flex-wrap gap-2">
+                          {currentBrandKit.colors.map((color, index) => (
+                            <button
+                              key={`${color}-${index}`}
+                              className="size-8 rounded-full border"
+                              style={{ background: color }}
+                              onClick={() => {
+                                if (!primary) return;
+                                updatePrimaryStyle(
+                                  primary.kind === "text" ? { color } : { fill: color },
+                                );
+                              }}
+                              title={color}
+                            />
+                          ))}
+                          <label className="flex size-8 cursor-pointer items-center justify-center rounded-full border bg-muted">
+                            <Plus className="size-4" />
+                            <input
+                              type="color"
+                              className="sr-only"
+                              onChange={(event) =>
+                                updateBrandKit({
+                                  colors: [...currentBrandKit.colors, event.target.value],
+                                })
+                              }
+                            />
+                          </label>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-2">
+                        <Label className="text-xs uppercase text-muted-foreground">Font chữ</Label>
+                        <div className="flex flex-col gap-2">
+                          {fontAssets.map((fontAsset) => {
+                            const selectedFont = currentBrandKit.fontAssetIds.includes(
+                              fontAsset.fontAssetId,
+                            );
+                            return (
+                              <button
+                                key={fontAsset.fontAssetId}
+                                className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left ${selectedFont ? "border-primary bg-primary/5" : ""}`}
+                                onClick={() =>
+                                  updateBrandKit({
+                                    fontAssetIds: selectedFont
+                                      ? currentBrandKit.fontAssetIds.filter(
+                                          (id) => id !== fontAsset.fontAssetId,
+                                        )
+                                      : [...currentBrandKit.fontAssetIds, fontAsset.fontAssetId],
+                                  })
+                                }
+                              >
+                                <span style={{ fontFamily: fontAsset.family }}>
+                                  {fontAsset.family}
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                  {selectedFont ? "Bật" : "Tắt"}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </InspectorSection>
+                  ) : (
+                    <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
+                      Tạo bộ thương hiệu để lưu bảng màu, font và logo cho editor.
+                    </div>
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
+
+          {headerLeading ? null : renderWorkspaceActions("ml-auto")}
         </div>
 
         <div
@@ -2496,53 +3488,55 @@ export function DesignWorkspace({
             <aside className="min-h-0 min-w-0 overflow-hidden border-r">
               <Tabs value={leftTab} onValueChange={setLeftTab} className="flex h-full flex-col">
                 <TabsList className="mx-4 mt-4 grid grid-cols-3">
-                  <TabsTrigger value="insert">Insert</TabsTrigger>
-                  <TabsTrigger value="assets">Assets</TabsTrigger>
-                  <TabsTrigger value="pages">Pages</TabsTrigger>
+                  <TabsTrigger value="insert">Thêm</TabsTrigger>
+                  <TabsTrigger value="assets">Tài nguyên</TabsTrigger>
+                  <TabsTrigger value="pages">Trang</TabsTrigger>
                 </TabsList>
                 <TabsContent value="insert" className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
                   <div className="space-y-2 pt-4">
                     <Button className="w-full justify-start" variant="outline" onClick={insertText}>
-                      <Type className="mr-2 size-4" /> Text
+                      <Type className="mr-2 size-4" /> Chữ
                     </Button>
                     <Button
                       className="w-full justify-start"
                       variant="outline"
                       onClick={insertImageFrame}
                     >
-                      <ImageIcon className="mr-2 size-4" /> Image
+                      <ImageIcon className="mr-2 size-4" /> Ảnh
                     </Button>
                     <Button
                       className="w-full justify-start"
                       variant="outline"
                       onClick={() => insertShape("rectangle")}
                     >
-                      <Shapes className="mr-2 size-4" /> Rectangle
+                      <Shapes className="mr-2 size-4" /> Chữ nhật
                     </Button>
                     <Button
                       className="w-full justify-start"
                       variant="outline"
                       onClick={() => insertShape("circle")}
                     >
-                      <Shapes className="mr-2 size-4" /> Circle
+                      <Shapes className="mr-2 size-4" /> Tròn
                     </Button>
                     <Button
                       className="w-full justify-start"
                       variant="outline"
                       onClick={() => insertShape("line")}
                     >
-                      <Minus className="mr-2 size-4" /> Line
+                      <Minus className="mr-2 size-4" /> Đường
                     </Button>
                     <Button
                       className="w-full justify-start"
                       variant="outline"
                       onClick={insertTable}
                     >
-                      <Table2 className="mr-2 size-4" /> Table
+                      <Table2 className="mr-2 size-4" /> Bảng
                     </Button>
                     <div className="flex flex-col gap-3 rounded-xl border bg-card p-3">
                       <div className="flex items-center justify-between gap-2">
-                        <Label className="text-xs uppercase text-muted-foreground">Icon</Label>
+                        <Label className="text-xs uppercase text-muted-foreground">
+                          Biểu tượng
+                        </Label>
                         <span className="text-xs tabular-nums text-muted-foreground">
                           {extendedIconsLoading ? "..." : filteredIconAssets.length}
                         </span>
@@ -2550,7 +3544,7 @@ export function DesignWorkspace({
                       <Input
                         value={iconSearch}
                         onChange={(event) => setIconSearch(event.target.value)}
-                        placeholder="Tìm icon: địa điểm, pin, phone, cafe..."
+                        placeholder="Tìm biểu tượng: địa điểm, ghim, điện thoại, cafe..."
                       />
                       <ToggleGroup
                         type="single"
@@ -2562,28 +3556,28 @@ export function DesignWorkspace({
                         size="sm"
                         className="grid grid-cols-4"
                       >
-                        <ToggleGroupItem value="all" aria-label="Tất cả icon">
+                        <ToggleGroupItem value="all" aria-label="Tất cả biểu tượng">
                           Tất cả
                         </ToggleGroupItem>
-                        <ToggleGroupItem value="line" aria-label="Icon line">
-                          Line
+                        <ToggleGroupItem value="line" aria-label="Biểu tượng nét">
+                          Nét
                         </ToggleGroupItem>
-                        <ToggleGroupItem value="solid" aria-label="Icon solid">
-                          Solid
+                        <ToggleGroupItem value="solid" aria-label="Biểu tượng đặc">
+                          Đặc
                         </ToggleGroupItem>
-                        <ToggleGroupItem value="color" aria-label="Icon màu">
+                        <ToggleGroupItem value="color" aria-label="Biểu tượng màu">
                           Màu
                         </ToggleGroupItem>
                       </ToggleGroup>
                       {extendedIconsLoading ? (
                         <div className="text-xs text-muted-foreground">
-                          Đang tải thêm icon Canva-like...
+                          Đang tải thêm biểu tượng kiểu Canva...
                         </div>
                       ) : null}
                       {iconResultsAreLimited ? (
                         <div className="text-xs text-muted-foreground">
-                          Đang hiển thị {visibleIconAssets.length} icon đầu tiên. Gõ từ khóa để lọc
-                          nhanh hơn.
+                          Đang hiển thị {visibleIconAssets.length} biểu tượng đầu tiên. Gõ từ khóa
+                          để lọc nhanh hơn.
                         </div>
                       ) : null}
                       <ScrollArea className="h-64 rounded-lg border bg-background p-2">
@@ -2694,7 +3688,7 @@ export function DesignWorkspace({
                         variant="outline"
                         onClick={() => editor.addPage()}
                       >
-                        <Plus className="mr-2 size-4" /> Add page
+                        <Plus className="mr-2 size-4" /> Thêm trang
                       </Button>
                     ) : null}
                     {hasPackPages
@@ -2782,7 +3776,7 @@ export function DesignWorkspace({
                                       onClick={editor.duplicateActivePage}
                                       disabled={!selectedPage}
                                     >
-                                      Copy
+                                      Sao chép
                                     </Button>
                                     <Button
                                       size="sm"
@@ -2790,12 +3784,12 @@ export function DesignWorkspace({
                                       onClick={() => editor.removePage(pageId)}
                                       disabled={editor.state.pageOrder.length <= 1}
                                     >
-                                      Delete
+                                      Xóa
                                     </Button>
                                   </>
                                 ) : (
                                   <div className="text-xs text-muted-foreground">
-                                    Single-page mode
+                                    Chế độ một trang
                                   </div>
                                 )}
                               </div>
@@ -2812,12 +3806,13 @@ export function DesignWorkspace({
 
           <div
             ref={stageWrapRef}
-            className={`design-stage-scroll min-h-0 min-w-0 overflow-auto bg-muted/30 px-6 pb-6 ${primary?.kind === "text" ? "pt-16" : "pt-6"}`}
+            className="design-stage-scroll min-h-0 min-w-0 overflow-auto px-8 pb-12 pt-24"
             onMouseDown={handleStageWrapMouseDown}
+            onMouseMove={handleStageWrapMouseMove}
           >
             <div
               ref={stagePanLayerRef}
-              className="flex min-h-full items-start justify-center"
+              className="design-stage-center flex min-h-full w-max min-w-full"
               style={{
                 transform: `translate(${editor.state.viewport.panX}px, ${editor.state.viewport.panY}px)`,
                 transformOrigin: "top left",
@@ -2959,19 +3954,8 @@ export function DesignWorkspace({
                     setSnapTargetIds([]);
                   }}
                   availableFontFamilies={availableFontFamilies}
-                  onUpdateElementStyle={(elementId, patch) =>
-                    editor.updateElements(
-                      [elementId],
-                      {
-                        style: {
-                          ...(editor.activeElements.find((e) => e.elementId === elementId)?.style ??
-                            {}),
-                          ...patch,
-                        },
-                      } as Partial<DesignElement>,
-                      { history: false },
-                    )
-                  }
+                  onUpdateElementStyle={updateElementStyle}
+                  onUpdateTextRunStyle={updateTextRunStyle}
                   cropTargetId={cropTargetId}
                   onStartImageCrop={(elementId) => setCropTargetId(elementId)}
                   onCommitCrop={(elementId, crop) => {
@@ -2988,10 +3972,9 @@ export function DesignWorkspace({
           {rightOpen ? (
             <aside className="min-h-0 min-w-0 overflow-hidden border-l">
               <Tabs value={rightTab} onValueChange={setRightTab} className="flex h-full flex-col">
-                <TabsList className="mx-4 mt-4 grid grid-cols-3">
+                <TabsList className="mx-4 mt-4 grid grid-cols-2">
                   <TabsTrigger value="properties">Thuộc tính</TabsTrigger>
-                  <TabsTrigger value="layers">Lớp</TabsTrigger>
-                  <TabsTrigger value="brand">Brand</TabsTrigger>
+                  <TabsTrigger value="brand">Thương hiệu</TabsTrigger>
                 </TabsList>
                 <TabsContent
                   value="properties"
@@ -3012,7 +3995,7 @@ export function DesignWorkspace({
                           }
                         >
                           <Grid2X2 className="size-3.5" />
-                          Snap {editor.state.documentSettings.snapToGrid ? "On" : "Off"}
+                          Hút lưới {editor.state.documentSettings.snapToGrid ? "Bật" : "Tắt"}
                         </Button>
                       }
                     >
@@ -3044,10 +4027,10 @@ export function DesignWorkspace({
                     {primary ? (
                       <div className="flex flex-col gap-3">
                         <InspectorSection
-                          title="Element"
+                          title="Đối tượng"
                           action={
                             <span className="rounded-md bg-muted px-2 py-1 text-[11px] font-medium capitalize text-muted-foreground">
-                              {selected.length > 1 ? `${selected.length} items` : primary.kind}
+                              {selected.length > 1 ? `${selected.length} mục` : primary.kind}
                             </span>
                           }
                         >
@@ -3064,7 +4047,7 @@ export function DesignWorkspace({
                                   { history: false },
                                 )
                               }
-                              placeholder="Layer name"
+                              placeholder="Tên layer"
                               className="h-8"
                             />
                           </div>
@@ -3100,7 +4083,7 @@ export function DesignWorkspace({
                           </div>
                           <div className="grid grid-cols-[1fr_auto_auto] items-end gap-2">
                             <NumberField
-                              label="Rotation"
+                              label="Xoay"
                               value={primary.rotation ?? 0}
                               suffix="°"
                               onChange={(value) =>
@@ -3138,20 +4121,24 @@ export function DesignWorkspace({
                             </Button>
                           </div>
                           <div className="grid grid-cols-2 gap-2">
-                            <Button size="sm" variant="outline" onClick={editor.copySelection}>
-                              <Copy className="mr-2 size-4" /> Copy
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => editor.copySelection()}
+                            >
+                              <Copy className="mr-2 size-4" /> Sao chép
                             </Button>
                             <Button
                               size="sm"
                               variant="outline"
                               onClick={() => editor.duplicateSelection()}
                             >
-                              <Layers className="mr-2 size-4" /> Duplicate
+                              <Layers className="mr-2 size-4" /> Nhân bản
                             </Button>
                           </div>
                         </InspectorSection>
 
-                        <InspectorSection title="Layer">
+                        <InspectorSection title="Lớp">
                           <div className="grid grid-cols-2 gap-2">
                             <Button
                               size="sm"
@@ -3189,9 +4176,9 @@ export function DesignWorkspace({
                         </InspectorSection>
 
                         {primary.kind === "text" ? (
-                          <InspectorSection title="Text">
+                          <InspectorSection title="Chữ">
                             <div className="text-[11px] text-muted-foreground">
-                              Double-click trên canvas để sửa nhanh.
+                              Nhấp đúp trên canvas để sửa nhanh.
                             </div>
                             <textarea
                               value={primary.text}
@@ -3206,44 +4193,26 @@ export function DesignWorkspace({
                             />
                             <div className="grid grid-cols-2 gap-2">
                               <NumberField
-                                label="Font size"
+                                label="Cỡ chữ"
                                 value={Number(primary.style?.fontSize ?? 48)}
                                 onChange={(value) =>
-                                  editor.updateElements(
-                                    [primary.elementId],
-                                    {
-                                      style: { ...(primary.style ?? {}), fontSize: value },
-                                    } as Partial<DesignElement>,
-                                    { history: false },
-                                  )
+                                  updateElementStyle(primary.elementId, { fontSize: value })
                                 }
                               />
                               <NumberField
-                                label="Weight"
+                                label="Độ đậm"
                                 value={Number(primary.style?.fontWeight ?? 700)}
                                 onChange={(value) =>
-                                  editor.updateElements(
-                                    [primary.elementId],
-                                    {
-                                      style: { ...(primary.style ?? {}), fontWeight: value },
-                                    } as Partial<DesignElement>,
-                                    { history: false },
-                                  )
+                                  updateElementStyle(primary.elementId, { fontWeight: value })
                                 }
                               />
                             </div>
                             <div className="space-y-2">
-                              <Label className="text-xs">Font family</Label>
+                              <Label className="text-xs">Font chữ</Label>
                               <Select
                                 value={String(primary.style?.fontFamily ?? "Be Vietnam Pro")}
                                 onValueChange={(value) =>
-                                  editor.updateElements(
-                                    [primary.elementId],
-                                    {
-                                      style: { ...(primary.style ?? {}), fontFamily: value },
-                                    } as Partial<DesignElement>,
-                                    { history: false },
-                                  )
+                                  updateElementStyle(primary.elementId, { fontFamily: value })
                                 }
                               >
                                 <SelectTrigger>
@@ -3261,22 +4230,17 @@ export function DesignWorkspace({
                             <CompactColorControl
                               label="Màu chữ"
                               value={primary.style?.color ?? "#0f172a"}
-                              onChange={(color) =>
-                                editor.updateElements(
-                                  [primary.elementId],
-                                  {
-                                    style: {
-                                      ...(primary.style ?? {}),
-                                      color,
-                                    },
-                                  } as Partial<DesignElement>,
-                                  { history: false },
-                                )
+                              onChange={(color) => updateElementStyle(primary.elementId, { color })}
+                            />
+                            <LetterSpacingControl
+                              value={Number(primary.style?.letterSpacing ?? 0)}
+                              onChange={(value) =>
+                                updateElementStyle(primary.elementId, { letterSpacing: value })
                               }
                             />
                             <div className="flex flex-col gap-3 rounded-lg border bg-muted/20 p-3">
                               <div className="flex items-center justify-between gap-2">
-                                <Label className="text-xs">Text outline</Label>
+                                <Label className="text-xs">Viền chữ</Label>
                                 <Button
                                   size="sm"
                                   variant={
@@ -3300,12 +4264,12 @@ export function DesignWorkspace({
                                     );
                                   }}
                                 >
-                                  {Number(primary.style?.textStrokeWidth ?? 0) > 0 ? "On" : "Off"}
+                                  {Number(primary.style?.textStrokeWidth ?? 0) > 0 ? "Bật" : "Tắt"}
                                 </Button>
                               </div>
                               <div className="grid grid-cols-[1fr_120px] items-end gap-2">
                                 <NumberField
-                                  label="Width"
+                                  label="Độ dày"
                                   value={Number(primary.style?.textStrokeWidth ?? 0)}
                                   onChange={(value) =>
                                     editor.updateElements(
@@ -3323,7 +4287,7 @@ export function DesignWorkspace({
                                   }
                                 />
                                 <CompactColorControl
-                                  label="Color"
+                                  label="Màu"
                                   value={primary.style?.textStrokeColor ?? "#ffffff"}
                                   onChange={(color) =>
                                     editor.updateElements(
@@ -3346,7 +4310,7 @@ export function DesignWorkspace({
                             </div>
                             <div className="flex flex-col gap-3 rounded-lg border bg-muted/20 p-3">
                               <div className="flex items-center justify-between gap-2">
-                                <Label className="text-xs">Text shadow</Label>
+                                <Label className="text-xs">Bóng chữ</Label>
                                 <Button
                                   size="sm"
                                   variant={primary.style?.textShadowColor ? "default" : "outline"}
@@ -3370,13 +4334,13 @@ export function DesignWorkspace({
                                     );
                                   }}
                                 >
-                                  {primary.style?.textShadowColor ? "On" : "Off"}
+                                  {primary.style?.textShadowColor ? "Bật" : "Tắt"}
                                 </Button>
                               </div>
                               {primary.style?.textShadowColor ? (
                                 <>
                                   <CompactColorControl
-                                    label="Color"
+                                    label="Màu"
                                     value={primary.style.textShadowColor}
                                     onChange={(color) =>
                                       editor.updateElements(
@@ -3393,7 +4357,7 @@ export function DesignWorkspace({
                                   />
                                   <div className="flex flex-col gap-2">
                                     <div className="flex items-center justify-between gap-2">
-                                      <Label className="text-xs text-muted-foreground">Blur</Label>
+                                      <Label className="text-xs text-muted-foreground">Mờ</Label>
                                       <span className="text-[11px] tabular-nums text-muted-foreground">
                                         {Number(primary.style?.textShadowBlur ?? 8)}px
                                       </span>
@@ -3458,9 +4422,9 @@ export function DesignWorkspace({
                         ) : null}
 
                         {primary.kind === "image" || primary.kind === "shape" ? (
-                          <InspectorSection title="Visual">
+                          <InspectorSection title="Hiển thị">
                             <div className="space-y-2">
-                              <Label className="text-xs">Border radius</Label>
+                              <Label className="text-xs">Bo góc</Label>
                               <Slider
                                 value={[Number(primary.style?.borderRadius ?? 0)]}
                                 min={0}
@@ -3479,7 +4443,7 @@ export function DesignWorkspace({
                             </div>
                             {primary.kind === "shape" ? (
                               <CompactColorControl
-                                label="Fill"
+                                label="Màu nền"
                                 value={primary.style?.fill ?? "#f97316"}
                                 onChange={(color) =>
                                   editor.updateElements(
@@ -3497,7 +4461,7 @@ export function DesignWorkspace({
                             ) : null}
                             {primary.kind === "image" ? (
                               <div className="space-y-2">
-                                <Label className="text-xs">Fit</Label>
+                                <Label className="text-xs">Cách khớp</Label>
                                 <Select
                                   value={primary.style?.fit ?? "cover"}
                                   onValueChange={(value) =>
@@ -3517,9 +4481,9 @@ export function DesignWorkspace({
                                     <SelectValue />
                                   </SelectTrigger>
                                   <SelectContent>
-                                    <SelectItem value="cover">cover</SelectItem>
-                                    <SelectItem value="contain">contain</SelectItem>
-                                    <SelectItem value="stretch">stretch</SelectItem>
+                                    <SelectItem value="cover">Phủ kín</SelectItem>
+                                    <SelectItem value="contain">Vừa khung</SelectItem>
+                                    <SelectItem value="stretch">Kéo giãn</SelectItem>
                                   </SelectContent>
                                 </Select>
                               </div>
@@ -3527,11 +4491,11 @@ export function DesignWorkspace({
                             {primary.kind === "image" ? (
                               <div className="space-y-3 border-t pt-3">
                                 <Label className="text-xs uppercase text-muted-foreground">
-                                  Filters
+                                  Bộ lọc
                                 </Label>
                                 <div className="space-y-2">
                                   <div className="flex items-center justify-between">
-                                    <Label className="text-xs">Brightness</Label>
+                                    <Label className="text-xs">Độ sáng</Label>
                                     <span className="text-[10px] tabular-nums text-muted-foreground">
                                       {Math.round((primary.style?.brightness ?? 1) * 100)}%
                                     </span>
@@ -3554,7 +4518,7 @@ export function DesignWorkspace({
                                 </div>
                                 <div className="space-y-2">
                                   <div className="flex items-center justify-between">
-                                    <Label className="text-xs">Contrast</Label>
+                                    <Label className="text-xs">Tương phản</Label>
                                     <span className="text-[10px] tabular-nums text-muted-foreground">
                                       {Math.round((primary.style?.contrast ?? 1) * 100)}%
                                     </span>
@@ -3577,7 +4541,7 @@ export function DesignWorkspace({
                                 </div>
                                 <div className="space-y-2">
                                   <div className="flex items-center justify-between">
-                                    <Label className="text-xs">Saturate</Label>
+                                    <Label className="text-xs">Độ bão hòa</Label>
                                     <span className="text-[10px] tabular-nums text-muted-foreground">
                                       {Math.round((primary.style?.saturate ?? 1) * 100)}%
                                     </span>
@@ -3600,7 +4564,7 @@ export function DesignWorkspace({
                                 </div>
                                 <div className="space-y-2">
                                   <div className="flex items-center justify-between">
-                                    <Label className="text-xs">Blur</Label>
+                                    <Label className="text-xs">Làm mờ</Label>
                                     <span className="text-[10px] tabular-nums text-muted-foreground">
                                       {primary.style?.blur ?? 0}px
                                     </span>
@@ -3641,7 +4605,7 @@ export function DesignWorkspace({
                                     )
                                   }
                                 >
-                                  Reset filters
+                                  Đặt lại bộ lọc
                                 </Button>
                               </div>
                             ) : null}
@@ -3652,7 +4616,7 @@ export function DesignWorkspace({
                         {primary.kind === "shape" || primary.kind === "text" ? (
                           <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
                             <div className="flex items-center justify-between gap-2">
-                              <Label className="text-xs">Gradient</Label>
+                              <Label className="text-xs">Màu chuyển</Label>
                               <Button
                                 size="sm"
                                 variant={primary.style?.gradientEnabled ? "default" : "outline"}
@@ -3669,14 +4633,14 @@ export function DesignWorkspace({
                                   )
                                 }
                               >
-                                {primary.style?.gradientEnabled ? "On" : "Off"}
+                                {primary.style?.gradientEnabled ? "Bật" : "Tắt"}
                               </Button>
                             </div>
                             {primary.style?.gradientEnabled ? (
                               <>
                                 <div className="grid grid-cols-2 gap-2">
                                   <div className="space-y-1">
-                                    <Label className="text-xs text-muted-foreground">From</Label>
+                                    <Label className="text-xs text-muted-foreground">Từ</Label>
                                     <Input
                                       type="color"
                                       value={primary.style?.gradientFrom ?? "#f97316"}
@@ -3696,7 +4660,7 @@ export function DesignWorkspace({
                                     />
                                   </div>
                                   <div className="space-y-1">
-                                    <Label className="text-xs text-muted-foreground">To</Label>
+                                    <Label className="text-xs text-muted-foreground">Đến</Label>
                                     <Input
                                       type="color"
                                       value={primary.style?.gradientTo ?? "#ec4899"}
@@ -3718,7 +4682,7 @@ export function DesignWorkspace({
                                 </div>
                                 <div className="space-y-1">
                                   <div className="flex items-center justify-between">
-                                    <Label className="text-xs text-muted-foreground">Angle</Label>
+                                    <Label className="text-xs text-muted-foreground">Góc</Label>
                                     <span className="text-[10px] tabular-nums text-muted-foreground">
                                       {primary.style?.gradientAngle ?? 90}°
                                     </span>
@@ -3750,7 +4714,7 @@ export function DesignWorkspace({
                         {/* Shadow controls — available for all elements */}
                         <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
                           <div className="flex items-center justify-between gap-2">
-                            <Label className="text-xs">Shadow</Label>
+                            <Label className="text-xs">Đổ bóng</Label>
                             <Button
                               size="sm"
                               variant={primary.style?.shadowColor ? "default" : "outline"}
@@ -3772,13 +4736,13 @@ export function DesignWorkspace({
                                 )
                               }
                             >
-                              {primary.style?.shadowColor ? "On" : "Off"}
+                              {primary.style?.shadowColor ? "Bật" : "Tắt"}
                             </Button>
                           </div>
                           {primary.style?.shadowColor ? (
                             <>
                               <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Color</Label>
+                                <Label className="text-xs text-muted-foreground">Màu</Label>
                                 <Input
                                   type="color"
                                   value={primary.style.shadowColor ?? "rgba(0,0,0,0.25)"}
@@ -3799,7 +4763,7 @@ export function DesignWorkspace({
                               </div>
                               <div className="space-y-1">
                                 <div className="flex items-center justify-between">
-                                  <Label className="text-xs text-muted-foreground">Blur</Label>
+                                  <Label className="text-xs text-muted-foreground">Mờ</Label>
                                   <span className="text-[10px] tabular-nums text-muted-foreground">
                                     {primary.style.shadowBlur ?? 8}px
                                   </span>
@@ -3854,63 +4818,9 @@ export function DesignWorkspace({
                       </div>
                     ) : (
                       <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
-                        Chọn một element để chỉnh thuộc tính.
+                        Chọn một đối tượng để chỉnh thuộc tính.
                       </div>
                     )}
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="layers" className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-                  <div className="space-y-2 pt-4">
-                    {layerTree(editor.activeElements).map(({ element, depth }) => {
-                      const selectedLayer = editor.state.selection.ids.includes(element.elementId);
-                      return (
-                        <div
-                          key={element.elementId}
-                          className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${selectedLayer ? "border-primary bg-primary/5" : "bg-card"}`}
-                          style={{ paddingLeft: 12 + depth * 18 }}
-                        >
-                          <button
-                            className="flex-1 truncate text-left"
-                            onClick={() =>
-                              editor.setSelection([element.elementId], element.elementId)
-                            }
-                          >
-                            {element.name ?? element.kind}
-                          </button>
-                          <button
-                            onClick={() =>
-                              editor.updateElements(
-                                [element.elementId],
-                                { hidden: !element.hidden },
-                                { history: false },
-                              )
-                            }
-                          >
-                            {element.hidden ? (
-                              <EyeOff className="size-4" />
-                            ) : (
-                              <Eye className="size-4" />
-                            )}
-                          </button>
-                          <button
-                            onClick={() =>
-                              editor.updateElements(
-                                [element.elementId],
-                                { locked: !element.locked },
-                                { history: false },
-                              )
-                            }
-                          >
-                            {element.locked ? (
-                              <Lock className="size-4" />
-                            ) : (
-                              <LockOpen className="size-4" />
-                            )}
-                          </button>
-                        </div>
-                      );
-                    })}
                   </div>
                 </TabsContent>
 
@@ -3918,19 +4828,19 @@ export function DesignWorkspace({
                   <div className="space-y-4 pt-4">
                     <div className="flex gap-2">
                       <Button variant="outline" onClick={createBrandKit}>
-                        <Plus className="mr-2 size-4" /> New kit
+                        <Plus className="mr-2 size-4" /> Bộ mới
                       </Button>
                       <Button variant="outline" onClick={uploadFont}>
-                        <Upload className="mr-2 size-4" /> Upload font
+                        <Upload className="mr-2 size-4" /> Tải font
                       </Button>
                       <Button variant="outline" onClick={() => uploadAsset("logo")}>
-                        <Upload className="mr-2 size-4" /> Upload logo
+                        <Upload className="mr-2 size-4" /> Tải logo
                       </Button>
                     </div>
 
                     <div className="space-y-2">
                       <Label className="text-xs uppercase text-muted-foreground">
-                        Current brand kit
+                        Bộ thương hiệu hiện tại
                       </Label>
                       <Select
                         value={currentBrandKit?.brandKitId ?? "__none__"}
@@ -3939,7 +4849,7 @@ export function DesignWorkspace({
                         }
                       >
                         <SelectTrigger>
-                          <SelectValue placeholder="Chưa chọn brand kit" />
+                          <SelectValue placeholder="Chưa chọn bộ thương hiệu" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="__none__">Không dùng</SelectItem>
@@ -3959,7 +4869,9 @@ export function DesignWorkspace({
                           onChange={(event) => updateBrandKit({ name: event.target.value })}
                         />
                         <div>
-                          <Label className="text-xs uppercase text-muted-foreground">Palette</Label>
+                          <Label className="text-xs uppercase text-muted-foreground">
+                            Bảng màu
+                          </Label>
                           <div className="mt-3 flex flex-wrap gap-2">
                             {currentBrandKit.colors.map((color, index) => (
                               <button
@@ -3969,13 +4881,9 @@ export function DesignWorkspace({
                                 onClick={() => {
                                   if (!primary) return;
                                   const styleKey = primary.kind === "text" ? "color" : "fill";
-                                  editor.updateElements(
-                                    [primary.elementId],
-                                    {
-                                      style: { ...(primary.style ?? {}), [styleKey]: color },
-                                    } as Partial<DesignElement>,
-                                    { history: false },
-                                  );
+                                  updateElementStyle(primary.elementId, {
+                                    [styleKey]: color,
+                                  } as Partial<ElementStyle>);
                                 }}
                               />
                             ))}
@@ -3995,7 +4903,9 @@ export function DesignWorkspace({
                         </div>
 
                         <div>
-                          <Label className="text-xs uppercase text-muted-foreground">Fonts</Label>
+                          <Label className="text-xs uppercase text-muted-foreground">
+                            Font chữ
+                          </Label>
                           <div className="mt-3 space-y-2">
                             {fontAssets.map((fontAsset) => {
                               const selectedFont = currentBrandKit.fontAssetIds.includes(
@@ -4019,7 +4929,7 @@ export function DesignWorkspace({
                                     {fontAsset.family}
                                   </span>
                                   <span className="text-xs text-muted-foreground">
-                                    {selectedFont ? "On" : "Off"}
+                                    {selectedFont ? "Bật" : "Tắt"}
                                   </span>
                                 </button>
                               );
@@ -4029,7 +4939,7 @@ export function DesignWorkspace({
                       </div>
                     ) : (
                       <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
-                        Tạo Brand Kit để lưu palette, font và logo cho editor.
+                        Tạo bộ thương hiệu để lưu bảng màu, font và logo cho editor.
                       </div>
                     )}
                   </div>
@@ -4082,6 +4992,7 @@ function DesignStage({
   onResizeCommit,
   availableFontFamilies,
   onUpdateElementStyle,
+  onUpdateTextRunStyle,
   cropTargetId,
   onStartImageCrop,
   onCommitCrop,
@@ -4109,7 +5020,7 @@ function DesignStage({
   editingTextValue: string;
   onEditingTextValueChange: (value: string) => void;
   onStartTextEdit: (elementId: string) => void;
-  onCommitTextEdit: () => void;
+  onCommitTextEdit: (textValue?: string, textRuns?: DesignTextRun[]) => void;
   onCancelTextEdit: () => void;
   onStageMouseDown: (event: React.MouseEvent<HTMLDivElement>) => void;
   onSelect: (elementId: string | null, additive: boolean) => void;
@@ -4120,6 +5031,11 @@ function DesignStage({
   onResizeCommit: () => void;
   availableFontFamilies: string[];
   onUpdateElementStyle: (elementId: string, patch: Partial<ElementStyle>) => void;
+  onUpdateTextRunStyle: (
+    elementId: string,
+    range: TextSelectionRange,
+    patch: Partial<ElementStyle>,
+  ) => void;
   cropTargetId: string | null;
   onStartImageCrop: (elementId: string) => void;
   onCommitCrop: (elementId: string, crop: ImageCrop) => void;
@@ -4128,14 +5044,6 @@ function DesignStage({
 }) {
   const toolIsPan = isPanToolActive(tool, spacePressed);
   const guideColor = "rgba(56,189,248,0.9)";
-  const gridSize = 40 * scale;
-  const gridBackground = showGrid
-    ? {
-        backgroundImage:
-          "linear-gradient(to right, rgba(148,163,184,0.16) 1px, transparent 1px), linear-gradient(to bottom, rgba(148,163,184,0.16) 1px, transparent 1px)",
-        backgroundSize: `${gridSize}px ${gridSize}px`,
-      }
-    : undefined;
   const [previewSnapLines, setPreviewSnapLines] = useState<SnapLine[]>([]);
   const [previewSnapTargetIds, setPreviewSnapTargetIds] = useState<string[]>([]);
   const previewSnapSignatureRef = useRef("");
@@ -4166,9 +5074,9 @@ function DesignStage({
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div
-            className="relative overflow-visible bg-background shadow-sm"
+            className="design-canvas-page relative overflow-visible bg-background"
             data-design-canvas
-            style={{ width: page.width * scale, height: page.height * scale, ...gridBackground }}
+            style={{ width: page.width * scale, height: page.height * scale }}
             onMouseDown={onStageMouseDown}
           >
             {showGuides
@@ -4216,7 +5124,9 @@ function DesignStage({
                   elements={elements}
                   scale={scale}
                   suppressElementIds={editingTextId ? [editingTextId] : []}
-                  showGuides={showGuides}
+                  showGuides={false}
+                  showGrid={showGrid}
+                  gridSize={documentGridSize}
                 />
               </div>
               {showSafeZone ? (
@@ -4230,7 +5140,7 @@ function DesignStage({
                 />
               ) : null}
 
-              {activeSnapLines.map((line, index) => {
+              {showGuides ? activeSnapLines.map((line, index) => {
                 const isCenterLine =
                   line.axis === "x"
                     ? Math.abs(line.value - page.width / 2) < 0.5
@@ -4260,9 +5170,9 @@ function DesignStage({
                     />
                   </div>
                 );
-              })}
+              }) : null}
 
-              <SmartSpacing lines={spacingLines} scale={scale} />
+              {showGuides ? <SmartSpacing lines={spacingLines} scale={scale} /> : null}
 
               {elements
                 .filter((element) => !element.hidden)
@@ -4280,15 +5190,11 @@ function DesignStage({
                     element.kind === "text" ? buildTextStyle(element.style, scale) : undefined;
                   const visibleBounds =
                     element.kind === "text" || element.kind === "image" || element.kind === "shape";
-                  const elementLabel =
-                    element.kind === "text"
-                      ? "Text"
-                      : element.kind === "image"
-                        ? "Image"
-                        : element.kind === "shape"
-                          ? "Shape"
-                          : "Group";
-
+                  const selectionLayerIndex = selectedIds.indexOf(element.elementId);
+                  const hitLayerZIndex =
+                    selected || primary
+                      ? 1_000_000 + Math.max(selectionLayerIndex, 0)
+                      : (element.zIndex ?? 0);
                   const overlay = (
                     <div
                       data-design-element
@@ -4442,22 +5348,12 @@ function DesignStage({
                             : "transparent",
                         cursor: element.locked ? "default" : "move",
                         boxSizing: "border-box",
-                        boxShadow: selected
-                          ? "0 0 0 1px rgba(124,58,237,0.16)"
-                          : undefined,
+                        boxShadow: selected ? "0 0 0 1px rgba(124,58,237,0.16)" : undefined,
+                        zIndex: hitLayerZIndex,
                       }}
                     >
                       {visibleBounds && (selected || primary) && !isEditingText && !isCropTarget ? (
                         <>
-                          <div
-                            className="pointer-events-none absolute left-1 top-1 z-20 rounded bg-slate-950/70 px-1.5 py-0.5 text-[10px] font-medium text-white opacity-80"
-                            style={{
-                              transform: `scale(${1 / Math.max(scale, 0.6)})`,
-                              transformOrigin: "top left",
-                            }}
-                          >
-                            {elementLabel}
-                          </div>
                           {element.kind === "image" ? (
                             <div className="pointer-events-none absolute inset-0 z-10 bg-[linear-gradient(135deg,rgba(37,99,235,0.08)_25%,transparent_25%,transparent_50%,rgba(37,99,235,0.08)_50%,rgba(37,99,235,0.08)_75%,transparent_75%,transparent)] bg-[length:20px_20px] opacity-50" />
                           ) : null}
@@ -4478,6 +5374,11 @@ function DesignStage({
                           ref={(el) => {
                             if (!el || el.dataset.init === "true") return;
                             el.dataset.init = "true";
+                            el.innerHTML = richTextToHtml(
+                              editingTextValue,
+                              element.kind === "text" ? element.textRuns : undefined,
+                              element.kind === "text" ? element.style : undefined,
+                            );
                             el.focus();
                             // Place cursor at end
                             const range = document.createRange();
@@ -4492,11 +5393,12 @@ function DesignStage({
                             sel?.addRange(range);
                           }}
                           contentEditable
+                          data-rich-text-editor-id={element.elementId}
                           suppressContentEditableWarning
                           onBlur={(e) => {
-                            const text = (e.currentTarget as HTMLElement).innerText ?? "";
-                            onEditingTextValueChange(text);
-                            onCommitTextEdit();
+                            const parsed = parseRichTextEditorContent(e.currentTarget);
+                            onEditingTextValueChange(parsed.text);
+                            onCommitTextEdit(parsed.text, parsed.textRuns);
                           }}
                           onInput={(e) => {
                             const text = (e.currentTarget as HTMLElement).innerText ?? "";
@@ -4529,12 +5431,11 @@ function DesignStage({
                             width: "100%",
                             height: "100%",
                             border: "none",
+                            cursor: "text",
                             wordBreak: "break-word",
                             whiteSpace: "pre-wrap",
                           }}
-                        >
-                          {editingTextValue}
-                        </div>
+                        />
                       ) : null}
 
                       {primary && !element.locked && element.kind !== "group" && !isEditingText ? (
@@ -4637,7 +5538,8 @@ function DesignStage({
                               borderRadius: 9999,
                               border: "1px solid rgba(124,58,237,0.9)",
                               background: "#ffffff",
-                              boxShadow: "0 0 0 1px rgba(124,58,237,0.16), 0 1px 4px rgba(15,23,42,0.14)",
+                              boxShadow:
+                                "0 0 0 1px rgba(124,58,237,0.16), 0 1px 4px rgba(15,23,42,0.14)",
                               display: "grid",
                               placeItems: "center",
                               cursor: "grab",
@@ -4749,7 +5651,8 @@ function DesignStage({
                                 borderRadius: 4,
                                 background: "#ffffff",
                                 border: "1px solid rgba(124,58,237,0.9)",
-                                boxShadow: "0 0 0 1px rgba(124,58,237,0.16), 0 1px 4px rgba(15,23,42,0.12)",
+                                boxShadow:
+                                  "0 0 0 1px rgba(124,58,237,0.16), 0 1px 4px rgba(15,23,42,0.12)",
                                 cursor: handle.cursor,
                                 zIndex: 20,
                                 ...handle.style,
@@ -4779,114 +5682,116 @@ function DesignStage({
                     top: bounds.y * scale - 6,
                     width: bounds.width * scale + 12,
                     height: bounds.height * scale + 12,
-                    pointerEvents: selectedIds.length > 1 ? "auto" : "none",
+                    pointerEvents: "none",
+                    zIndex: 1_100_000,
                   }}
                 >
                   {RESIZE_HANDLES.map((handle) => (
-                        <button
-                          key={handle.key}
-                          onMouseDown={(event) => {
-                            event.stopPropagation();
-                            const canvas = (event.currentTarget as HTMLElement).closest(
-                              "[data-design-canvas]",
-                            ) as HTMLElement | null;
-                            const startX = event.clientX;
-                            const startY = event.clientY;
-                            const origBounds = { ...bounds };
-                            const origElements = selectedIds
-                              .map((id) => elements.find((e) => e.elementId === id))
-                              .filter((e): e is DesignElement => !!e);
-                            const previewCache = createPreviewNodeCache(canvas, selectedIds);
+                    <button
+                      key={handle.key}
+                      onMouseDown={(event) => {
+                        event.stopPropagation();
+                        const canvas = (event.currentTarget as HTMLElement).closest(
+                          "[data-design-canvas]",
+                        ) as HTMLElement | null;
+                        const startX = event.clientX;
+                        const startY = event.clientY;
+                        const origBounds = { ...bounds };
+                        const origElements = selectedIds
+                          .map((id) => elements.find((e) => e.elementId === id))
+                          .filter((e): e is DesignElement => !!e);
+                        const previewCache = createPreviewNodeCache(canvas, selectedIds);
 
-                            let latestMultiResizePayloads: ResizePayload[] = [];
-                            const scheduleMultiResize = createRafScheduler(
-                              (move: {
-                                clientX: number;
-                                clientY: number;
-                                shiftKey: boolean;
-                                altKey: boolean;
-                              }) => {
-                                const dx = (move.clientX - startX) / scale;
-                                const dy = (move.clientY - startY) / scale;
-                                const draft = applyResizeModifiers(
-                                  origBounds,
-                                  handle.key,
-                                  dx,
-                                  dy,
-                                  move.shiftKey,
-                                  move.altKey,
-                                );
-                                // Scale each element proportionally
-                                const sx = draft.width / Math.max(origBounds.width, 1);
-                                const sy = draft.height / Math.max(origBounds.height, 1);
-                                latestMultiResizePayloads = [];
-                                for (const el of origElements) {
-                                  const relX = el.x - origBounds.x;
-                                  const relY = el.y - origBounds.y;
-                                  const nextRect = {
-                                    x: draft.x + relX * sx,
-                                    y: draft.y + relY * sy,
-                                    width: Math.max(20, el.width * sx),
-                                    height: Math.max(20, el.height * sy),
-                                  };
-                                  latestMultiResizePayloads.push({
-                                    elementId: el.elementId,
-                                    patch: nextRect,
-                                  });
-                                  applyResizePreview(
-                                    canvas,
-                                    el.elementId,
-                                    nextRect,
-                                    scale,
-                                    false,
-                                    previewCache,
-                                  );
-                                }
-                                const boundsNode =
-                                  previewCache.selectionBoundsNode ??
-                                  canvas?.querySelector<HTMLElement>("[data-selection-bounds]");
-                                if (boundsNode) {
-                                  markPreviewNode(boundsNode, "left, top, width, height");
-                                  boundsNode.style.left = `${draft.x * scale - 6}px`;
-                                  boundsNode.style.top = `${draft.y * scale - 6}px`;
-                                  boundsNode.style.width = `${draft.width * scale + 12}px`;
-                                  boundsNode.style.height = `${draft.height * scale + 12}px`;
-                                }
-                              },
+                        let latestMultiResizePayloads: ResizePayload[] = [];
+                        const scheduleMultiResize = createRafScheduler(
+                          (move: {
+                            clientX: number;
+                            clientY: number;
+                            shiftKey: boolean;
+                            altKey: boolean;
+                          }) => {
+                            const dx = (move.clientX - startX) / scale;
+                            const dy = (move.clientY - startY) / scale;
+                            const draft = applyResizeModifiers(
+                              origBounds,
+                              handle.key,
+                              dx,
+                              dy,
+                              move.shiftKey,
+                              move.altKey,
                             );
-                            const onMouseMove = (moveEvent: MouseEvent) => {
-                              scheduleMultiResize({
-                                clientX: moveEvent.clientX,
-                                clientY: moveEvent.clientY,
-                                shiftKey: moveEvent.shiftKey,
-                                altKey: moveEvent.altKey,
+                            // Scale each element proportionally
+                            const sx = draft.width / Math.max(origBounds.width, 1);
+                            const sy = draft.height / Math.max(origBounds.height, 1);
+                            latestMultiResizePayloads = [];
+                            for (const el of origElements) {
+                              const relX = el.x - origBounds.x;
+                              const relY = el.y - origBounds.y;
+                              const nextRect = {
+                                x: draft.x + relX * sx,
+                                y: draft.y + relY * sy,
+                                width: Math.max(20, el.width * sx),
+                                height: Math.max(20, el.height * sy),
+                              };
+                              latestMultiResizePayloads.push({
+                                elementId: el.elementId,
+                                patch: nextRect,
                               });
-                            };
-                            const onMouseUp = () => {
-                              window.removeEventListener("mousemove", onMouseMove);
-                              window.removeEventListener("mouseup", onMouseUp);
-                              scheduleMultiResize.flush();
-                              onResizeMany(latestMultiResizePayloads);
-                              onResizeCommit();
-                              window.requestAnimationFrame(() => resetPreviewMarkers(canvas));
-                            };
-                            window.addEventListener("mousemove", onMouseMove);
-                            window.addEventListener("mouseup", onMouseUp);
-                          }}
-                          style={{
-                            position: "absolute",
-                            width: 16,
-                            height: 16,
-                            borderRadius: 4,
-                            background: "#ffffff",
-                            border: "1px solid rgba(124,58,237,0.9)",
-                            boxShadow: "0 0 0 1px rgba(124,58,237,0.16), 0 1px 4px rgba(15,23,42,0.12)",
-                            cursor: handle.cursor,
-                            zIndex: 20,
-                            ...handle.style,
-                          }}
-                        />
-                      ))}
+                              applyResizePreview(
+                                canvas,
+                                el.elementId,
+                                nextRect,
+                                scale,
+                                false,
+                                previewCache,
+                              );
+                            }
+                            const boundsNode =
+                              previewCache.selectionBoundsNode ??
+                              canvas?.querySelector<HTMLElement>("[data-selection-bounds]");
+                            if (boundsNode) {
+                              markPreviewNode(boundsNode, "left, top, width, height");
+                              boundsNode.style.left = `${draft.x * scale - 6}px`;
+                              boundsNode.style.top = `${draft.y * scale - 6}px`;
+                              boundsNode.style.width = `${draft.width * scale + 12}px`;
+                              boundsNode.style.height = `${draft.height * scale + 12}px`;
+                            }
+                          },
+                        );
+                        const onMouseMove = (moveEvent: MouseEvent) => {
+                          scheduleMultiResize({
+                            clientX: moveEvent.clientX,
+                            clientY: moveEvent.clientY,
+                            shiftKey: moveEvent.shiftKey,
+                            altKey: moveEvent.altKey,
+                          });
+                        };
+                        const onMouseUp = () => {
+                          window.removeEventListener("mousemove", onMouseMove);
+                          window.removeEventListener("mouseup", onMouseUp);
+                          scheduleMultiResize.flush();
+                          onResizeMany(latestMultiResizePayloads);
+                          onResizeCommit();
+                          window.requestAnimationFrame(() => resetPreviewMarkers(canvas));
+                        };
+                        window.addEventListener("mousemove", onMouseMove);
+                        window.addEventListener("mouseup", onMouseUp);
+                      }}
+                      style={{
+                        position: "absolute",
+                        width: 16,
+                        height: 16,
+                        borderRadius: 4,
+                        background: "#ffffff",
+                        border: "1px solid rgba(124,58,237,0.9)",
+                        boxShadow: "0 0 0 1px rgba(124,58,237,0.16), 0 1px 4px rgba(15,23,42,0.12)",
+                        cursor: handle.cursor,
+                        pointerEvents: "auto",
+                        zIndex: 20,
+                        ...handle.style,
+                      }}
+                    />
+                  ))}
                 </div>
               ) : null}
 
@@ -4903,6 +5808,9 @@ function DesignStage({
                     canvasWidth={page.width * scale}
                     availableFontFamilies={availableFontFamilies}
                     onUpdateStyle={(patch) => onUpdateElementStyle(textEl.elementId, patch)}
+                    onUpdateTextRunStyle={(range, patch) =>
+                      onUpdateTextRunStyle(textEl.elementId, range, patch)
+                    }
                     onUpdateText={() => {}}
                   />
                 );
@@ -4925,7 +5833,7 @@ function DesignStage({
                     }}
                     onMouseDown={(e) => e.stopPropagation()}
                   >
-                    <span className="text-[10px] font-medium text-muted-foreground">Opacity</span>
+                    <span className="text-[10px] font-medium text-muted-foreground">Độ mờ</span>
                     <Slider
                       min={0}
                       max={1}
@@ -5001,6 +5909,48 @@ function CompactColorControl({
           <ColorPicker value={value} onChange={onChange} />
         </PopoverContent>
       </Popover>
+    </div>
+  );
+}
+
+function clampInspectorNumber(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value));
+}
+
+function LetterSpacingControl({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  const displayValue = clampInspectorNumber(value, LETTER_SPACING_MIN, LETTER_SPACING_MAX);
+  const updateValue = (next: number) =>
+    onChange(clampInspectorNumber(next, LETTER_SPACING_MIN, LETTER_SPACING_MAX));
+
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border bg-muted/20 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <Label className="text-xs">Giãn chữ</Label>
+        <span className="text-[11px] tabular-nums text-muted-foreground">
+          {displayValue.toFixed(1)}px
+        </span>
+      </div>
+      <Slider
+        value={[displayValue]}
+        min={LETTER_SPACING_MIN}
+        max={LETTER_SPACING_MAX}
+        step={LETTER_SPACING_STEP}
+        onValueChange={([next]) => updateValue(next)}
+      />
+      <NumberField
+        label="Khoảng"
+        value={displayValue}
+        onChange={updateValue}
+        suffix="px"
+        precision={1}
+      />
     </div>
   );
 }
