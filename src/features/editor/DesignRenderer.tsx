@@ -21,6 +21,7 @@ export function DesignRenderer({
   className,
   innerRef,
   suppressElementIds = [],
+  suppressShapeTextIds = [],
   showGuides = false,
   showGrid = false,
   gridSize = 8,
@@ -31,6 +32,7 @@ export function DesignRenderer({
   className?: string;
   innerRef?: Ref<HTMLDivElement>;
   suppressElementIds?: string[];
+  suppressShapeTextIds?: string[];
   showGuides?: boolean;
   showGrid?: boolean;
   gridSize?: number;
@@ -90,6 +92,7 @@ export function DesignRenderer({
           element={element}
           scale={scale}
           showGuides={showGuides}
+          suppressShapeText={suppressShapeTextIds.includes(element.elementId)}
         />
       ))}
     </div>
@@ -191,10 +194,12 @@ const DesignElementNode = memo(
     element,
     scale,
     showGuides,
+    suppressShapeText = false,
   }: {
     element: DesignElement;
     scale: number;
     showGuides: boolean;
+    suppressShapeText?: boolean;
   }) {
     const style = baseElementStyle(element, scale);
     const legacyMeta = (element.meta?.legacy ?? {}) as Record<string, unknown>;
@@ -371,7 +376,7 @@ const DesignElementNode = memo(
               }}
             />
           )}
-          {element.text ? (
+          {element.text && !suppressShapeText ? (
             <div
               style={{
                 ...buildTextStyle(element.style, scale),
@@ -387,10 +392,18 @@ const DesignElementNode = memo(
                       : "flex-start",
               }}
             >
-              {displayEditorText(element.text)}
+              {renderRichTextRuns({
+                text: element.text,
+                runs: element.textRuns,
+                baseStyle: element.style,
+                scale,
+                fallback: displayEditorText(element.text),
+              })}
             </div>
           ) : null}
-          {!element.text ? <EditorGuideBounds kind={element.kind} show={showGuides} /> : null}
+          {!element.text || suppressShapeText ? (
+            <EditorGuideBounds kind={element.kind} show={showGuides} />
+          ) : null}
         </div>
       );
     }

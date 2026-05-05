@@ -305,6 +305,7 @@ export interface DesignShapeElement extends DesignElementBase {
   src?: string;
   crop?: ImageCrop;
   text?: string;
+  textRuns?: DesignTextRun[];
 }
 
 export interface DesignIconElement extends DesignElementBase {

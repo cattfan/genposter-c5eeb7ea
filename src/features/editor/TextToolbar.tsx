@@ -9,9 +9,16 @@ import {
   AlignRight,
   Blend,
   Bold,
+  Circle,
+  Eye,
   Italic,
+  Minus,
   MoveHorizontal,
+  Plus,
+  SlidersHorizontal,
   Sparkles,
+  Square,
+  SquareDashed,
   Strikethrough,
   TypeOutline,
   Underline,
@@ -28,7 +35,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
-import type { DesignTextElement, ElementStyle } from "@/models";
+import type { DesignShapeElement, DesignTextElement, ElementStyle } from "@/models";
 import type { TextSelectionRange } from "./richText";
 
 const FONT_SIZE_PRESETS = [10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 64, 72, 96, 120];
@@ -39,6 +46,18 @@ const DEFAULT_GRADIENT_TO = "#ec4899";
 const LETTER_SPACING_MIN = -5;
 const LETTER_SPACING_MAX = 32;
 const LETTER_SPACING_STEP = 0.5;
+const FONT_SIZE_MIN = 6;
+const FONT_SIZE_MAX = 300;
+const FONT_SIZE_STEP = 2;
+const TEXT_TRANSFORM_OPTIONS: Array<{
+  value: NonNullable<ElementStyle["textTransform"]>;
+  label: string;
+}> = [
+  { value: "none", label: "Aa" },
+  { value: "uppercase", label: "AA" },
+  { value: "lowercase", label: "aa" },
+  { value: "capitalize", label: "Aa Từng từ" },
+];
 
 /** Check if there's a text selection inside a contentEditable */
 function hasSelection(): boolean {
@@ -66,6 +85,31 @@ function styleNumber(
 
 function shouldAllowNativeToolbarControl(target: EventTarget | null): boolean {
   return target instanceof HTMLInputElement && target.type === "color";
+}
+
+function ToolbarColorInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (color: string) => void;
+}) {
+  return (
+    <div className="relative size-7 overflow-hidden rounded-md border bg-background">
+      <span className="absolute inset-1 rounded-sm border" style={{ background: value }} />
+      <Input
+        type="color"
+        value={value}
+        aria-label={label}
+        title={label}
+        onInput={(event) => onChange(event.currentTarget.value)}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        className="absolute inset-0 size-full cursor-pointer opacity-0"
+      />
+    </div>
+  );
 }
 
 function attrSelectorValue(value: string): string {
@@ -100,6 +144,7 @@ function applyCssToSelection(patch: Partial<ElementStyle>): boolean {
   if (patch.fontStyle) span.style.fontStyle = patch.fontStyle;
   if (patch.textDecoration) span.style.textDecoration = patch.textDecoration;
   if (patch.color) span.style.color = patch.color;
+  if (patch.textTransform) span.style.textTransform = patch.textTransform;
   if (patch.lineHeight != null) span.style.lineHeight = String(patch.lineHeight);
   if (patch.letterSpacing != null) span.style.letterSpacing = `${patch.letterSpacing}px`;
   try {
@@ -116,23 +161,27 @@ function applyCssToSelection(patch: Partial<ElementStyle>): boolean {
 }
 
 interface TextToolbarProps {
-  element: DesignTextElement;
-  scale: number;
-  canvasWidth: number;
+  element: DesignTextElement | DesignShapeElement;
   availableFontFamilies: string[];
   onUpdateStyle: (patch: Partial<ElementStyle>) => void;
+  onUpdateElement?: (patch: Partial<DesignShapeElement>) => void;
   onUpdateTextRunStyle?: (range: TextSelectionRange, patch: Partial<ElementStyle>) => void;
   onUpdateText: (text: string) => void;
+  mode?: "auto" | "text" | "shape";
 }
 
 export function TextToolbar({
   element,
-  canvasWidth,
   availableFontFamilies,
   onUpdateStyle,
+  onUpdateElement,
   onUpdateTextRunStyle,
+  mode = "auto",
 }: TextToolbarProps) {
   const style = element.style ?? {};
+  const showShapeControls = element.kind === "shape" && mode !== "text";
+  const isLine =
+    element.kind === "shape" && (element.shapeKind === "line" || element.shapeKind === "divider");
   const isBold = Number(style.fontWeight ?? 400) >= 600;
   const isItalic = style.fontStyle === "italic";
   const isUnderline = style.textDecoration?.includes("underline") ?? false;
@@ -143,6 +192,21 @@ export function TextToolbar({
   const hasTextShadow = Boolean(style.textShadowColor);
   const lineHeight = styleNumber(style.lineHeight, 1.2, 0.8, 3);
   const letterSpacing = styleNumber(style.letterSpacing, 0, LETTER_SPACING_MIN, LETTER_SPACING_MAX);
+  const fontSize = styleNumber(style.fontSize, 48, FONT_SIZE_MIN, FONT_SIZE_MAX);
+  const fontSizeOptions = Array.from(new Set([...FONT_SIZE_PRESETS, Math.round(fontSize)])).sort(
+    (a, b) => a - b,
+  );
+  const opacity = styleNumber(style.opacity, 1, 0, 1);
+  const textTransform = style.textTransform ?? "none";
+  const shapeStrokeWidth = styleNumber(
+    isLine ? style.strokeWidth : style.borderWidth,
+    isLine ? 4 : 0,
+    0,
+    32,
+  );
+  const shapeRadius = styleNumber(style.borderRadius, 0, 0, 240);
+  const shapeFill = safeColor(style.fill, isLine ? "#0f172a" : "#f97316");
+  const shapeBorderColor = safeColor(style.borderColor, "#0f172a");
 
   const applyTextStyle = useCallback(
     (patch: Partial<ElementStyle>) => {
@@ -210,6 +274,52 @@ export function TextToolbar({
     [onUpdateStyle],
   );
 
+  const setShapeKind = useCallback(
+    (shapeKind: NonNullable<DesignShapeElement["shapeKind"]>) => {
+      if (element.kind !== "shape" || !onUpdateElement) return;
+      const stylePatch: Partial<ElementStyle> = {};
+      if (shapeKind === "circle") {
+        stylePatch.borderRadius = 9999;
+      } else if (shapeKind === "line" || shapeKind === "divider") {
+        stylePatch.fill = style.fill ?? "#0f172a";
+        stylePatch.strokeWidth = Math.max(2, Number(style.strokeWidth ?? 4));
+        stylePatch.borderWidth = undefined;
+      } else {
+        stylePatch.borderRadius = Math.min(Number(style.borderRadius ?? 18), 160);
+      }
+
+      onUpdateElement({
+        shapeKind,
+        height:
+          shapeKind === "line" || shapeKind === "divider"
+            ? Math.max(12, element.height)
+            : element.height,
+        style: {
+          ...(element.style ?? {}),
+          ...stylePatch,
+        },
+      });
+    },
+    [
+      element.height,
+      element.style,
+      element.kind,
+      onUpdateElement,
+      style.borderRadius,
+      style.fill,
+      style.strokeWidth,
+    ],
+  );
+
+  const updateFontSize = useCallback(
+    (nextSize: number) => {
+      applyTextStyle({
+        fontSize: clampNumber(Math.round(nextSize), FONT_SIZE_MIN, FONT_SIZE_MAX),
+      });
+    },
+    [applyTextStyle],
+  );
+
   const toggleOutline = useCallback(() => {
     onUpdateStyle({
       textStrokeWidth: hasOutline ? 0 : Math.max(2, Number(style.textStrokeWidth ?? 0)),
@@ -248,10 +358,7 @@ export function TextToolbar({
 
   return (
     <div
-      className="pointer-events-auto absolute left-1/2 top-[-52px] z-50 flex w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-nowrap items-center gap-0.5 whitespace-nowrap rounded-lg border bg-card px-1 py-0.5 shadow-lg"
-      style={{
-        maxWidth: Math.max(280, canvasWidth - 24),
-      }}
+      className="pointer-events-auto absolute left-1/2 top-[-52px] z-50 flex w-max -translate-x-1/2 flex-nowrap items-center gap-0.5 whitespace-nowrap rounded-lg border bg-card px-1 py-0.5 shadow-lg"
       onMouseDown={(e) => {
         e.stopPropagation();
         if (!shouldAllowNativeToolbarControl(e.target)) {
@@ -259,6 +366,206 @@ export function TextToolbar({
         }
       }}
     >
+      {showShapeControls ? (
+        <>
+          <Button
+            size="icon"
+            variant={!isLine && element.shapeKind !== "circle" ? "default" : "ghost"}
+            className="size-7"
+            onClick={() => setShapeKind("rectangle")}
+            aria-label="Chữ nhật"
+            title="Chữ nhật"
+          >
+            <Square className="size-3.5" />
+          </Button>
+          <Button
+            size="icon"
+            variant={element.shapeKind === "circle" ? "default" : "ghost"}
+            className="size-7"
+            onClick={() => setShapeKind("circle")}
+            aria-label="Hình tròn"
+            title="Hình tròn"
+          >
+            <Circle className="size-3.5" />
+          </Button>
+          <Button
+            size="icon"
+            variant={isLine ? "default" : "ghost"}
+            className="size-7"
+            onClick={() => setShapeKind("line")}
+            aria-label="Đường thẳng"
+            title="Đường thẳng"
+          >
+            <Minus className="size-3.5" />
+          </Button>
+
+          <div className="mx-0.5 h-5 w-px bg-border" />
+
+          <ToolbarColorInput
+            label={isLine ? "Màu đường" : "Màu nền"}
+            value={shapeFill}
+            onChange={(color) => onUpdateStyle({ fill: color })}
+          />
+
+          {!isLine ? (
+            <ToolbarColorInput
+              label="Màu viền"
+              value={shapeBorderColor}
+              onChange={(color) =>
+                onUpdateStyle({
+                  borderColor: color,
+                  borderWidth: Math.max(1, Number(style.borderWidth ?? 2)),
+                  borderStyle: style.borderStyle ?? "solid",
+                })
+              }
+            />
+          ) : null}
+
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                size="icon"
+                variant={shapeStrokeWidth > 0 ? "default" : "ghost"}
+                className="size-7"
+                aria-label={isLine ? "Độ dày đường" : "Độ dày viền"}
+                title={isLine ? "Độ dày đường" : "Độ dày viền"}
+              >
+                <SlidersHorizontal className="size-3.5" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              className="w-64 p-3"
+              side="top"
+              align="start"
+              onOpenAutoFocus={(event) => event.preventDefault()}
+            >
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between gap-2">
+                  <Label className="text-xs font-medium">
+                    {isLine ? "Độ dày đường" : "Độ dày viền"}
+                  </Label>
+                  <span className="text-[11px] tabular-nums text-muted-foreground">
+                    {Math.round(shapeStrokeWidth)}px
+                  </span>
+                </div>
+                <Slider
+                  value={[shapeStrokeWidth]}
+                  min={0}
+                  max={32}
+                  step={1}
+                  onValueChange={([value]) =>
+                    onUpdateStyle(
+                      isLine
+                        ? { strokeWidth: value }
+                        : {
+                            borderWidth: value,
+                            borderColor: style.borderColor ?? "#0f172a",
+                            borderStyle: style.borderStyle ?? "solid",
+                          },
+                    )
+                  }
+                />
+                {!isLine ? (
+                  <Select
+                    value={style.borderStyle ?? "solid"}
+                    onValueChange={(value) =>
+                      onUpdateStyle({
+                        borderStyle: value as ElementStyle["borderStyle"],
+                        borderWidth: Math.max(1, Number(style.borderWidth ?? 2)),
+                        borderColor: style.borderColor ?? "#0f172a",
+                      })
+                    }
+                  >
+                    <SelectTrigger className="h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="solid">Liền</SelectItem>
+                      <SelectItem value="dashed">Đứt đoạn</SelectItem>
+                      <SelectItem value="dotted">Chấm</SelectItem>
+                    </SelectContent>
+                  </Select>
+                ) : null}
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {!isLine ? (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  size="icon"
+                  variant={element.shapeKind === "circle" || shapeRadius > 0 ? "default" : "ghost"}
+                  className="size-7"
+                  aria-label="Bo góc"
+                  title="Bo góc"
+                >
+                  <SquareDashed className="size-3.5" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                className="w-64 p-3"
+                side="top"
+                align="start"
+                onOpenAutoFocus={(event) => event.preventDefault()}
+              >
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-xs font-medium">Bo góc</Label>
+                    <span className="text-[11px] tabular-nums text-muted-foreground">
+                      {element.shapeKind === "circle" ? "tròn" : `${Math.round(shapeRadius)}px`}
+                    </span>
+                  </div>
+                  <Slider
+                    value={[element.shapeKind === "circle" ? 160 : shapeRadius]}
+                    min={0}
+                    max={160}
+                    step={2}
+                    onValueChange={([value]) => onUpdateStyle({ borderRadius: value })}
+                  />
+                </div>
+              </PopoverContent>
+            </Popover>
+          ) : null}
+
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                size="icon"
+                variant={opacity < 1 ? "default" : "ghost"}
+                className="size-7"
+                aria-label="Độ mờ"
+                title="Độ mờ"
+              >
+                <Eye className="size-3.5" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              className="w-64 p-3"
+              side="top"
+              align="start"
+              onOpenAutoFocus={(event) => event.preventDefault()}
+            >
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between gap-2">
+                  <Label className="text-xs font-medium">Độ mờ</Label>
+                  <span className="text-[11px] tabular-nums text-muted-foreground">
+                    {Math.round(opacity * 100)}%
+                  </span>
+                </div>
+                <Slider
+                  value={[opacity]}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  onValueChange={([value]) => onUpdateStyle({ opacity: value })}
+                />
+              </div>
+            </PopoverContent>
+          </Popover>
+        </>
+      ) : (
+        <>
       {/* Bold */}
       <Button
         size="icon"
@@ -323,21 +630,43 @@ export function TextToolbar({
       </Select>
 
       {/* Font size */}
-      <Select
-        value={String(style.fontSize ?? 48)}
-        onValueChange={(value) => applyTextStyle({ fontSize: Number(value) })}
-      >
-        <SelectTrigger className="h-7 w-[56px] gap-0.5 border-none px-1.5 text-xs shadow-none">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {FONT_SIZE_PRESETS.map((size) => (
-            <SelectItem key={size} value={String(size)} className="text-xs">
-              {size}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <div className="flex h-7 items-center rounded-md border bg-background">
+        <Button
+          size="icon"
+          variant="ghost"
+          className="size-7 rounded-r-none"
+          onClick={() => updateFontSize(fontSize - FONT_SIZE_STEP)}
+          aria-label="Giảm cỡ chữ"
+          title="Giảm cỡ chữ"
+        >
+          <Minus className="size-3.5" />
+        </Button>
+        <Select
+          value={String(Math.round(fontSize))}
+          onValueChange={(value) => updateFontSize(Number(value))}
+        >
+          <SelectTrigger className="h-7 w-[56px] gap-0.5 border-x border-y-0 px-1.5 text-xs shadow-none">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {fontSizeOptions.map((size) => (
+              <SelectItem key={size} value={String(size)} className="text-xs">
+                {size}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="size-7 rounded-l-none"
+          onClick={() => updateFontSize(fontSize + FONT_SIZE_STEP)}
+          aria-label="Tăng cỡ chữ"
+          title="Tăng cỡ chữ"
+        >
+          <Plus className="size-3.5" />
+        </Button>
+      </div>
 
       <div className="mx-0.5 h-5 w-px bg-border" />
 
@@ -379,6 +708,40 @@ export function TextToolbar({
           className="size-7 cursor-pointer rounded border p-0.5"
         />
       </div>
+
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            size="icon"
+            variant={textTransform !== "none" ? "default" : "ghost"}
+            className="size-7"
+            aria-label="Kiểu chữ hoa thường"
+            title="Kiểu chữ hoa thường"
+          >
+            <span className="text-[11px] font-bold leading-none">Aa</span>
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          className="w-44 p-2"
+          side="top"
+          align="start"
+          onOpenAutoFocus={(event) => event.preventDefault()}
+        >
+          <div className="flex flex-col gap-1">
+            {TEXT_TRANSFORM_OPTIONS.map((option) => (
+              <Button
+                key={option.value}
+                size="sm"
+                variant={textTransform === option.value ? "default" : "ghost"}
+                className="h-8 justify-start"
+                onClick={() => applyTextStyle({ textTransform: option.value })}
+              >
+                {option.label}
+              </Button>
+            ))}
+          </div>
+        </PopoverContent>
+      </Popover>
 
       <Popover>
         <PopoverTrigger asChild>
@@ -478,6 +841,42 @@ export function TextToolbar({
                 Về 0
               </Button>
             </div>
+          </div>
+        </PopoverContent>
+      </Popover>
+
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            size="icon"
+            variant={opacity < 1 ? "default" : "ghost"}
+            className="size-7"
+            aria-label="Độ mờ"
+            title="Độ mờ"
+          >
+            <Eye className="size-3.5" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          className="w-64 p-3"
+          side="top"
+          align="start"
+          onOpenAutoFocus={(event) => event.preventDefault()}
+        >
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-xs font-medium">Độ mờ</Label>
+              <span className="text-[11px] tabular-nums text-muted-foreground">
+                {Math.round(opacity * 100)}%
+              </span>
+            </div>
+            <Slider
+              value={[opacity]}
+              min={0}
+              max={1}
+              step={0.05}
+              onValueChange={([value]) => onUpdateStyle({ opacity: value })}
+            />
           </div>
         </PopoverContent>
       </Popover>
@@ -742,6 +1141,8 @@ export function TextToolbar({
           </div>
         </PopoverContent>
       </Popover>
+        </>
+      )}
     </div>
   );
 }

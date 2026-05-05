@@ -162,6 +162,7 @@ const TEXT_RUN_STYLE_KEYS = [
   "color",
   "lineHeight",
   "letterSpacing",
+  "textTransform",
 ] as const;
 
 type MovePayload = {
@@ -630,18 +631,16 @@ function buildElementStylePatch(
     },
   } as Partial<DesignElement>;
   const textRunPatch = pickTextRunStylePatch(patch);
-  if (
-    element.kind === "text" &&
-    element.text.length > 0 &&
-    element.textRuns?.length &&
-    Object.keys(textRunPatch).length > 0
-  ) {
-    (next as Partial<DesignTextElement>).textRuns = applyTextRunStyle(
-      element.text,
-      element.textRuns,
-      { start: 0, end: element.text.length },
-      textRunPatch,
-    );
+  if ((element.kind === "text" || element.kind === "shape") && Object.keys(textRunPatch).length) {
+    const text = element.text ?? "";
+    if (text.length > 0 && element.textRuns?.length) {
+      next.textRuns = applyTextRunStyle(
+        text,
+        element.textRuns,
+        { start: 0, end: text.length },
+        textRunPatch,
+      );
+    }
   }
   return next;
 }
@@ -1272,7 +1271,7 @@ export function DesignWorkspace({
   useEffect(() => {
     if (!editingTextId) return;
     const current = editor.activeElements.find((element) => element.elementId === editingTextId);
-    if (!current || current.kind !== "text") {
+    if (!current || (current.kind !== "text" && current.kind !== "shape")) {
       setEditingTextId(null);
       setEditingTextValue("");
     }
@@ -1354,10 +1353,17 @@ export function DesignWorkspace({
       zIndex: editor.activeElements.length,
       shapeKind,
       text: "",
+      textRuns: [],
       style: {
         fill: shapeKind === "line" ? "#0f172a" : "#f97316",
         borderRadius: shapeKind === "circle" ? 9999 : 18,
         strokeWidth: shapeKind === "line" ? 4 : undefined,
+        fontFamily: "Be Vietnam Pro",
+        fontSize: 32,
+        fontWeight: 700,
+        color: "#0f172a",
+        lineHeight: 1.2,
+        textAlign: "center",
       },
     });
   };
@@ -1643,10 +1649,10 @@ export function DesignWorkspace({
 
   const startInlineTextEdit = (elementId: string) => {
     const element = editor.activeElements.find((item) => item.elementId === elementId);
-    if (!element || element.kind !== "text") return;
+    if (!element || (element.kind !== "text" && element.kind !== "shape")) return;
     editor.setSelection([elementId], elementId);
     setEditingTextId(elementId);
-    setEditingTextValue(element.text);
+    setEditingTextValue(element.text ?? "");
   };
 
   const commitInlineTextEdit = (textValue = editingTextValue, textRuns?: DesignTextRun[]) => {
@@ -1668,9 +1674,9 @@ export function DesignWorkspace({
     editor.updateElements(
       [elementId],
       (element) => {
-        if (element.kind !== "text") return {};
+        if (element.kind !== "text" && element.kind !== "shape") return {};
         return {
-          textRuns: applyTextRunStyle(element.text, element.textRuns, range, patch),
+          textRuns: applyTextRunStyle(element.text ?? "", element.textRuns, range, patch),
         } as Partial<DesignElement>;
       },
       { history: false },
@@ -3955,6 +3961,9 @@ export function DesignWorkspace({
                   }}
                   availableFontFamilies={availableFontFamilies}
                   onUpdateElementStyle={updateElementStyle}
+                  onUpdateElement={(elementId, patch) =>
+                    editor.updateElements([elementId], patch, { history: false })
+                  }
                   onUpdateTextRunStyle={updateTextRunStyle}
                   cropTargetId={cropTargetId}
                   onStartImageCrop={(elementId) => setCropTargetId(elementId)}
@@ -4992,6 +5001,7 @@ function DesignStage({
   onResizeCommit,
   availableFontFamilies,
   onUpdateElementStyle,
+  onUpdateElement,
   onUpdateTextRunStyle,
   cropTargetId,
   onStartImageCrop,
@@ -5031,6 +5041,7 @@ function DesignStage({
   onResizeCommit: () => void;
   availableFontFamilies: string[];
   onUpdateElementStyle: (elementId: string, patch: Partial<ElementStyle>) => void;
+  onUpdateElement: (elementId: string, patch: Partial<DesignElement>) => void;
   onUpdateTextRunStyle: (
     elementId: string,
     range: TextSelectionRange,
@@ -5123,7 +5134,26 @@ function DesignStage({
                   page={page}
                   elements={elements}
                   scale={scale}
-                  suppressElementIds={editingTextId ? [editingTextId] : []}
+                  suppressElementIds={
+                    editingTextId
+                      ? elements.some(
+                          (element) =>
+                            element.elementId === editingTextId && element.kind === "text",
+                        )
+                        ? [editingTextId]
+                        : []
+                      : []
+                  }
+                  suppressShapeTextIds={
+                    editingTextId
+                      ? elements.some(
+                          (element) =>
+                            element.elementId === editingTextId && element.kind === "shape",
+                        )
+                        ? [editingTextId]
+                        : []
+                      : []
+                  }
                   showGuides={false}
                   showGrid={showGrid}
                   gridSize={documentGridSize}
@@ -5183,11 +5213,14 @@ function DesignStage({
                   const primary = primaryId === element.elementId;
                   const isSnapTarget = activeSnapTargetIds.includes(element.elementId);
                   const isEditingText =
-                    editingTextId === element.elementId && element.kind === "text";
+                    editingTextId === element.elementId &&
+                    (element.kind === "text" || element.kind === "shape");
                   const isCropTarget =
                     cropTargetId === element.elementId && element.kind === "image";
                   const textEditorStyle =
-                    element.kind === "text" ? buildTextStyle(element.style, scale) : undefined;
+                    element.kind === "text" || element.kind === "shape"
+                      ? buildTextStyle(element.style, 1)
+                      : undefined;
                   const visibleBounds =
                     element.kind === "text" || element.kind === "image" || element.kind === "shape";
                   const selectionLayerIndex = selectedIds.indexOf(element.elementId);
@@ -5203,7 +5236,7 @@ function DesignStage({
                         if (!selected) onSelect(element.elementId, false);
                       }}
                       onDoubleClick={(event) => {
-                        if (element.kind === "text") {
+                        if (element.kind === "text" || element.kind === "shape") {
                           event.stopPropagation();
                           onStartTextEdit(element.elementId);
                         } else if (element.kind === "image") {
@@ -5376,8 +5409,12 @@ function DesignStage({
                             el.dataset.init = "true";
                             el.innerHTML = richTextToHtml(
                               editingTextValue,
-                              element.kind === "text" ? element.textRuns : undefined,
-                              element.kind === "text" ? element.style : undefined,
+                              element.kind === "text" || element.kind === "shape"
+                                ? element.textRuns
+                                : undefined,
+                              element.kind === "text" || element.kind === "shape"
+                                ? element.style
+                                : undefined,
                             );
                             el.focus();
                             // Place cursor at end
@@ -5425,13 +5462,15 @@ function DesignStage({
                             }
                           }}
                           onMouseDown={(event) => event.stopPropagation()}
-                          className="absolute inset-0 overflow-hidden bg-transparent outline-none"
+                          className="absolute left-0 top-0 overflow-hidden bg-transparent outline-none"
                           style={{
                             ...textEditorStyle,
-                            width: "100%",
-                            height: "100%",
+                            width: element.width,
+                            height: element.height,
                             border: "none",
                             cursor: "text",
+                            transform: `scale(${scale})`,
+                            transformOrigin: "left top",
                             wordBreak: "break-word",
                             whiteSpace: "pre-wrap",
                           }}
@@ -5795,21 +5834,24 @@ function DesignStage({
                 </div>
               ) : null}
 
-              {/* Floating text toolbar for selected text element */}
+              {/* Floating toolbar for selected text or shape element */}
               {(() => {
-                const textEl = primaryId
-                  ? elements.find((e) => e.elementId === primaryId && e.kind === "text")
+                const editableEl = primaryId
+                  ? elements.find(
+                      (e) =>
+                        e.elementId === primaryId && (e.kind === "text" || e.kind === "shape"),
+                    )
                   : null;
-                if (!textEl || textEl.kind !== "text") return null;
+                if (!editableEl || selectedIds.length !== 1) return null;
                 return (
                   <TextToolbar
-                    element={textEl}
-                    scale={scale}
-                    canvasWidth={page.width * scale}
+                    element={editableEl}
                     availableFontFamilies={availableFontFamilies}
-                    onUpdateStyle={(patch) => onUpdateElementStyle(textEl.elementId, patch)}
+                    onUpdateStyle={(patch) => onUpdateElementStyle(editableEl.elementId, patch)}
+                    onUpdateElement={(patch) => onUpdateElement(editableEl.elementId, patch)}
+                    mode={editingTextId === editableEl.elementId ? "text" : "auto"}
                     onUpdateTextRunStyle={(range, patch) =>
-                      onUpdateTextRunStyle(textEl.elementId, range, patch)
+                      onUpdateTextRunStyle(editableEl.elementId, range, patch)
                     }
                     onUpdateText={() => {}}
                   />
@@ -5821,7 +5863,14 @@ function DesignStage({
                 const primaryEl = primaryId
                   ? elements.find((e) => e.elementId === primaryId)
                   : null;
-                if (!primaryEl || !bounds) return null;
+                if (
+                  !primaryEl ||
+                  !bounds ||
+                  editingTextId ||
+                  primaryEl.kind === "text" ||
+                  primaryEl.kind === "shape"
+                )
+                  return null;
                 const opacity = primaryEl.style?.opacity ?? 1;
                 return (
                   <div

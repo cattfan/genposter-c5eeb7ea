@@ -202,6 +202,7 @@ function slotToElement(slot: Slot, pageId: string, canvas: CanvasSize): DesignEl
       src: staticImage,
       crop: slot.crop ? clone(slot.crop) : undefined,
       text: slot.staticText,
+      textRuns: slot.textRuns ? clone(slot.textRuns) : undefined,
     };
     return element;
   }
@@ -299,6 +300,7 @@ function elementToSlot(element: DesignElement): Slot {
       groupId: legacyMeta.groupId as string | undefined,
       shapeKind: element.shapeKind,
       staticText: element.text,
+      textRuns: element.textRuns ? clone(element.textRuns) : undefined,
       staticImage: element.src,
       crop: element.crop ? clone(element.crop) : undefined,
       style,

@@ -159,6 +159,7 @@ function styleToInlineCss(style: Partial<ElementStyle>): string {
   if (style.fontStyle) parts.push(`font-style:${style.fontStyle}`);
   if (style.textDecoration) parts.push(`text-decoration:${style.textDecoration}`);
   if (style.color) parts.push(`color:${style.color}`);
+  if (style.textTransform) parts.push(`text-transform:${style.textTransform}`);
   if (typeof style.lineHeight === "number" && Number.isFinite(style.lineHeight)) {
     parts.push(`line-height:${style.lineHeight}`);
   }
@@ -216,6 +217,9 @@ function collectElementStyle(element: HTMLElement): Partial<ElementStyle> {
   if (element.style.color) style.color = element.style.color;
   if (element.style.textDecoration) {
     style.textDecoration = element.style.textDecoration as ElementStyle["textDecoration"];
+  }
+  if (element.style.textTransform) {
+    style.textTransform = element.style.textTransform as ElementStyle["textTransform"];
   }
   if (element.style.lineHeight) {
     const lineHeight = Number.parseFloat(element.style.lineHeight);

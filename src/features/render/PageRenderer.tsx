@@ -438,7 +438,13 @@ function SlotRenderer({
                     : "flex-start",
             }}
           >
-            {displayRenderedText(shapeText)}
+            {renderRichTextRuns({
+              text: shapeText,
+              runs: slot.bindingPath ? undefined : slot.textRuns,
+              baseStyle: slot.style,
+              scale,
+              fallback: displayRenderedText(shapeText),
+            })}
           </div>
         )}
         <SlotPreviewBounds kind="shape" show={showSlotBounds && !hasShapeText} />
