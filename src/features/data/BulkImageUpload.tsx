@@ -28,6 +28,9 @@ import {
   entityHasImageSource,
   getAssetEntityIds,
   getEntityImageReferences,
+  getEntityImageReferencesWithAssets,
+  isImageReferenceAsset,
+  isUsableImageAsset,
   looksLikeDriveReference,
 } from "@/features/data/imageReferences";
 import { matchFilesToEntities, type MatchResult } from "@/features/data/imageMatcher";
@@ -444,6 +447,16 @@ export function BulkImageUpload() {
 
   const matchedCount = pending.filter((item) => item.manualEntityId).length;
   const assetEntityIds = useMemo(() => getAssetEntityIds(allAssets), [allAssets]);
+  const usableAssets = useMemo(() => allAssets.filter(isUsableImageAsset), [allAssets]);
+  const assetsByEntityId = useMemo(() => {
+    const map = new Map<string, Asset[]>();
+    for (const asset of allAssets) {
+      const group = map.get(asset.entityId) ?? [];
+      group.push(asset);
+      map.set(asset.entityId, group);
+    }
+    return map;
+  }, [allAssets]);
   const entitiesWithoutImage = useMemo(
     () => entities.filter((entity) => !entityHasImageSource(entity, assetEntityIds)),
     [assetEntityIds, entities],
@@ -451,9 +464,14 @@ export function BulkImageUpload() {
   const driveImportCandidates = useMemo(
     () =>
       entities.filter(
-        (entity) => !assetEntityIds.has(entity.entityId) && getEntityImageReferences(entity).length > 0,
+        (entity) =>
+          !assetEntityIds.has(entity.entityId) &&
+          getEntityImageReferencesWithAssets(
+            entity,
+            assetsByEntityId.get(entity.entityId) ?? [],
+          ).length > 0,
       ),
-    [assetEntityIds, entities],
+    [assetEntityIds, assetsByEntityId, entities],
   );
   const shouldHighlightDriveDownload =
     driveImportCandidates.length > 0 && !driveBusy && !matching && !busy;
@@ -495,7 +513,9 @@ export function BulkImageUpload() {
 
     const rootUrl = driveRootUrl.trim();
     const hasNameOnlyRef = driveImportCandidates.some((entity) =>
-      getEntityImageReferences(entity).some((reference) => !looksLikeDriveReference(reference)),
+      getEntityImageReferencesWithAssets(entity, assetsByEntityId.get(entity.entityId) ?? []).some(
+        (reference) => !looksLikeDriveReference(reference),
+      ),
     );
     if (hasNameOnlyRef && !rootUrl) {
       toast.error("Có cột Link Drive dạng tên folder. Dán root folder Drive public trước.");
@@ -511,7 +531,7 @@ export function BulkImageUpload() {
     let imported = 0;
     const coverCount: Record<string, number> = {};
 
-    for (const asset of allAssets) {
+    for (const asset of usableAssets) {
       if (asset.isCover) coverCount[asset.entityId] = (coverCount[asset.entityId] ?? 0) + 1;
     }
 
@@ -532,13 +552,17 @@ export function BulkImageUpload() {
         const entityFailures: DriveFailure[] = [];
 
         try {
-          for (const reference of getEntityImageReferences(entity)) {
+          const references = getEntityImageReferencesWithAssets(
+            entity,
+            assetsByEntityId.get(entity.entityId) ?? [],
+          );
+          for (const reference of references) {
             const result = await fetchDriveImagesServer({
               data: {
                 reference,
-                rootFolderUrl: rootUrl || undefined,
-                searchContext: entity.sheetName,
-                maxFiles: 20,
+            rootFolderUrl: rootUrl || undefined,
+            searchContext: entity.sheetName,
+            maxFiles: 20,
               },
             });
 
@@ -574,13 +598,27 @@ export function BulkImageUpload() {
             }
           }
 
-          if (entityAssets.length) await db.assets.bulkPut(entityAssets);
+          if (entityAssets.length) {
+            const staleAssets = (assetsByEntityId.get(entity.entityId) ?? []).filter(
+              isImageReferenceAsset,
+            );
+            await db.transaction("rw", [db.assets, db.blobs], async () => {
+              if (staleAssets.length) {
+                await db.assets.bulkDelete(staleAssets.map((asset) => asset.assetId));
+              }
+              await db.assets.bulkPut(entityAssets);
+            });
+          }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           entityFailures.push({
             entityId: entity.entityId,
             entityName: entity.name,
-            reference: getEntityImageReferences(entity)[0] ?? entity.name,
+            reference:
+              getEntityImageReferencesWithAssets(
+                entity,
+                assetsByEntityId.get(entity.entityId) ?? [],
+              )[0] ?? entity.name,
             error: message,
             type: classifyDriveFailure(message),
           });
@@ -744,8 +782,13 @@ export function BulkImageUpload() {
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             <div className="rounded-lg border p-3">
-              <div className="text-2xl font-semibold">{allAssets.length}</div>
-              <div className="text-sm text-muted-foreground">Ảnh đã import</div>
+              <div className="text-2xl font-semibold">{usableAssets.length}</div>
+              <div className="text-sm text-muted-foreground">Ảnh đọc được</div>
+              {allAssets.length !== usableAssets.length ? (
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {allAssets.length - usableAssets.length} link cần tải về local
+                </div>
+              ) : null}
             </div>
             <div className="rounded-lg border p-3">
               <div className="flex items-center gap-2">

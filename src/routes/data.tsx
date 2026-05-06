@@ -53,6 +53,7 @@ import {
   entityHasImageSource,
   getAssetEntityIds,
   getEntityImageReferences,
+  getEntityImageReferencesWithAssets,
   looksLikeDirectImageReference,
   looksLikeDriveReference,
 } from "@/features/data/imageReferences";
@@ -862,6 +863,15 @@ function DataPage() {
     [entities],
   );
   const assetEntityIds = useMemo(() => getAssetEntityIds(assets), [assets]);
+  const assetsByEntityId = useMemo(() => {
+    const map = new Map<string, Asset[]>();
+    for (const asset of assets) {
+      const group = map.get(asset.entityId) ?? [];
+      group.push(asset);
+      map.set(asset.entityId, group);
+    }
+    return map;
+  }, [assets]);
   const missingImageCount = useMemo(
     () => entities.filter((entity) => !entityHasImageSource(entity, assetEntityIds)).length,
     [assetEntityIds, entities],
@@ -873,9 +883,14 @@ function DataPage() {
   const driveDownloadCandidateCount = useMemo(
     () =>
       entities.filter(
-        (entity) => !assetEntityIds.has(entity.entityId) && getEntityImageReferences(entity).length > 0,
+        (entity) =>
+          !assetEntityIds.has(entity.entityId) &&
+          getEntityImageReferencesWithAssets(
+            entity,
+            assetsByEntityId.get(entity.entityId) ?? [],
+          ).length > 0,
       ).length,
-    [assetEntityIds, entities],
+    [assetEntityIds, assetsByEntityId, entities],
   );
   const driveIssueCounts = useMemo(() => buildDriveIssueCounts(driveLinkIssues), [driveLinkIssues]);
   const filteredDriveLinkIssues = useMemo(

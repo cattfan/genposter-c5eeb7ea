@@ -1,4 +1,5 @@
 import type { Asset } from "@/models";
+import { isUsableImageAsset } from "@/features/data/imageReferences";
 
 function isDirectImageSource(src: string): boolean {
   return (
@@ -24,8 +25,7 @@ export function getAssetImageSource(asset: Asset | undefined): string | undefine
 }
 
 export function isRenderableAsset(asset: Asset | undefined): asset is Asset {
-  if (!asset) return false;
-  if (asset.status === "missing" || asset.status === "broken") return false;
+  if (!isUsableImageAsset(asset)) return false;
   const src = getAssetImageSource(asset);
   if (!src) return false;
   if (src.startsWith("blob:") && !asset.blobKey) return false;

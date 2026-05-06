@@ -10,6 +10,7 @@ import {
   buildTextStyle,
   shapeBorderRadius,
   shapeClipPath,
+  textVerticalFlexAlign,
 } from "@/engines/binding/dataBinding";
 import { CropOverlay } from "./CropOverlay";
 import { SlotContextMenu, type SlotMenuActions } from "./SlotContextMenu";
@@ -261,17 +262,21 @@ function SlotEditor({
     content = (
       <div
         style={{
-          ...textCss,
           width: "100%",
           height: "100%",
+          display: "flex",
+          alignItems: textVerticalFlexAlign(slot.style),
+          overflow: "hidden",
         }}
       >
-        {renderRichTextRuns({
-          text: displayText ?? "",
-          runs: slot.textRuns,
-          baseStyle: slot.style,
-          scale: zoom,
-        })}
+        <div style={{ ...textCss, width: "100%" }}>
+          {renderRichTextRuns({
+            text: displayText ?? "",
+            runs: slot.textRuns,
+            baseStyle: slot.style,
+            scale: zoom,
+          })}
+        </div>
       </div>
     );
   } else if (slot.kind === "image") {

@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid";
 import type { Asset, Entity } from "@/models";
+import { looksLikeDirectImageReference, looksLikeDriveReference } from "@/features/data/imageReferences";
 import { FIELD_ALIASES, FIELD_LABELS_VI, METADATA_FIELDS, normalizeKey, parseBool, parseList, parseNumber } from "./aliases";
 
 export interface RawRow {
@@ -58,6 +59,16 @@ export function normalizeRows(rows: RawRow[], mapping: FieldMapping, sheetName?:
     }
 
     const entityId = nanoid();
+    const imageRaw = std.image ? String(std.image).trim() : "";
+    const imagesRaw = parseList(std.images);
+    const allImageRefs = [imageRaw, ...imagesRaw].filter(Boolean);
+    const downloadableImageRefs = allImageRefs.filter(
+      (url) => looksLikeDriveReference(url) || !looksLikeDirectImageReference(url),
+    );
+    const directImageUrls = allImageRefs.filter(
+      (url) => !looksLikeDriveReference(url) && looksLikeDirectImageReference(url),
+    );
+
     // Gom các trường tuỳ ý (day, description, signatureDish, hoặc bất kỳ key chưa nhận diện) vào metadata
     const metadata: Record<string, string | number> = {};
     for (const [k, v] of Object.entries(std)) {
@@ -69,6 +80,10 @@ export function normalizeRows(rows: RawRow[], mapping: FieldMapping, sheetName?:
         // Cột "lạ" không có trong alias chuẩn → giữ nguyên trong metadata để filterRules dùng
         metadata[k] = String(v).trim();
       }
+    }
+    if (downloadableImageRefs.length > 0) {
+      const currentImageRef = metadata.imageRef ? String(metadata.imageRef) : "";
+      metadata.imageRef = [currentImageRef, ...downloadableImageRefs].filter(Boolean).join(" | ");
     }
     const entity: Entity = {
       entityId,
@@ -93,10 +108,7 @@ export function normalizeRows(rows: RawRow[], mapping: FieldMapping, sheetName?:
     entities.push(entity);
 
     // Xử lý ảnh
-    const imageRaw = std.image ? String(std.image).trim() : "";
-    const imagesRaw = parseList(std.images);
-    const allImgs = [imageRaw, ...imagesRaw].filter(Boolean);
-    allImgs.forEach((url, i) => {
+    directImageUrls.forEach((url, i) => {
       assets.push({
         assetId: nanoid(),
         entityId,
@@ -109,7 +121,7 @@ export function normalizeRows(rows: RawRow[], mapping: FieldMapping, sheetName?:
       });
     });
 
-    if (allImgs.length === 0) {
+    if (allImageRefs.length === 0) {
       warnings.push(`Dòng ${idx + 1} (${name}): không có ảnh`);
     }
   });

@@ -68,8 +68,39 @@ export function entityHasImageReference(entity: Entity) {
   return getEntityImageReferences(entity).length > 0;
 }
 
+export function isUsableImageAsset(asset: Asset | undefined): asset is Asset {
+  if (!asset) return false;
+  if (asset.status === "missing" || asset.status === "broken") return false;
+  const source = (asset.blobKey ? `idb://${asset.blobKey}` : asset.sourceValue)?.trim();
+  if (!source) return false;
+  if (
+    asset.blobKey ||
+    source.startsWith("idb://") ||
+    source.startsWith("blob:") ||
+    source.startsWith("data:image/")
+  ) {
+    return true;
+  }
+  if (/drive\.google\.com|docs\.google\.com/i.test(source)) return false;
+  return looksLikeDirectImageReference(source) || /googleusercontent\.com|cloudinary|imgur/i.test(source);
+}
+
+export function isImageReferenceAsset(asset: Asset | undefined): asset is Asset {
+  if (!asset?.sourceValue || isUsableImageAsset(asset)) return false;
+  return looksLikeImageReference(asset.sourceValue);
+}
+
+export function getEntityImageReferencesWithAssets(entity: Entity, assets: Asset[]): string[] {
+  const references = new Set(getEntityImageReferences(entity));
+  for (const asset of assets) {
+    if (asset.entityId !== entity.entityId || !isImageReferenceAsset(asset)) continue;
+    references.add(asset.sourceValue.trim());
+  }
+  return [...references];
+}
+
 export function getAssetEntityIds(assets: Asset[]) {
-  return new Set(assets.map((asset) => asset.entityId));
+  return new Set(assets.filter(isUsableImageAsset).map((asset) => asset.entityId));
 }
 
 export function entityHasImageSource(entity: Entity, assetEntityIds: Set<string>) {

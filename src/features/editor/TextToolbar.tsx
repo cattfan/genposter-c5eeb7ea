@@ -7,6 +7,9 @@ import {
   AlignJustify,
   AlignLeft,
   AlignRight,
+  AlignCenterHorizontal,
+  AlignEndHorizontal,
+  AlignStartHorizontal,
   Blend,
   Bold,
   Circle,
@@ -187,6 +190,7 @@ export function TextToolbar({
   const isUnderline = style.textDecoration?.includes("underline") ?? false;
   const isStrikethrough = style.textDecoration?.includes("line-through") ?? false;
   const textAlign = style.textAlign ?? "left";
+  const textVerticalAlign = style.textVerticalAlign ?? "top";
   const hasOutline = Number(style.textStrokeWidth ?? 0) > 0;
   const hasGradient = Boolean(style.gradientEnabled);
   const hasTextShadow = Boolean(style.textShadowColor);
@@ -270,6 +274,13 @@ export function TextToolbar({
   const setAlign = useCallback(
     (align: "left" | "center" | "right") => {
       onUpdateStyle({ textAlign: align });
+    },
+    [onUpdateStyle],
+  );
+
+  const setVerticalAlign = useCallback(
+    (align: NonNullable<ElementStyle["textVerticalAlign"]>) => {
+      onUpdateStyle({ textVerticalAlign: align });
     },
     [onUpdateStyle],
   );
@@ -694,6 +705,39 @@ export function TextToolbar({
         onClick={() => setAlign("right")}
       >
         <AlignRight className="size-3.5" />
+      </Button>
+
+      <div className="mx-0.5 h-5 w-px bg-border" />
+
+      <Button
+        size="icon"
+        variant={textVerticalAlign === "top" ? "default" : "ghost"}
+        className="size-7"
+        onClick={() => setVerticalAlign("top")}
+        aria-label="Chữ lên trên"
+        title="Chữ lên trên"
+      >
+        <AlignStartHorizontal className="size-3.5" />
+      </Button>
+      <Button
+        size="icon"
+        variant={textVerticalAlign === "middle" ? "default" : "ghost"}
+        className="size-7"
+        onClick={() => setVerticalAlign("middle")}
+        aria-label="Chữ giữa khung"
+        title="Chữ giữa khung"
+      >
+        <AlignCenterHorizontal className="size-3.5" />
+      </Button>
+      <Button
+        size="icon"
+        variant={textVerticalAlign === "bottom" ? "default" : "ghost"}
+        className="size-7"
+        onClick={() => setVerticalAlign("bottom")}
+        aria-label="Chữ xuống cuối khung"
+        title="Chữ xuống cuối khung"
+      >
+        <AlignEndHorizontal className="size-3.5" />
       </Button>
 
       {/* Color */}

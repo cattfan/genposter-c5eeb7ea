@@ -9,6 +9,7 @@ import {
   buildTextStyle,
   shapeBorderRadius,
   shapeClipPath,
+  textVerticalFlexAlign,
 } from "@/engines/binding/dataBinding";
 import { useResolvedImageSrc } from "@/storage/imageSrc";
 import { getHeroiconComponent } from "./designAssets";
@@ -219,16 +220,20 @@ const DesignElementNode = memo(
           data-rendered-element-id={element.elementId}
           style={{
             ...style,
-            ...textStyle,
+            display: "flex",
+            alignItems: textVerticalFlexAlign(element.style),
+            overflow: "hidden",
           }}
         >
-          {renderRichTextRuns({
-            text: element.text,
-            runs: element.textRuns,
-            baseStyle: element.style,
-            scale,
-            fallback: displayEditorText(element.text),
-          })}
+          <div style={{ ...textStyle, width: "100%" }}>
+            {renderRichTextRuns({
+              text: element.text,
+              runs: element.textRuns,
+              baseStyle: element.style,
+              scale,
+              fallback: displayEditorText(element.text),
+            })}
+          </div>
           <EditorGuideBounds kind={element.kind} show={showGuides} />
         </div>
       );
@@ -379,26 +384,21 @@ const DesignElementNode = memo(
           {element.text && !suppressShapeText ? (
             <div
               style={{
-                ...buildTextStyle(element.style, scale),
                 position: "absolute",
                 inset: 0,
                 display: "flex",
-                alignItems: "center",
-                justifyContent:
-                  element.style?.textAlign === "center"
-                    ? "center"
-                    : element.style?.textAlign === "right"
-                      ? "flex-end"
-                      : "flex-start",
+                alignItems: textVerticalFlexAlign(element.style),
               }}
             >
-              {renderRichTextRuns({
-                text: element.text,
-                runs: element.textRuns,
-                baseStyle: element.style,
-                scale,
-                fallback: displayEditorText(element.text),
-              })}
+              <div style={{ ...buildTextStyle(element.style, scale), width: "100%" }}>
+                {renderRichTextRuns({
+                  text: element.text,
+                  runs: element.textRuns,
+                  baseStyle: element.style,
+                  scale,
+                  fallback: displayEditorText(element.text),
+                })}
+              </div>
             </div>
           ) : null}
           {!element.text || suppressShapeText ? (

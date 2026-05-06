@@ -82,6 +82,7 @@ export interface SlotStyle {
   lineHeight?: number;
   letterSpacing?: number;
   textAlign?: "left" | "center" | "right";
+  textVerticalAlign?: "top" | "middle" | "bottom";
   textTransform?: "none" | "uppercase" | "lowercase" | "capitalize";
   maxLines?: number;
   textShadow?: string;
@@ -763,6 +764,7 @@ export interface BlueprintBlock {
     fill?: string;
     borderRadius?: number;
     textAlign?: "left" | "center" | "right";
+    textVerticalAlign?: "top" | "middle" | "bottom";
     textTransform?: "none" | "uppercase" | "lowercase";
     lineHeight?: number;
     letterSpacing?: number;

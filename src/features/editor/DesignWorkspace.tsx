@@ -98,7 +98,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { buildTextStyle } from "@/engines/binding/dataBinding";
+import { buildTextStyle, textVerticalFlexAlign } from "@/engines/binding/dataBinding";
 import { LayoutGuides } from "@/features/render/LayoutGuides";
 import { PageRenderer } from "@/features/render/PageRenderer";
 import { db, saveBlob } from "@/storage/db";
@@ -1078,6 +1078,10 @@ export function DesignWorkspace({
     () => [...builtInAssets.filter(isHeroiconAsset), ...extendedIconAssets],
     [builtInAssets, extendedIconAssets],
   );
+
+  const clearElementPreviewState = useCallback(() => {
+    resetPreviewMarkers(getDesignCanvasElement(stageWrapRef.current), { restoreTransform: true });
+  }, []);
   const filteredIconAssets = useMemo(() => {
     const query = normalizeIconSearch(deferredIconSearch.trim());
     return iconAssets.filter((asset) => {
@@ -1695,6 +1699,7 @@ export function DesignWorkspace({
     insertText,
     insertShape,
     cancelInlineTextEdit,
+    clearElementPreviewState,
   });
   keyboardStateRef.current = {
     editor,
@@ -1703,6 +1708,7 @@ export function DesignWorkspace({
     insertText,
     insertShape,
     cancelInlineTextEdit,
+    clearElementPreviewState,
   };
 
   useEffect(() => {
@@ -1762,11 +1768,13 @@ export function DesignWorkspace({
       }
       if (mod && lower === "z" && !event.shiftKey) {
         event.preventDefault();
+        keyboard.clearElementPreviewState();
         currentEditor.undo();
         return;
       }
       if (mod && ((lower === "z" && event.shiftKey) || lower === "y")) {
         event.preventDefault();
+        keyboard.clearElementPreviewState();
         currentEditor.redo();
         return;
       }
@@ -2518,7 +2526,10 @@ export function DesignWorkspace({
                   variant="ghost"
                   className="size-8"
                   disabled={!editor.canUndo}
-                  onClick={() => editor.undo()}
+                  onClick={() => {
+                    clearElementPreviewState();
+                    editor.undo();
+                  }}
                 >
                   <Undo2 className="size-4" />
                 </Button>
@@ -2532,7 +2543,10 @@ export function DesignWorkspace({
                   variant="ghost"
                   className="size-8"
                   disabled={!editor.canRedo}
-                  onClick={() => editor.redo()}
+                  onClick={() => {
+                    clearElementPreviewState();
+                    editor.redo();
+                  }}
                 >
                   <Redo2 className="size-4" />
                 </Button>
@@ -5369,6 +5383,8 @@ function DesignStage({
                         top: element.y * scale,
                         width: element.width * scale,
                         height: element.height * scale,
+                        transform: element.rotation ? `rotate(${element.rotation}deg)` : undefined,
+                        transformOrigin: "center",
                         border: isSnapTarget
                           ? "2px solid rgba(236,72,153,0.9)"
                           : selected
@@ -5404,77 +5420,97 @@ function DesignStage({
                         />
                       ) : isEditingText && textEditorStyle ? (
                         <div
-                          ref={(el) => {
-                            if (!el || el.dataset.init === "true") return;
-                            el.dataset.init = "true";
-                            el.innerHTML = richTextToHtml(
-                              editingTextValue,
-                              element.kind === "text" || element.kind === "shape"
-                                ? element.textRuns
-                                : undefined,
-                              element.kind === "text" || element.kind === "shape"
-                                ? element.style
-                                : undefined,
-                            );
-                            el.focus();
-                            // Place cursor at end
-                            const range = document.createRange();
-                            const sel = window.getSelection();
-                            if (el.childNodes.length > 0) {
-                              range.selectNodeContents(el);
-                              range.collapse(false);
-                            } else {
-                              range.selectNodeContents(el);
-                            }
-                            sel?.removeAllRanges();
-                            sel?.addRange(range);
-                          }}
-                          contentEditable
-                          data-rich-text-editor-id={element.elementId}
-                          suppressContentEditableWarning
-                          onBlur={(e) => {
-                            const parsed = parseRichTextEditorContent(e.currentTarget);
-                            onEditingTextValueChange(parsed.text);
-                            onCommitTextEdit(parsed.text, parsed.textRuns);
-                          }}
-                          onInput={(e) => {
-                            const text = (e.currentTarget as HTMLElement).innerText ?? "";
-                            onEditingTextValueChange(text);
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key === "Escape") {
-                              event.preventDefault();
-                              onCancelTextEdit();
-                            }
-                            // Rich text shortcuts
-                            const mod = event.ctrlKey || event.metaKey;
-                            if (mod && event.key === "b") {
-                              event.preventDefault();
-                              document.execCommand("bold", false);
-                            }
-                            if (mod && event.key === "i") {
-                              event.preventDefault();
-                              document.execCommand("italic", false);
-                            }
-                            if (mod && event.key === "u") {
-                              event.preventDefault();
-                              document.execCommand("underline", false);
-                            }
-                          }}
-                          onMouseDown={(event) => event.stopPropagation()}
                           className="absolute left-0 top-0 overflow-hidden bg-transparent outline-none"
+                          onMouseDown={(event) => {
+                            event.stopPropagation();
+                            const editor = event.currentTarget.querySelector<HTMLElement>(
+                              "[data-rich-text-editor-id]",
+                            );
+                            if (editor && event.target === event.currentTarget) {
+                              event.preventDefault();
+                              editor.focus();
+                            }
+                          }}
                           style={{
-                            ...textEditorStyle,
                             width: element.width,
                             height: element.height,
-                            border: "none",
-                            cursor: "text",
+                            display: "flex",
+                            flexDirection: "column",
+                            justifyContent: textVerticalFlexAlign(element.style),
                             transform: `scale(${scale})`,
                             transformOrigin: "left top",
-                            wordBreak: "break-word",
-                            whiteSpace: "pre-wrap",
                           }}
-                        />
+                        >
+                          <div
+                            ref={(el) => {
+                              if (!el || el.dataset.init === "true") return;
+                              el.dataset.init = "true";
+                              el.innerHTML = richTextToHtml(
+                                editingTextValue,
+                                element.kind === "text" || element.kind === "shape"
+                                  ? element.textRuns
+                                  : undefined,
+                                element.kind === "text" || element.kind === "shape"
+                                  ? element.style
+                                  : undefined,
+                              );
+                              el.focus();
+                              // Place cursor at end
+                              const range = document.createRange();
+                              const sel = window.getSelection();
+                              if (el.childNodes.length > 0) {
+                                range.selectNodeContents(el);
+                                range.collapse(false);
+                              } else {
+                                range.selectNodeContents(el);
+                              }
+                              sel?.removeAllRanges();
+                              sel?.addRange(range);
+                            }}
+                            contentEditable
+                            data-rich-text-editor-id={element.elementId}
+                            suppressContentEditableWarning
+                            onBlur={(e) => {
+                              const parsed = parseRichTextEditorContent(e.currentTarget);
+                              onEditingTextValueChange(parsed.text);
+                              onCommitTextEdit(parsed.text, parsed.textRuns);
+                            }}
+                            onInput={(e) => {
+                              const text = (e.currentTarget as HTMLElement).innerText ?? "";
+                              onEditingTextValueChange(text);
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Escape") {
+                                event.preventDefault();
+                                onCancelTextEdit();
+                              }
+                              // Rich text shortcuts
+                              const mod = event.ctrlKey || event.metaKey;
+                              if (mod && event.key === "b") {
+                                event.preventDefault();
+                                document.execCommand("bold", false);
+                              }
+                              if (mod && event.key === "i") {
+                                event.preventDefault();
+                                document.execCommand("italic", false);
+                              }
+                              if (mod && event.key === "u") {
+                                event.preventDefault();
+                                document.execCommand("underline", false);
+                              }
+                            }}
+                            onMouseDown={(event) => event.stopPropagation()}
+                            className="w-full overflow-hidden bg-transparent outline-none"
+                            style={{
+                              ...textEditorStyle,
+                              width: "100%",
+                              border: "none",
+                              cursor: "text",
+                              wordBreak: "break-word",
+                              whiteSpace: "pre-wrap",
+                            }}
+                          />
+                        </div>
                       ) : null}
 
                       {primary && !element.locked && element.kind !== "group" && !isEditingText ? (
@@ -5560,9 +5596,9 @@ function DesignStage({
                                 window.removeEventListener("mousemove", onMouseMove);
                                 window.removeEventListener("mouseup", onMouseUp);
                                 scheduleRotate.flush();
+                                resetPreviewMarkers(canvas, { restoreTransform: true });
                                 if (latestRotatePayload) onResize(latestRotatePayload);
                                 onResizeCommit();
-                                window.requestAnimationFrame(() => resetPreviewMarkers(canvas));
                               };
                               window.addEventListener("mousemove", onMouseMove);
                               window.addEventListener("mouseup", onMouseUp);

@@ -854,6 +854,14 @@ export function buildTextStyle(style: Slot["style"] | undefined, scale = 1): Rea
   return css;
 }
 
+export function textVerticalFlexAlign(
+  style: Slot["style"] | undefined,
+): "flex-start" | "center" | "flex-end" {
+  if (style?.textVerticalAlign === "bottom") return "flex-end";
+  if (style?.textVerticalAlign === "middle") return "center";
+  return "flex-start";
+}
+
 /** Clip-path CSS theo shapeKind, cho ảnh nằm trong shape. */
 export function shapeClipPath(shapeKind: NonNullable<Slot["shapeKind"]>): string | undefined {
   if (shapeKind === "triangle") return "polygon(50% 0%, 100% 100%, 0% 100%)";

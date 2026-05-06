@@ -22,6 +22,7 @@ import {
   resolveTextBinding,
   shapeBorderRadius,
   shapeClipPath,
+  textVerticalFlexAlign,
 } from "@/engines/binding/dataBinding";
 import {
   buildExpandedSlotImagePlan,
@@ -425,26 +426,21 @@ function SlotRenderer({
         {hasShapeText && (
           <div
             style={{
-              ...textCss,
               position: "absolute",
               inset: 0,
               display: "flex",
-              alignItems: "center",
-              justifyContent:
-                slot.style?.textAlign === "center"
-                  ? "center"
-                  : slot.style?.textAlign === "right"
-                    ? "flex-end"
-                    : "flex-start",
+              alignItems: textVerticalFlexAlign(slot.style),
             }}
           >
-            {renderRichTextRuns({
-              text: shapeText,
-              runs: slot.bindingPath ? undefined : slot.textRuns,
-              baseStyle: slot.style,
-              scale,
-              fallback: displayRenderedText(shapeText),
-            })}
+            <div style={{ ...textCss, width: "100%" }}>
+              {renderRichTextRuns({
+                text: shapeText,
+                runs: slot.bindingPath ? undefined : slot.textRuns,
+                baseStyle: slot.style,
+                scale,
+                fallback: displayRenderedText(shapeText),
+              })}
+            </div>
           </div>
         )}
         <SlotPreviewBounds kind="shape" show={showSlotBounds && !hasShapeText} />
@@ -556,16 +552,20 @@ function SlotRenderer({
       <div
         style={{
           ...baseStyle,
-          ...textCss,
+          display: "flex",
+          alignItems: textVerticalFlexAlign(slot.style),
+          overflow: "hidden",
         }}
       >
-        {renderRichTextRuns({
-          text,
-          runs: slot.bindingPath ? undefined : slot.textRuns,
-          baseStyle: slot.style,
-          scale,
-          fallback: displayRenderedText(text),
-        })}
+        <div style={{ ...textCss, width: "100%" }}>
+          {renderRichTextRuns({
+            text,
+            runs: slot.bindingPath ? undefined : slot.textRuns,
+            baseStyle: slot.style,
+            scale,
+            fallback: displayRenderedText(text),
+          })}
+        </div>
         <DebugBadge debug={debug} text="text" />
       </div>
     );

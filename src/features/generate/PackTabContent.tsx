@@ -1195,6 +1195,30 @@ export function PackTabContent({
       if (orderedAssignments.size === sortedTargets.length) return orderedAssignments;
     }
 
+    if (formatClipboard.snapshots.length > 1) {
+      const partialOrderedAssignments = new Map<string, SlotFormatAssignment>();
+      const bounds = buildSlotBounds(sortedTargets) ?? undefined;
+      const dataGroupIds = new Map<string, string>();
+      sortedTargets.forEach((target, index) => {
+        const snapshot = formatClipboard.snapshots[index];
+        if (!snapshot || getSlotBindMode(target) !== snapshot.bindMode) return;
+        let dataGroupId: string | undefined;
+        if (snapshot.dataGroupKey) {
+          dataGroupId = dataGroupIds.get(snapshot.dataGroupKey);
+          if (!dataGroupId) {
+            dataGroupId = createDataGroupId();
+            dataGroupIds.set(snapshot.dataGroupKey, dataGroupId);
+          }
+        }
+        partialOrderedAssignments.set(target.slotId, {
+          snapshot,
+          layoutBounds: bounds,
+          dataGroupId,
+        });
+      });
+      if (partialOrderedAssignments.size > 0) return partialOrderedAssignments;
+    }
+
     const modeOrderedAssignments = new Map<string, SlotFormatAssignment>();
     const modeOrderedUseCount = new Map<FormatSlotMode, number>();
     for (const target of sortedTargets) {
@@ -1203,8 +1227,12 @@ export function PackTabContent({
       const modeMatches = byMode.get(mode) ?? [];
       if (modeMatches.length === 0) continue;
       const used = modeOrderedUseCount.get(mode) ?? 0;
+      if (formatClipboard.snapshots.length > 1 && used >= modeMatches.length) continue;
       modeOrderedAssignments.set(target.slotId, {
-        snapshot: modeMatches[used % modeMatches.length],
+        snapshot:
+          formatClipboard.snapshots.length === 1
+            ? modeMatches[0]
+            : modeMatches[used],
       });
       modeOrderedUseCount.set(mode, used + 1);
     }
@@ -1222,8 +1250,12 @@ export function PackTabContent({
       const exactMatches = byKey.get(bindingKey) ?? [];
       if (exactMatches.length > 0) {
         const used = keyUseCount.get(bindingKey) ?? 0;
+        if (formatClipboard.snapshots.length > 1 && used >= exactMatches.length) continue;
         assignments.set(target.slotId, {
-          snapshot: exactMatches[used % exactMatches.length],
+          snapshot:
+            formatClipboard.snapshots.length === 1
+              ? exactMatches[0]
+              : exactMatches[used],
         });
         keyUseCount.set(bindingKey, used + 1);
         continue;
@@ -1232,8 +1264,12 @@ export function PackTabContent({
       const modeMatches = byMode.get(mode) ?? [];
       if (modeMatches.length === 0) continue;
       const used = modeUseCount.get(mode) ?? 0;
+      if (formatClipboard.snapshots.length > 1 && used >= modeMatches.length) continue;
       assignments.set(target.slotId, {
-        snapshot: modeMatches[used % modeMatches.length],
+        snapshot:
+          formatClipboard.snapshots.length === 1
+            ? modeMatches[0]
+            : modeMatches[used],
       });
       modeUseCount.set(mode, used + 1);
     }

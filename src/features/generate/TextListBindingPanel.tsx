@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ListChecks, Shuffle } from "lucide-react";
+import { ListChecks, Plus, Shuffle, X } from "lucide-react";
 import type { Entity, Slot } from "@/models";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,7 @@ export interface TextListFieldOption {
 }
 
 const NONE_VALUE = "__none__";
+const MAX_FIELD_COUNT = 10;
 
 export function TextListBindingPanel({
   selectedSlot,
@@ -48,7 +49,7 @@ export function TextListBindingPanel({
       "entity.name",
     [fieldOptions],
   );
-  const [fields, setFields] = useState<string[]>([defaultField, NONE_VALUE, NONE_VALUE]);
+  const [fields, setFields] = useState<string[]>([defaultField]);
   const [count, setCount] = useState(12);
   const [separator, setSeparator] = useState(" - ");
   const [bullet, setBullet] = useState<EntityListBullet>("dot");
@@ -59,7 +60,7 @@ export function TextListBindingPanel({
   useEffect(() => {
     const parsed = parseEntityListBindingPath(selectedSlot?.bindingPath);
     if (parsed) {
-      setFields([...parsed.fields, NONE_VALUE, NONE_VALUE].slice(0, 3));
+      setFields(parsed.fields.length ? parsed.fields.slice(0, MAX_FIELD_COUNT) : [defaultField]);
       setCount(parsed.count);
       setSeparator(parsed.separator ?? " - ");
       setBullet(parsed.bullet ?? "dot");
@@ -69,14 +70,20 @@ export function TextListBindingPanel({
       return;
     }
 
-    setFields([defaultField, NONE_VALUE, NONE_VALUE]);
+    setFields([defaultField]);
     setCount(Math.min(12, Math.max(1, entityPool.length || 12)));
     setSeparator(" - ");
     setBullet("dot");
     setRandomize(true);
     setPrioritizePartner(prioritizePartnerDefault);
     setSeed(String(Date.now()));
-  }, [selectedSlot?.slotId, selectedSlot?.bindingPath, defaultField]);
+  }, [
+    selectedSlot?.slotId,
+    selectedSlot?.bindingPath,
+    defaultField,
+    entityPool.length,
+    prioritizePartnerDefault,
+  ]);
 
   const optionList = useMemo(() => {
     const map = new Map<string, TextListFieldOption>();
@@ -89,7 +96,10 @@ export function TextListBindingPanel({
     return Array.from(map.values());
   }, [fieldOptions, fields]);
 
-  const selectedFields = fields.filter((field) => field !== NONE_VALUE);
+  const selectedFields = useMemo(
+    () => fields.filter((field) => field !== NONE_VALUE),
+    [fields],
+  );
   const buildPath = (nextSeed = seed) =>
     buildEntityListBindingPath({
       fields: selectedFields,
@@ -101,13 +111,39 @@ export function TextListBindingPanel({
       seed: nextSeed,
     });
 
-  const previewText = useMemo(() => {
+  const previewBindingPath = useMemo(() => {
     if (selectedFields.length === 0) return "";
-    return resolveEntityListBinding(buildPath(), entityPool, "");
-  }, [selectedFields.join("|"), count, separator, bullet, randomize, prioritizePartner, seed, entityPool]);
+    return buildEntityListBindingPath({
+      fields: selectedFields,
+      count,
+      separator,
+      bullet,
+      randomize,
+      prioritizePartner,
+      seed,
+    });
+  }, [selectedFields, count, separator, bullet, randomize, prioritizePartner, seed]);
+
+  const previewText = useMemo(
+    () => (previewBindingPath ? resolveEntityListBinding(previewBindingPath, entityPool, "") : ""),
+    [previewBindingPath, entityPool],
+  );
 
   const setFieldAt = (index: number, value: string) => {
     setFields((current) => current.map((field, i) => (i === index ? value : field)));
+  };
+
+  const addField = () => {
+    setFields((current) =>
+      current.length >= MAX_FIELD_COUNT ? current : [...current, NONE_VALUE],
+    );
+  };
+
+  const removeFieldAt = (index: number) => {
+    setFields((current) => {
+      if (current.length <= 1) return current;
+      return current.filter((_, i) => i !== index);
+    });
   };
 
   const applyCurrent = (nextSeed = seed) => {
@@ -134,11 +170,25 @@ export function TextListBindingPanel({
       </div>
 
       <div className="space-y-2">
-        {[0, 1, 2].map((index) => (
-          <div key={index}>
-            <Label className="text-[11px]">Trường {index + 1}</Label>
+        {fields.map((fieldValue, index) => (
+          <div key={`${index}-${fieldValue}`} className="space-y-1">
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-[11px]">Trường {index + 1}</Label>
+              {fields.length > 1 && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 w-6 p-0"
+                  onClick={() => removeFieldAt(index)}
+                  title="Bỏ trường này"
+                >
+                  <X className="size-3" />
+                </Button>
+              )}
+            </div>
             <Select
-              value={fields[index] ?? NONE_VALUE}
+              value={fieldValue ?? NONE_VALUE}
               onValueChange={(value) => setFieldAt(index, value)}
             >
               <SelectTrigger className="h-8 text-xs">
@@ -156,6 +206,16 @@ export function TextListBindingPanel({
             </Select>
           </div>
         ))}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 w-full justify-center text-xs"
+          onClick={addField}
+          disabled={fields.length >= MAX_FIELD_COUNT}
+        >
+          <Plus className="mr-1 size-3" /> Thêm trường
+        </Button>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
@@ -222,10 +282,20 @@ export function TextListBindingPanel({
       )}
 
       <div className="grid grid-cols-2 gap-2">
-        <Button size="sm" variant="outline" onClick={() => applyCurrent()}>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => applyCurrent()}
+          disabled={selectedFields.length === 0}
+        >
           <ListChecks className="size-3 mr-1" /> Áp dụng
         </Button>
-        <Button size="sm" variant="outline" onClick={randomAgain} disabled={!randomize}>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={randomAgain}
+          disabled={!randomize || selectedFields.length === 0}
+        >
           <Shuffle className="size-3 mr-1" /> Xáo trộn lại
         </Button>
       </div>

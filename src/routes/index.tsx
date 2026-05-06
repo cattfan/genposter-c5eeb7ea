@@ -19,7 +19,10 @@ import {
   UploadCloud,
 } from "lucide-react";
 import { PageContainer } from "@/components/PageHeader";
-import { getEntityImageReferences } from "@/features/data/imageReferences";
+import {
+  getEntityImageReferencesWithAssets,
+  isUsableImageAsset,
+} from "@/features/data/imageReferences";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/")({
@@ -70,17 +73,27 @@ function Dashboard() {
     );
     const activeEntities = entities.filter((entity) => entity.status === "active").length;
     const partnerEntities = entities.filter((entity) => entity.partnerFlag).length;
-    const localAssets = assets.filter((asset) => asset.blobKey).length;
-    const linkAssets = assets.filter((asset) => !asset.blobKey && asset.sourceValue).length;
+    const usableAssets = assets.filter(isUsableImageAsset);
+    const localAssets = usableAssets.filter((asset) => asset.blobKey).length;
+    const linkAssets = usableAssets.filter((asset) => !asset.blobKey && asset.sourceValue).length;
     const hasUsableAssets = localAssets > 0 || linkAssets > 0;
     const brokenAssets = assets.filter((asset) => asset.status === "broken").length;
     const missingAssets = assets.filter((asset) => asset.status === "missing" || !asset.sourceValue)
       .length;
-    const assetEntityIds = new Set(assets.map((asset) => asset.entityId).filter(Boolean));
+    const assetEntityIds = new Set(usableAssets.map((asset) => asset.entityId).filter(Boolean));
+    const assetsByEntityId = new Map<string, typeof assets>();
+    for (const asset of assets) {
+      const group = assetsByEntityId.get(asset.entityId) ?? [];
+      group.push(asset);
+      assetsByEntityId.set(asset.entityId, group);
+    }
     const entitiesWithoutAssets = entities.filter((entity) => !assetEntityIds.has(entity.entityId))
       .length;
     const driveDownloadCandidateCount = entities.filter(
-      (entity) => !assetEntityIds.has(entity.entityId) && getEntityImageReferences(entity).length > 0,
+      (entity) =>
+        !assetEntityIds.has(entity.entityId) &&
+        getEntityImageReferencesWithAssets(entity, assetsByEntityId.get(entity.entityId) ?? [])
+          .length > 0,
     ).length;
     const latestJob = jobs[0] ?? null;
     const renderedPages = jobs.reduce((sum, job) => sum + job.pages.length, 0);
