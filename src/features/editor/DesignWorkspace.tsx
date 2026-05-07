@@ -38,7 +38,6 @@ import {
   MousePointer2,
   PanelLeft,
   PanelRight,
-  Palette,
   Plus,
   RotateCcw,
   RotateCw,
@@ -128,6 +127,7 @@ import {
   type HeroiconAsset,
 } from "./designAssets";
 import { useDesignEditor } from "./designStore";
+import type { CommitOptions } from "./designStore";
 import { TextToolbar } from "./TextToolbar";
 import {
   applyTextRunStyle,
@@ -183,6 +183,74 @@ type ResizePayload = {
 };
 
 type RafScheduler<T> = ((value: T) => void) & { cancel: () => void; flush: () => void };
+
+type PointerSessionHandlers = {
+  onMove?: (event: PointerEvent) => void;
+  onEnd?: (event: PointerEvent | Event) => void;
+  onCancel?: (event: PointerEvent | Event) => void;
+};
+
+function startPointerSession(
+  event: React.PointerEvent<HTMLElement>,
+  { onMove, onEnd, onCancel }: PointerSessionHandlers,
+) {
+  const target = event.currentTarget;
+  const pointerId = event.pointerId;
+  let ended = false;
+
+  try {
+    target.setPointerCapture(pointerId);
+  } catch {
+    // Pointer capture can fail if the browser already released the pointer.
+  }
+
+  const cleanup = () => {
+    target.removeEventListener("pointermove", handleMove);
+    target.removeEventListener("pointerup", handleEnd);
+    target.removeEventListener("pointercancel", handleCancel);
+    target.removeEventListener("lostpointercapture", handleCancel);
+    window.removeEventListener("blur", handleCancel);
+    window.removeEventListener("keydown", handleKeyDown);
+    try {
+      if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId);
+    } catch {
+      // Ignore release errors from already-cancelled pointer sessions.
+    }
+  };
+
+  const finish = (handler: PointerSessionHandlers["onEnd"], nextEvent: PointerEvent | Event) => {
+    if (ended) return;
+    ended = true;
+    cleanup();
+    handler?.(nextEvent);
+  };
+
+  function handleMove(nextEvent: PointerEvent) {
+    if (nextEvent.pointerId !== pointerId) return;
+    onMove?.(nextEvent);
+  }
+
+  function handleEnd(nextEvent: PointerEvent) {
+    if (nextEvent.pointerId !== pointerId) return;
+    finish(onEnd, nextEvent);
+  }
+
+  function handleCancel(nextEvent: PointerEvent | Event) {
+    if (nextEvent instanceof PointerEvent && nextEvent.pointerId !== pointerId) return;
+    finish(onCancel ?? onEnd, nextEvent);
+  }
+
+  function handleKeyDown(nextEvent: KeyboardEvent) {
+    if (nextEvent.key === "Escape") finish(onCancel ?? onEnd, nextEvent);
+  }
+
+  target.addEventListener("pointermove", handleMove);
+  target.addEventListener("pointerup", handleEnd);
+  target.addEventListener("pointercancel", handleCancel);
+  target.addEventListener("lostpointercapture", handleCancel);
+  window.addEventListener("blur", handleCancel);
+  window.addEventListener("keydown", handleKeyDown);
+}
 
 function createRafScheduler<T>(callback: (value: T) => void): RafScheduler<T> {
   let frame = 0;
@@ -1057,6 +1125,10 @@ export function DesignWorkspace({
   const [spacingLines, setSpacingLines] = useState<
     Array<{ axis: "x" | "y"; from: number; to: number; pos: number; gap: number }>
   >([]);
+
+  useEffect(() => {
+    if (rightTab !== "properties") setRightTab("properties");
+  }, [rightTab]);
   const assetLibraryQuery = useLiveQuery(
     () => db.assetLibrary.orderBy("updatedAt").reverse().toArray(),
     [],
@@ -1651,6 +1723,27 @@ export function DesignWorkspace({
     updateElementStyle(primary.elementId, patch);
   };
 
+  const commitElementStyle = (elementId: string, patch: Partial<ElementStyle>) => {
+    editor.updateElements([elementId], (element) => buildElementStylePatch(element, patch));
+  };
+
+  const commitPrimaryStyle = (patch: Partial<ElementStyle>) => {
+    if (!primary) return;
+    commitElementStyle(primary.elementId, patch);
+  };
+
+  const updatePagePreview = (
+    pageId: string,
+    patch: Partial<DesignPage>,
+    options: CommitOptions = { history: false },
+  ) => {
+    editor.updatePage(pageId, patch, options);
+  };
+
+  const commitPagePatch = (pageId: string, patch: Partial<DesignPage>) => {
+    editor.updatePage(pageId, patch);
+  };
+
   const startInlineTextEdit = (elementId: string) => {
     const element = editor.activeElements.find((item) => item.elementId === elementId);
     if (!element || (element.kind !== "text" && element.kind !== "shape")) return;
@@ -2019,20 +2112,17 @@ export function DesignWorkspace({
     setViewportDrag(null);
   };
 
-  const handleStageBackgroundMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+  const handleStageBackgroundPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     const canvas = event.currentTarget;
     if (isPanToolActive(tool, spacePressed)) {
       beginPan(event.clientX, event.clientY);
-      const onMouseMove = (moveEvent: MouseEvent) =>
+      const onMove = (moveEvent: PointerEvent) =>
         updatePan(moveEvent.clientX, moveEvent.clientY);
-      const onMouseUp = () => {
-        window.removeEventListener("mousemove", onMouseMove);
-        window.removeEventListener("mouseup", onMouseUp);
+      const onEnd = () => {
         endPan();
       };
-      window.addEventListener("mousemove", onMouseMove);
-      window.addEventListener("mouseup", onMouseUp);
+      startPointerSession(event, { onMove, onEnd, onCancel: onEnd });
       return;
     }
 
@@ -2042,7 +2132,7 @@ export function DesignWorkspace({
     const start = getCanvasPoint(canvas, zoom, event.clientX, event.clientY, 0, 0);
     setMarqueeRect({ x: start.x, y: start.y, width: 0, height: 0 });
 
-    const onMouseMove = (moveEvent: MouseEvent) => {
+    const onMove = (moveEvent: PointerEvent) => {
       const point = getCanvasPoint(canvas, zoom, moveEvent.clientX, moveEvent.clientY, 0, 0);
       const rect = normalizeMarqueeRect(start, point);
       setMarqueeRect(rect);
@@ -2055,17 +2145,14 @@ export function DesignWorkspace({
       editor.setSelection(nextIds, nextIds.at(-1) ?? null);
     };
 
-    const onMouseUp = () => {
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
+    const onEnd = () => {
       setMarqueeRect(null);
     };
 
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
+    startPointerSession(event, { onMove, onEnd, onCancel: onEnd });
   };
 
-  const handleStageWrapMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+  const handleStageWrapPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     const target = event.target as HTMLElement | null;
     if (target?.closest("[data-design-canvas]")) return;
@@ -2518,7 +2605,7 @@ export function DesignWorkspace({
           <ToolbarDivider />
 
           {/* Undo / Redo */}
-          <div className="flex shrink-0 items-center rounded-md border bg-background p-0.5">
+          <ToolbarGroup>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -2553,11 +2640,11 @@ export function DesignWorkspace({
               </TooltipTrigger>
               <TooltipContent>Làm lại · Ctrl+Shift+Z</TooltipContent>
             </Tooltip>
-          </div>
+          </ToolbarGroup>
 
           <ToolbarDivider />
 
-          <div className="flex shrink-0 items-center rounded-md border bg-background p-0.5">
+          <ToolbarGroup>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -2603,11 +2690,11 @@ export function DesignWorkspace({
               </TooltipTrigger>
               <TooltipContent>Đặt lại khung nhìn</TooltipContent>
             </Tooltip>
-          </div>
+          </ToolbarGroup>
 
           <ToolbarDivider />
 
-          <div className="flex shrink-0 items-center rounded-md border bg-background p-0.5">
+          <ToolbarGroup>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -2638,12 +2725,12 @@ export function DesignWorkspace({
               </TooltipTrigger>
               <TooltipContent>Di chuyển khung nhìn · H / Space</TooltipContent>
             </Tooltip>
-          </div>
+          </ToolbarGroup>
 
           <ToolbarDivider />
 
           {headerLeading ? null : (
-            <div className="flex shrink-0 items-center rounded-md border bg-background p-0.5">
+            <ToolbarGroup>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -2709,12 +2796,12 @@ export function DesignWorkspace({
               </TooltipTrigger>
               <TooltipContent>Đường căn</TooltipContent>
             </Tooltip>
-            </div>
+            </ToolbarGroup>
           )}
 
           <ToolbarDivider />
 
-          <div className="flex shrink-0 items-center rounded-md border bg-background p-0.5">
+          <ToolbarGroup>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -2819,11 +2906,11 @@ export function DesignWorkspace({
               </TooltipTrigger>
               <TooltipContent>Dàn đều dọc</TooltipContent>
             </Tooltip>
-          </div>
+          </ToolbarGroup>
 
           <ToolbarDivider />
 
-          <div className="flex shrink-0 items-center rounded-md border bg-background p-0.5">
+          <ToolbarGroup>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -2852,11 +2939,86 @@ export function DesignWorkspace({
               </TooltipTrigger>
               <TooltipContent>Bỏ nhóm · Ctrl+Shift+G</TooltipContent>
             </Tooltip>
-          </div>
+          </ToolbarGroup>
 
           <ToolbarDivider />
 
-          <div className="flex shrink-0 items-center rounded-md border bg-background p-0.5">
+          <ToolbarGroup>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-8"
+                  disabled={!primary}
+                  onClick={() => editor.copySelection()}
+                >
+                  <Copy className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Sao chÃ©p</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-8"
+                  disabled={!primary}
+                  onClick={() => editor.duplicateSelection()}
+                >
+                  <ClipboardPaste className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Nhân bản</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon"
+                  variant={primary?.hidden ? "default" : "ghost"}
+                  className="size-8"
+                  disabled={!primary}
+                  onClick={() => primary && updatePrimaryElement({ hidden: !primary.hidden })}
+                >
+                  {primary?.hidden ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{primary?.hidden ? "Hiện" : "Ẩn"}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon"
+                  variant={primary?.locked ? "default" : "ghost"}
+                  className="size-8"
+                  disabled={!primary}
+                  onClick={() => primary && updatePrimaryElement({ locked: !primary.locked })}
+                >
+                  {primary?.locked ? <LockOpen className="size-4" /> : <Lock className="size-4" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{primary?.locked ? "Mở khóa" : "Khóa"}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-8 text-destructive hover:text-destructive"
+                  disabled={!primary}
+                  onClick={() => editor.deleteSelection()}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Xóa</TooltipContent>
+            </Tooltip>
+          </ToolbarGroup>
+
+          <ToolbarDivider />
+
+          <ToolbarGroup>
             <Popover>
               <PopoverTrigger asChild>
                 <Button size="sm" variant="ghost" className="h-8 gap-1.5 px-2">
@@ -2902,7 +3064,10 @@ export function DesignWorkspace({
                       label="Nền"
                       value={activePage.background ?? "#ffffff"}
                       onChange={(color) =>
-                        editor.updatePage(activePage.pageId, { background: color })
+                        updatePagePreview(activePage.pageId, { background: color })
+                      }
+                      onCommit={(color) =>
+                        commitPagePatch(activePage.pageId, { background: color })
                       }
                     />
                     <div className="grid grid-cols-3 gap-2">
@@ -3125,6 +3290,7 @@ export function DesignWorkspace({
                           label="Màu chữ"
                           value={primary.style?.color ?? "#0f172a"}
                           onChange={(color) => updatePrimaryStyle({ color })}
+                          onCommit={(color) => commitPrimaryStyle({ color })}
                         />
                         <LetterSpacingControl
                           value={Number(primary.style?.letterSpacing ?? 0)}
@@ -3155,6 +3321,7 @@ export function DesignWorkspace({
                             label="Màu nền"
                             value={primary.style?.fill ?? "#f97316"}
                             onChange={(color) => updatePrimaryStyle({ fill: color })}
+                            onCommit={(color) => commitPrimaryStyle({ fill: color })}
                           />
                         ) : null}
                         {primary.kind === "image" ? (
@@ -3252,12 +3419,26 @@ export function DesignWorkspace({
                                 gradientTo: primary.style?.gradientTo ?? "#ec4899",
                               })
                             }
+                            onCommit={(color) =>
+                              commitPrimaryStyle({
+                                gradientEnabled: true,
+                                gradientFrom: color,
+                                gradientTo: primary.style?.gradientTo ?? "#ec4899",
+                              })
+                            }
                           />
                           <CompactColorControl
                             label="Đến"
                             value={primary.style?.gradientTo ?? "#ec4899"}
                             onChange={(color) =>
                               updatePrimaryStyle({
+                                gradientEnabled: true,
+                                gradientFrom: primary.style?.gradientFrom ?? "#f97316",
+                                gradientTo: color,
+                              })
+                            }
+                            onCommit={(color) =>
+                              commitPrimaryStyle({
                                 gradientEnabled: true,
                                 gradientFrom: primary.style?.gradientFrom ?? "#f97316",
                                 gradientTo: color,
@@ -3320,6 +3501,14 @@ export function DesignWorkspace({
                             shadowY: primary.style?.shadowY ?? 4,
                           })
                         }
+                        onCommit={(color) =>
+                          commitPrimaryStyle({
+                            shadowColor: color,
+                            shadowBlur: primary.style?.shadowBlur ?? 8,
+                            shadowX: primary.style?.shadowX ?? 0,
+                            shadowY: primary.style?.shadowY ?? 4,
+                          })
+                        }
                       />
                       <div className="flex flex-col gap-2">
                         <div className="flex items-center justify-between">
@@ -3368,132 +3557,7 @@ export function DesignWorkspace({
                 ) : null}
               </PopoverContent>
             </Popover>
-
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button size="sm" variant="ghost" className="h-8 gap-1.5 px-2">
-                  <Palette className="size-4" />
-                  Thương hiệu
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="start" className="max-h-[70vh] w-96 overflow-y-auto p-3">
-                <div className="flex flex-col gap-3">
-                  <div className="grid grid-cols-3 gap-2">
-                    <Button variant="outline" size="sm" onClick={createBrandKit}>
-                      <Plus className="mr-2 size-4" /> Tạo mới
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={uploadFont}>
-                      <Upload className="mr-2 size-4" /> Font
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => uploadAsset("logo")}>
-                      <Upload className="mr-2 size-4" /> Logo
-                    </Button>
-                  </div>
-
-                  <div className="flex flex-col gap-2">
-                    <Label className="text-xs uppercase text-muted-foreground">
-                      Bộ thương hiệu hiện tại
-                    </Label>
-                    <Select
-                      value={currentBrandKit?.brandKitId ?? "__none__"}
-                      onValueChange={(value) =>
-                        persistBrandKitSelection(value === "__none__" ? undefined : value)
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Chưa chọn bộ thương hiệu" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">Không dùng</SelectItem>
-                        {brandKits.map((kit) => (
-                          <SelectItem key={kit.brandKitId} value={kit.brandKitId}>
-                            {kit.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {currentBrandKit ? (
-                    <InspectorSection title="Bộ thương hiệu">
-                      <Input
-                        value={currentBrandKit.name}
-                        onChange={(event) => updateBrandKit({ name: event.target.value })}
-                      />
-                      <div className="flex flex-col gap-2">
-                        <Label className="text-xs uppercase text-muted-foreground">Bảng màu</Label>
-                        <div className="flex flex-wrap gap-2">
-                          {currentBrandKit.colors.map((color, index) => (
-                            <button
-                              key={`${color}-${index}`}
-                              className="size-8 rounded-full border"
-                              style={{ background: color }}
-                              onClick={() => {
-                                if (!primary) return;
-                                updatePrimaryStyle(
-                                  primary.kind === "text" ? { color } : { fill: color },
-                                );
-                              }}
-                              title={color}
-                            />
-                          ))}
-                          <label className="flex size-8 cursor-pointer items-center justify-center rounded-full border bg-muted">
-                            <Plus className="size-4" />
-                            <input
-                              type="color"
-                              className="sr-only"
-                              onChange={(event) =>
-                                updateBrandKit({
-                                  colors: [...currentBrandKit.colors, event.target.value],
-                                })
-                              }
-                            />
-                          </label>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col gap-2">
-                        <Label className="text-xs uppercase text-muted-foreground">Font chữ</Label>
-                        <div className="flex flex-col gap-2">
-                          {fontAssets.map((fontAsset) => {
-                            const selectedFont = currentBrandKit.fontAssetIds.includes(
-                              fontAsset.fontAssetId,
-                            );
-                            return (
-                              <button
-                                key={fontAsset.fontAssetId}
-                                className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left ${selectedFont ? "border-primary bg-primary/5" : ""}`}
-                                onClick={() =>
-                                  updateBrandKit({
-                                    fontAssetIds: selectedFont
-                                      ? currentBrandKit.fontAssetIds.filter(
-                                          (id) => id !== fontAsset.fontAssetId,
-                                        )
-                                      : [...currentBrandKit.fontAssetIds, fontAsset.fontAssetId],
-                                  })
-                                }
-                              >
-                                <span style={{ fontFamily: fontAsset.family }}>
-                                  {fontAsset.family}
-                                </span>
-                                <span className="text-xs text-muted-foreground">
-                                  {selectedFont ? "Bật" : "Tắt"}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </InspectorSection>
-                  ) : (
-                    <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
-                      Tạo bộ thương hiệu để lưu bảng màu, font và logo cho editor.
-                    </div>
-                  )}
-                </div>
-              </PopoverContent>
-            </Popover>
-          </div>
+          </ToolbarGroup>
 
           {headerLeading ? null : renderWorkspaceActions("ml-auto")}
         </div>
@@ -3827,7 +3891,7 @@ export function DesignWorkspace({
           <div
             ref={stageWrapRef}
             className="design-stage-scroll min-h-0 min-w-0 overflow-auto px-8 pb-12 pt-24"
-            onMouseDown={handleStageWrapMouseDown}
+            onPointerDown={handleStageWrapPointerDown}
             onMouseMove={handleStageWrapMouseMove}
           >
             <div
@@ -3883,7 +3947,7 @@ export function DesignWorkspace({
                   onStartTextEdit={startInlineTextEdit}
                   onCommitTextEdit={commitInlineTextEdit}
                   onCancelTextEdit={cancelInlineTextEdit}
-                  onStageMouseDown={handleStageBackgroundMouseDown}
+                  onStagePointerDown={handleStageBackgroundPointerDown}
                   onSelect={(elementId, additive) => {
                     if (!elementId) {
                       editor.setSelection([]);
@@ -3995,9 +4059,8 @@ export function DesignWorkspace({
           {rightOpen ? (
             <aside className="min-h-0 min-w-0 overflow-hidden border-l">
               <Tabs value={rightTab} onValueChange={setRightTab} className="flex h-full flex-col">
-                <TabsList className="mx-4 mt-4 grid grid-cols-2">
+                <TabsList className="mx-4 mt-4 grid grid-cols-1">
                   <TabsTrigger value="properties">Thuộc tính</TabsTrigger>
-                  <TabsTrigger value="brand">Thương hiệu</TabsTrigger>
                 </TabsList>
                 <TabsContent
                   value="properties"
@@ -4042,7 +4105,10 @@ export function DesignWorkspace({
                         label="Nền"
                         value={activePage.background ?? "#ffffff"}
                         onChange={(color) =>
-                          editor.updatePage(activePage.pageId, { background: color })
+                          updatePagePreview(activePage.pageId, { background: color })
+                        }
+                        onCommit={(color) =>
+                          commitPagePatch(activePage.pageId, { background: color })
                         }
                       />
                     </InspectorSection>
@@ -4254,6 +4320,9 @@ export function DesignWorkspace({
                               label="Màu chữ"
                               value={primary.style?.color ?? "#0f172a"}
                               onChange={(color) => updateElementStyle(primary.elementId, { color })}
+                              onCommit={(color) =>
+                                commitElementStyle(primary.elementId, { color })
+                              }
                             />
                             <LetterSpacingControl
                               value={Number(primary.style?.letterSpacing ?? 0)}
@@ -4307,6 +4376,15 @@ export function DesignWorkspace({
                                       } as Partial<DesignElement>,
                                       { history: false },
                                     )
+                                  }
+                                  onCommit={(color) =>
+                                    commitElementStyle(primary.elementId, {
+                                      textStrokeColor: color,
+                                      textStrokeWidth:
+                                        Number(primary.style?.textStrokeWidth ?? 0) > 0
+                                          ? primary.style?.textStrokeWidth
+                                          : 2,
+                                    })
                                   }
                                 />
                                 <CompactColorControl
@@ -4376,6 +4454,11 @@ export function DesignWorkspace({
                                         } as Partial<DesignElement>,
                                         { history: false },
                                       )
+                                    }
+                                    onCommit={(color) =>
+                                      commitElementStyle(primary.elementId, {
+                                        textShadowColor: color,
+                                      })
                                     }
                                   />
                                   <div className="flex flex-col gap-2">
@@ -4479,6 +4562,9 @@ export function DesignWorkspace({
                                     } as Partial<DesignElement>,
                                     { history: false },
                                   )
+                                }
+                                onCommit={(color) =>
+                                  commitElementStyle(primary.elementId, { fill: color })
                                 }
                               />
                             ) : null}
@@ -4664,42 +4750,36 @@ export function DesignWorkspace({
                                 <div className="grid grid-cols-2 gap-2">
                                   <div className="space-y-1">
                                     <Label className="text-xs text-muted-foreground">Từ</Label>
-                                    <Input
-                                      type="color"
+                                    <CompactColorControl
+                                      label="Từ"
                                       value={primary.style?.gradientFrom ?? "#f97316"}
-                                      onChange={(event) =>
-                                        editor.updateElements(
-                                          [primary.elementId],
-                                          {
-                                            style: {
-                                              ...(primary.style ?? {}),
-                                              gradientFrom: event.target.value,
-                                            },
-                                          } as Partial<DesignElement>,
-                                          { history: false },
-                                        )
+                                      onChange={(color) =>
+                                        updateElementStyle(primary.elementId, {
+                                          gradientFrom: color,
+                                        })
                                       }
-                                      className="h-8 p-1"
+                                      onCommit={(color) =>
+                                        commitElementStyle(primary.elementId, {
+                                          gradientFrom: color,
+                                        })
+                                      }
                                     />
                                   </div>
                                   <div className="space-y-1">
                                     <Label className="text-xs text-muted-foreground">Đến</Label>
-                                    <Input
-                                      type="color"
+                                    <CompactColorControl
+                                      label="Đến"
                                       value={primary.style?.gradientTo ?? "#ec4899"}
-                                      onChange={(event) =>
-                                        editor.updateElements(
-                                          [primary.elementId],
-                                          {
-                                            style: {
-                                              ...(primary.style ?? {}),
-                                              gradientTo: event.target.value,
-                                            },
-                                          } as Partial<DesignElement>,
-                                          { history: false },
-                                        )
+                                      onChange={(color) =>
+                                        updateElementStyle(primary.elementId, {
+                                          gradientTo: color,
+                                        })
                                       }
-                                      className="h-8 p-1"
+                                      onCommit={(color) =>
+                                        commitElementStyle(primary.elementId, {
+                                          gradientTo: color,
+                                        })
+                                      }
                                     />
                                   </div>
                                 </div>
@@ -4766,22 +4846,19 @@ export function DesignWorkspace({
                             <>
                               <div className="space-y-1">
                                 <Label className="text-xs text-muted-foreground">Màu</Label>
-                                <Input
-                                  type="color"
-                                  value={primary.style.shadowColor ?? "rgba(0,0,0,0.25)"}
-                                  onChange={(event) =>
-                                    editor.updateElements(
-                                      [primary.elementId],
-                                      {
-                                        style: {
-                                          ...(primary.style ?? {}),
-                                          shadowColor: event.target.value,
-                                        },
-                                      } as Partial<DesignElement>,
-                                      { history: false },
-                                    )
+                                <CompactColorControl
+                                  label="MÃ u"
+                                  value={primary.style.shadowColor ?? "#000000"}
+                                  onChange={(color) =>
+                                    updateElementStyle(primary.elementId, {
+                                      shadowColor: color,
+                                    })
                                   }
-                                  className="h-8 p-1"
+                                  onCommit={(color) =>
+                                    commitElementStyle(primary.elementId, {
+                                      shadowColor: color,
+                                    })
+                                  }
                                 />
                               </div>
                               <div className="space-y-1">
@@ -4846,127 +4923,6 @@ export function DesignWorkspace({
                     )}
                   </div>
                 </TabsContent>
-
-                <TabsContent value="brand" className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-                  <div className="space-y-4 pt-4">
-                    <div className="flex gap-2">
-                      <Button variant="outline" onClick={createBrandKit}>
-                        <Plus className="mr-2 size-4" /> Bộ mới
-                      </Button>
-                      <Button variant="outline" onClick={uploadFont}>
-                        <Upload className="mr-2 size-4" /> Tải font
-                      </Button>
-                      <Button variant="outline" onClick={() => uploadAsset("logo")}>
-                        <Upload className="mr-2 size-4" /> Tải logo
-                      </Button>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label className="text-xs uppercase text-muted-foreground">
-                        Bộ thương hiệu hiện tại
-                      </Label>
-                      <Select
-                        value={currentBrandKit?.brandKitId ?? "__none__"}
-                        onValueChange={(value) =>
-                          persistBrandKitSelection(value === "__none__" ? undefined : value)
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Chưa chọn bộ thương hiệu" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">Không dùng</SelectItem>
-                          {brandKits.map((kit) => (
-                            <SelectItem key={kit.brandKitId} value={kit.brandKitId}>
-                              {kit.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {currentBrandKit ? (
-                      <div className="space-y-4 rounded-xl border bg-card p-3">
-                        <Input
-                          value={currentBrandKit.name}
-                          onChange={(event) => updateBrandKit({ name: event.target.value })}
-                        />
-                        <div>
-                          <Label className="text-xs uppercase text-muted-foreground">
-                            Bảng màu
-                          </Label>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {currentBrandKit.colors.map((color, index) => (
-                              <button
-                                key={`${color}-${index}`}
-                                className="size-10 rounded-full border"
-                                style={{ background: color }}
-                                onClick={() => {
-                                  if (!primary) return;
-                                  const styleKey = primary.kind === "text" ? "color" : "fill";
-                                  updateElementStyle(primary.elementId, {
-                                    [styleKey]: color,
-                                  } as Partial<ElementStyle>);
-                                }}
-                              />
-                            ))}
-                            <label className="flex size-10 cursor-pointer items-center justify-center rounded-full border bg-muted">
-                              <Plus className="size-4" />
-                              <input
-                                type="color"
-                                className="sr-only"
-                                onChange={(event) =>
-                                  updateBrandKit({
-                                    colors: [...currentBrandKit.colors, event.target.value],
-                                  })
-                                }
-                              />
-                            </label>
-                          </div>
-                        </div>
-
-                        <div>
-                          <Label className="text-xs uppercase text-muted-foreground">
-                            Font chữ
-                          </Label>
-                          <div className="mt-3 space-y-2">
-                            {fontAssets.map((fontAsset) => {
-                              const selectedFont = currentBrandKit.fontAssetIds.includes(
-                                fontAsset.fontAssetId,
-                              );
-                              return (
-                                <button
-                                  key={fontAsset.fontAssetId}
-                                  className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left ${selectedFont ? "border-primary bg-primary/5" : ""}`}
-                                  onClick={() =>
-                                    updateBrandKit({
-                                      fontAssetIds: selectedFont
-                                        ? currentBrandKit.fontAssetIds.filter(
-                                            (id) => id !== fontAsset.fontAssetId,
-                                          )
-                                        : [...currentBrandKit.fontAssetIds, fontAsset.fontAssetId],
-                                    })
-                                  }
-                                >
-                                  <span style={{ fontFamily: fontAsset.family }}>
-                                    {fontAsset.family}
-                                  </span>
-                                  <span className="text-xs text-muted-foreground">
-                                    {selectedFont ? "Bật" : "Tắt"}
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
-                        Tạo bộ thương hiệu để lưu bảng màu, font và logo cho editor.
-                      </div>
-                    )}
-                  </div>
-                </TabsContent>
               </Tabs>
             </aside>
           ) : (
@@ -4980,6 +4936,10 @@ export function DesignWorkspace({
 
 function ToolbarDivider() {
   return <div className="mx-0.5 h-6 w-px shrink-0 bg-border" aria-hidden />;
+}
+
+function ToolbarGroup({ children }: { children: ReactNode }) {
+  return <div className="flex shrink-0 items-center gap-0.5 p-0.5">{children}</div>;
 }
 
 function DesignStage({
@@ -5006,9 +4966,9 @@ function DesignStage({
   onStartTextEdit,
   onCommitTextEdit,
   onCancelTextEdit,
-  onStageMouseDown,
+  onStagePointerDown,
   onSelect,
-  onMove,
+  onMove: onMoveElement,
   onMoveCommit,
   onResize,
   onResizeMany,
@@ -5046,7 +5006,7 @@ function DesignStage({
   onStartTextEdit: (elementId: string) => void;
   onCommitTextEdit: (textValue?: string, textRuns?: DesignTextRun[]) => void;
   onCancelTextEdit: () => void;
-  onStageMouseDown: (event: React.MouseEvent<HTMLDivElement>) => void;
+  onStagePointerDown: (event: React.PointerEvent<HTMLDivElement>) => void;
   onSelect: (elementId: string | null, additive: boolean) => void;
   onMove: (payload: MovePayload) => void;
   onMoveCommit: () => void;
@@ -5071,8 +5031,25 @@ function DesignStage({
   const guideColor = "rgba(56,189,248,0.9)";
   const [previewSnapLines, setPreviewSnapLines] = useState<SnapLine[]>([]);
   const [previewSnapTargetIds, setPreviewSnapTargetIds] = useState<string[]>([]);
+  const [activeTransformKind, setActiveTransformKind] = useState<"move" | "resize" | null>(null);
   const previewSnapSignatureRef = useRef("");
-  const activeSnapLines = previewSnapLines.length ? previewSnapLines : snapLines;
+  const canvasCenterLines =
+    activeTransformKind !== null
+      ? [
+          { axis: "x" as const, value: page.width / 2 },
+          { axis: "y" as const, value: page.height / 2 },
+        ]
+      : [];
+  const activeSnapLines = [
+    ...canvasCenterLines,
+    ...(previewSnapLines.length ? previewSnapLines : snapLines),
+  ].filter(
+    (line, index, lines) =>
+      lines.findIndex(
+        (candidate) =>
+          candidate.axis === line.axis && Math.abs(candidate.value - line.value) < 0.5,
+      ) === index,
+  );
   const activeSnapTargetIds = previewSnapTargetIds.length ? previewSnapTargetIds : snapTargetIds;
   const setLiveSnapState = useCallback((lines: SnapLine[], targetIds: string[]) => {
     const signature = `${lines
@@ -5099,10 +5076,10 @@ function DesignStage({
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div
-            className="design-canvas-page relative overflow-visible bg-background"
+            className="design-canvas-page relative overflow-visible bg-background touch-none"
             data-design-canvas
             style={{ width: page.width * scale, height: page.height * scale }}
-            onMouseDown={onStageMouseDown}
+            onPointerDown={onStagePointerDown}
           >
             {showGuides
               ? page.guides?.map((guide) => (
@@ -5258,7 +5235,7 @@ function DesignStage({
                           onStartImageCrop(element.elementId);
                         }
                       }}
-                      onMouseDown={(event) => {
+                      onPointerDown={(event) => {
                         if (isEditingText || toolIsPan) return;
                         event.stopPropagation();
                         const additive = event.shiftKey || event.ctrlKey || event.metaKey;
@@ -5300,6 +5277,7 @@ function DesignStage({
                         const pointerOffsetX = startPoint.x - element.x;
                         const pointerOffsetY = startPoint.y - element.y;
                         let latestMovePayload: MovePayload | null = null;
+                        setActiveTransformKind("move");
                         const scheduleMovePreview = createRafScheduler((payload: MovePayload) => {
                           const primaryOrigin = payload.originById[payload.elementId];
                           if (!primaryOrigin) return;
@@ -5337,7 +5315,7 @@ function DesignStage({
                             previewCache,
                           );
                         });
-                        const onMouseMove = (moveEvent: MouseEvent) => {
+                        const handlePointerMove = (moveEvent: PointerEvent) => {
                           const point = getCanvasPoint(
                             canvas,
                             scale,
@@ -5363,19 +5341,30 @@ function DesignStage({
                             nextPrimaryY,
                           });
                         };
-                        const onMouseUp = () => {
-                          window.removeEventListener("mousemove", onMouseMove);
-                          window.removeEventListener("mouseup", onMouseUp);
+                        const onEnd = () => {
                           scheduleMovePreview.flush();
-                          if (latestMovePayload) onMove(latestMovePayload);
+                          if (latestMovePayload) onMoveElement(latestMovePayload);
                           onMoveCommit();
                           clearPreviewSnapState();
+                          setActiveTransformKind(null);
                           window.requestAnimationFrame(() =>
                             resetPreviewMarkers(canvas, { restoreTransform: true }),
                           );
                         };
-                        window.addEventListener("mousemove", onMouseMove);
-                        window.addEventListener("mouseup", onMouseUp);
+                        const onCancel = () => {
+                          scheduleMovePreview.cancel();
+                          onMoveCommit();
+                          clearPreviewSnapState();
+                          setActiveTransformKind(null);
+                          window.requestAnimationFrame(() =>
+                            resetPreviewMarkers(canvas, { restoreTransform: true }),
+                          );
+                        };
+                        startPointerSession(event, {
+                          onMove: handlePointerMove,
+                          onEnd,
+                          onCancel,
+                        });
                       }}
                       style={{
                         position: "absolute",
@@ -5528,7 +5517,7 @@ function DesignStage({
                             }}
                           />
                           <button
-                            onMouseDown={(event) => {
+                            onPointerDown={(event) => {
                               event.stopPropagation();
                               const canvas = (event.currentTarget as HTMLElement).closest(
                                 "[data-design-canvas]",
@@ -5552,6 +5541,7 @@ function DesignStage({
                                 element.elementId,
                               ]);
                               let latestRotatePayload: ResizePayload | null = null;
+                              setActiveTransformKind("resize");
                               const scheduleRotate = createRafScheduler(
                                 (move: { clientX: number; clientY: number; shiftKey: boolean }) => {
                                   const point = getCanvasPoint(
@@ -5585,23 +5575,27 @@ function DesignStage({
                                   );
                                 },
                               );
-                              const onMouseMove = (moveEvent: MouseEvent) => {
+                              const onMove = (moveEvent: PointerEvent) => {
                                 scheduleRotate({
                                   clientX: moveEvent.clientX,
                                   clientY: moveEvent.clientY,
                                   shiftKey: moveEvent.shiftKey,
                                 });
                               };
-                              const onMouseUp = () => {
-                                window.removeEventListener("mousemove", onMouseMove);
-                                window.removeEventListener("mouseup", onMouseUp);
+                              const onEnd = () => {
                                 scheduleRotate.flush();
                                 resetPreviewMarkers(canvas, { restoreTransform: true });
                                 if (latestRotatePayload) onResize(latestRotatePayload);
                                 onResizeCommit();
+                                setActiveTransformKind(null);
                               };
-                              window.addEventListener("mousemove", onMouseMove);
-                              window.addEventListener("mouseup", onMouseUp);
+                              const onCancel = () => {
+                                scheduleRotate.cancel();
+                                resetPreviewMarkers(canvas, { restoreTransform: true });
+                                onResizeCommit();
+                                setActiveTransformKind(null);
+                              };
+                              startPointerSession(event, { onMove, onEnd, onCancel });
                             }}
                             style={{
                               position: "absolute",
@@ -5627,7 +5621,7 @@ function DesignStage({
                           {RESIZE_HANDLES.map((handle) => (
                             <button
                               key={handle.key}
-                              onMouseDown={(event) => {
+                              onPointerDown={(event) => {
                                 event.stopPropagation();
                                 const canvas = (event.currentTarget as HTMLElement).closest(
                                   "[data-design-canvas]",
@@ -5647,6 +5641,7 @@ function DesignStage({
                                   element.elementId,
                                 ]);
                                 let latestResizePayload: ResizePayload | null = null;
+                                setActiveTransformKind("resize");
                                 const scheduleResize = createRafScheduler(
                                   (move: {
                                     clientX: number;
@@ -5699,7 +5694,7 @@ function DesignStage({
                                     );
                                   },
                                 );
-                                const onMouseMove = (moveEvent: MouseEvent) => {
+                                const onMove = (moveEvent: PointerEvent) => {
                                   scheduleResize({
                                     clientX: moveEvent.clientX,
                                     clientY: moveEvent.clientY,
@@ -5707,17 +5702,22 @@ function DesignStage({
                                     altKey: moveEvent.altKey,
                                   });
                                 };
-                                const onMouseUp = () => {
-                                  window.removeEventListener("mousemove", onMouseMove);
-                                  window.removeEventListener("mouseup", onMouseUp);
+                                const onEnd = () => {
                                   scheduleResize.flush();
                                   if (latestResizePayload) onResize(latestResizePayload);
                                   onResizeCommit();
                                   clearPreviewSnapState();
+                                  setActiveTransformKind(null);
                                   window.requestAnimationFrame(() => resetPreviewMarkers(canvas));
                                 };
-                                window.addEventListener("mousemove", onMouseMove);
-                                window.addEventListener("mouseup", onMouseUp);
+                                const onCancel = () => {
+                                  scheduleResize.cancel();
+                                  onResizeCommit();
+                                  clearPreviewSnapState();
+                                  setActiveTransformKind(null);
+                                  window.requestAnimationFrame(() => resetPreviewMarkers(canvas));
+                                };
+                                startPointerSession(event, { onMove, onEnd, onCancel });
                               }}
                               style={{
                                 position: "absolute",
@@ -5764,7 +5764,7 @@ function DesignStage({
                   {RESIZE_HANDLES.map((handle) => (
                     <button
                       key={handle.key}
-                      onMouseDown={(event) => {
+                      onPointerDown={(event) => {
                         event.stopPropagation();
                         const canvas = (event.currentTarget as HTMLElement).closest(
                           "[data-design-canvas]",
@@ -5778,6 +5778,7 @@ function DesignStage({
                         const previewCache = createPreviewNodeCache(canvas, selectedIds);
 
                         let latestMultiResizePayloads: ResizePayload[] = [];
+                        setActiveTransformKind("resize");
                         const scheduleMultiResize = createRafScheduler(
                           (move: {
                             clientX: number;
@@ -5833,7 +5834,7 @@ function DesignStage({
                             }
                           },
                         );
-                        const onMouseMove = (moveEvent: MouseEvent) => {
+                        const onMove = (moveEvent: PointerEvent) => {
                           scheduleMultiResize({
                             clientX: moveEvent.clientX,
                             clientY: moveEvent.clientY,
@@ -5841,16 +5842,20 @@ function DesignStage({
                             altKey: moveEvent.altKey,
                           });
                         };
-                        const onMouseUp = () => {
-                          window.removeEventListener("mousemove", onMouseMove);
-                          window.removeEventListener("mouseup", onMouseUp);
+                        const onEnd = () => {
                           scheduleMultiResize.flush();
                           onResizeMany(latestMultiResizePayloads);
                           onResizeCommit();
+                          setActiveTransformKind(null);
                           window.requestAnimationFrame(() => resetPreviewMarkers(canvas));
                         };
-                        window.addEventListener("mousemove", onMouseMove);
-                        window.addEventListener("mouseup", onMouseUp);
+                        const onCancel = () => {
+                          scheduleMultiResize.cancel();
+                          onResizeCommit();
+                          setActiveTransformKind(null);
+                          window.requestAnimationFrame(() => resetPreviewMarkers(canvas));
+                        };
+                        startPointerSession(event, { onMove, onEnd, onCancel });
                       }}
                       style={{
                         position: "absolute",
@@ -5970,10 +5975,12 @@ function CompactColorControl({
   label,
   value,
   onChange,
+  onCommit,
 }: {
   label: string;
   value: string;
   onChange: (color: string) => void;
+  onCommit?: (color: string) => void;
 }) {
   return (
     <div className="flex items-center gap-2 rounded-lg border bg-background px-2 py-2">
@@ -5991,7 +5998,11 @@ function CompactColorControl({
           </Button>
         </PopoverTrigger>
         <PopoverContent align="end" className="w-64 p-3">
-          <ColorPicker value={value} onChange={onChange} />
+          <ColorPicker
+            value={value}
+            onChange={onChange}
+            onCommit={onCommit ?? onChange}
+          />
         </PopoverContent>
       </Popover>
     </div>

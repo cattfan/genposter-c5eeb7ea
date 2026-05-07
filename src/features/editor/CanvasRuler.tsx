@@ -16,6 +16,67 @@ interface CanvasRulerProps {
   onRemoveGuide: (guideId: string) => void;
 }
 
+type PointerSessionHandlers = {
+  onMove?: (event: PointerEvent) => void;
+  onEnd?: (event: PointerEvent | Event) => void;
+  onCancel?: (event: PointerEvent | Event) => void;
+};
+
+function startPointerSession(
+  event: React.PointerEvent<HTMLElement>,
+  { onMove, onEnd, onCancel }: PointerSessionHandlers,
+) {
+  const target = event.currentTarget;
+  const pointerId = event.pointerId;
+  let ended = false;
+  try {
+    target.setPointerCapture(pointerId);
+  } catch {
+    // Ignore browsers that release capture early.
+  }
+
+  const cleanup = () => {
+    target.removeEventListener("pointermove", handleMove);
+    target.removeEventListener("pointerup", handleEnd);
+    target.removeEventListener("pointercancel", handleCancel);
+    target.removeEventListener("lostpointercapture", handleCancel);
+    window.removeEventListener("blur", handleCancel);
+    try {
+      if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId);
+    } catch {
+      // Already released.
+    }
+  };
+
+  const finish = (handler: PointerSessionHandlers["onEnd"], nextEvent: PointerEvent | Event) => {
+    if (ended) return;
+    ended = true;
+    cleanup();
+    handler?.(nextEvent);
+  };
+
+  function handleMove(nextEvent: PointerEvent) {
+    if (nextEvent.pointerId !== pointerId) return;
+    onMove?.(nextEvent);
+  }
+
+  function handleEnd(nextEvent: PointerEvent) {
+    if (nextEvent.pointerId !== pointerId) return;
+    finish(onEnd, nextEvent);
+  }
+
+  function handleCancel(nextEvent: PointerEvent | Event) {
+    if (nextEvent instanceof PointerEvent && nextEvent.pointerId !== pointerId) return;
+    finish(onCancel ?? onEnd, nextEvent);
+  }
+
+  target.addEventListener("pointermove", handleMove);
+  target.addEventListener("pointerup", handleEnd);
+  target.addEventListener("pointercancel", handleCancel);
+  target.addEventListener("lostpointercapture", handleCancel);
+  window.addEventListener("blur", handleCancel);
+}
+
 export function CanvasRuler({
   pageWidth,
   pageHeight,
@@ -29,7 +90,7 @@ export function CanvasRuler({
   const containerRef = useRef<HTMLDivElement>(null);
 
   const startDrag = useCallback(
-    (axis: "x" | "y", e: React.MouseEvent) => {
+    (axis: "x" | "y", e: React.PointerEvent<HTMLDivElement>) => {
       e.preventDefault();
       e.stopPropagation();
       setDragAxis(axis);
@@ -38,7 +99,7 @@ export function CanvasRuler({
       const canvasEl = container.querySelector("[data-design-canvas]") as HTMLElement | null;
       if (!canvasEl) return;
 
-      const onMove = (ev: MouseEvent) => {
+      const onMove = (ev: PointerEvent) => {
         const rect = canvasEl.getBoundingClientRect();
         if (axis === "x") {
           const val = (ev.clientX - rect.left) / scale;
@@ -48,31 +109,30 @@ export function CanvasRuler({
           setDragValue(val);
         }
       };
-      const onUp = (ev: MouseEvent) => {
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
+      const onUp = (ev: PointerEvent | Event) => {
         setDragAxis(null);
         setDragValue(null);
         const rect = canvasEl.getBoundingClientRect();
+        const clientX = ev instanceof PointerEvent ? ev.clientX : 0;
+        const clientY = ev instanceof PointerEvent ? ev.clientY : 0;
         let val: number;
         if (axis === "x") {
-          val = (ev.clientX - rect.left) / scale;
+          val = (clientX - rect.left) / scale;
         } else {
-          val = (ev.clientY - rect.top) / scale;
+          val = (clientY - rect.top) / scale;
         }
         // Only add if within canvas bounds
         if (val > 0 && (axis === "x" ? val < pageWidth : val < pageHeight)) {
           onAddGuide(axis, Math.round(val));
         }
       };
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
+      startPointerSession(e, { onMove, onEnd: onUp, onCancel: onUp });
     },
     [scale, pageWidth, pageHeight, onAddGuide],
   );
 
   const handleGuideDrag = useCallback(
-    (guide: DesignGuide, e: React.MouseEvent) => {
+    (guide: DesignGuide, e: React.PointerEvent<HTMLDivElement>) => {
       e.preventDefault();
       e.stopPropagation();
       const container = containerRef.current;
@@ -80,7 +140,7 @@ export function CanvasRuler({
       const canvasEl = container.querySelector("[data-design-canvas]") as HTMLElement | null;
       if (!canvasEl) return;
 
-      const onMove = (ev: MouseEvent) => {
+      const onMove = (ev: PointerEvent) => {
         const rect = canvasEl.getBoundingClientRect();
         if (guide.axis === "x") {
           const val = (ev.clientX - rect.left) / scale;
@@ -92,25 +152,24 @@ export function CanvasRuler({
           setDragValue(val);
         }
       };
-      const onUp = (ev: MouseEvent) => {
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
+      const onUp = (ev: PointerEvent | Event) => {
         setDragAxis(null);
         setDragValue(null);
         const rect = canvasEl.getBoundingClientRect();
+        const clientX = ev instanceof PointerEvent ? ev.clientX : 0;
+        const clientY = ev instanceof PointerEvent ? ev.clientY : 0;
         let val: number;
         if (guide.axis === "x") {
-          val = (ev.clientX - rect.left) / scale;
+          val = (clientX - rect.left) / scale;
         } else {
-          val = (ev.clientY - rect.top) / scale;
+          val = (clientY - rect.top) / scale;
         }
         // If dragged off canvas, remove guide
         if (val <= 0 || (guide.axis === "x" ? val >= pageWidth : val >= pageHeight)) {
           onRemoveGuide(guide.guideId);
         }
       };
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
+      startPointerSession(e, { onMove, onEnd: onUp, onCancel: onUp });
     },
     [scale, pageWidth, pageHeight, onRemoveGuide],
   );
@@ -139,7 +198,7 @@ export function CanvasRuler({
           zIndex: 40,
           overflow: "hidden",
         }}
-        onMouseDown={(e) => startDrag("x", e)}
+        onPointerDown={(e) => startDrag("x", e)}
       >
         <svg width={pageWidth * scale} height={RULER_SIZE} className="block">
           {hTicks.map((val) => {
@@ -182,7 +241,7 @@ export function CanvasRuler({
           zIndex: 40,
           overflow: "hidden",
         }}
-        onMouseDown={(e) => startDrag("y", e)}
+        onPointerDown={(e) => startDrag("y", e)}
       >
         <svg width={RULER_SIZE} height={pageHeight * scale} className="block">
           {vTicks.map((val) => {
@@ -251,7 +310,7 @@ export function CanvasRuler({
                 }),
             zIndex: 41,
           }}
-          onMouseDown={(e) => handleGuideDrag(guide, e)}
+          onPointerDown={(e) => handleGuideDrag(guide, e)}
         >
           <div
             className="size-full rounded-sm bg-primary/60"

@@ -48,7 +48,7 @@ export interface DesignEditorState {
   };
 }
 
-type CommitOptions = {
+export type CommitOptions = {
   history?: boolean;
   nextSelection?: DesignSelectionState;
 };
@@ -581,12 +581,12 @@ export function useDesignEditor(document: DesignDocument) {
   );
 
   const updatePage = useCallback(
-    (pageId: string, patch: Partial<DesignPage>) => {
+    (pageId: string, patch: Partial<DesignPage>, options?: CommitOptions) => {
       commitDocument((next) => {
         const page = next.pages.find((item) => item.pageId === pageId);
         if (!page) return;
         Object.assign(page, patch);
-      });
+      }, options);
     },
     [commitDocument],
   );

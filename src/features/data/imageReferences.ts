@@ -103,6 +103,10 @@ export function getAssetEntityIds(assets: Asset[]) {
   return new Set(assets.filter(isUsableImageAsset).map((asset) => asset.entityId));
 }
 
+export function entityHasUsableImageAsset(entity: Entity, assetEntityIds: Set<string>) {
+  return assetEntityIds.has(entity.entityId);
+}
+
 export function entityHasImageSource(entity: Entity, assetEntityIds: Set<string>) {
-  return assetEntityIds.has(entity.entityId) || entityHasImageReference(entity);
+  return entityHasUsableImageAsset(entity, assetEntityIds) || entityHasImageReference(entity);
 }

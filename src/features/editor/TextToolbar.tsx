@@ -27,6 +27,7 @@ import {
   Underline,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ColorPicker } from "./ColorPicker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -86,10 +87,6 @@ function styleNumber(
   return clampNumber(typeof value === "number" ? value : fallback, min, max);
 }
 
-function shouldAllowNativeToolbarControl(target: EventTarget | null): boolean {
-  return target instanceof HTMLInputElement && target.type === "color";
-}
-
 function ToolbarColorInput({
   label,
   value,
@@ -100,18 +97,21 @@ function ToolbarColorInput({
   onChange: (color: string) => void;
 }) {
   return (
-    <div className="relative size-7 overflow-hidden rounded-md border bg-background">
-      <span className="absolute inset-1 rounded-sm border" style={{ background: value }} />
-      <Input
-        type="color"
-        value={value}
-        aria-label={label}
-        title={label}
-        onInput={(event) => onChange(event.currentTarget.value)}
-        onChange={(event) => onChange(event.currentTarget.value)}
-        className="absolute inset-0 size-full cursor-pointer opacity-0"
-      />
-    </div>
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button type="button" size="icon" variant="ghost" className="size-7" aria-label={label} title={label}>
+          <span className="size-4 rounded-sm border" style={{ background: value }} />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-64 p-3"
+        side="top"
+        align="start"
+        onOpenAutoFocus={(event) => event.preventDefault()}
+      >
+        <ColorPicker value={value} onChange={onChange} onCommit={onChange} />
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -369,12 +369,12 @@ export function TextToolbar({
 
   return (
     <div
-      className="pointer-events-auto absolute left-1/2 top-[-52px] z-50 flex w-max -translate-x-1/2 flex-nowrap items-center gap-0.5 whitespace-nowrap rounded-lg border bg-card px-1 py-0.5 shadow-lg"
+      className="pointer-events-auto absolute left-1/2 top-[-52px] z-50 flex w-max -translate-x-1/2 flex-nowrap items-center gap-0.5 overflow-visible whitespace-nowrap rounded-md bg-card/95 px-1 py-0.5 shadow-lg ring-1 ring-border/70"
+      onPointerDown={(e) => {
+        e.stopPropagation();
+      }}
       onMouseDown={(e) => {
         e.stopPropagation();
-        if (!shouldAllowNativeToolbarControl(e.target)) {
-          e.preventDefault();
-        }
       }}
     >
       {showShapeControls ? (
@@ -743,13 +743,10 @@ export function TextToolbar({
       {/* Color */}
       <div className="ml-0.5 flex items-center">
         <Label className="sr-only">Màu chữ</Label>
-        <Input
-          type="color"
+        <ToolbarColorInput
+          label="Màu chữ"
           value={style.color ?? "#0f172a"}
-          onInput={(event) => applyTextStyle({ color: event.currentTarget.value })}
-          onChange={(event) => applyTextStyle({ color: event.target.value })}
-          aria-label="Màu chữ"
-          className="size-7 cursor-pointer rounded border p-0.5"
+          onChange={(color) => applyTextStyle({ color })}
         />
       </div>
 
@@ -978,16 +975,15 @@ export function TextToolbar({
             </div>
             <div className="flex items-center justify-between gap-3">
               <Label className="text-xs text-muted-foreground">Màu</Label>
-              <Input
-                type="color"
+              <ToolbarColorInput
+                label="Màu viền chữ"
                 value={safeColor(style.textStrokeColor, DEFAULT_STROKE_COLOR)}
-                onChange={(event) =>
+                onChange={(color) =>
                   onUpdateStyle({
-                    textStrokeColor: event.target.value,
+                    textStrokeColor: color,
                     textStrokeWidth: hasOutline ? style.textStrokeWidth : 2,
                   })
                 }
-                className="h-8 w-12 cursor-pointer p-1"
               />
             </div>
           </div>
@@ -1026,32 +1022,30 @@ export function TextToolbar({
             <div className="grid grid-cols-2 gap-2">
               <div className="flex flex-col gap-1">
                 <Label className="text-xs text-muted-foreground">Từ</Label>
-                <Input
-                  type="color"
+                <ToolbarColorInput
+                  label="Từ"
                   value={safeColor(style.gradientFrom, DEFAULT_GRADIENT_FROM)}
-                  onChange={(event) =>
+                  onChange={(color) =>
                     onUpdateStyle({
                       gradientEnabled: true,
-                      gradientFrom: event.target.value,
+                      gradientFrom: color,
                       gradientTo: style.gradientTo ?? DEFAULT_GRADIENT_TO,
                     })
                   }
-                  className="h-8 cursor-pointer p-1"
                 />
               </div>
               <div className="flex flex-col gap-1">
                 <Label className="text-xs text-muted-foreground">Đến</Label>
-                <Input
-                  type="color"
+                <ToolbarColorInput
+                  label="Đến"
                   value={safeColor(style.gradientTo, DEFAULT_GRADIENT_TO)}
-                  onChange={(event) =>
+                  onChange={(color) =>
                     onUpdateStyle({
                       gradientEnabled: true,
                       gradientFrom: style.gradientFrom ?? DEFAULT_GRADIENT_FROM,
-                      gradientTo: event.target.value,
+                      gradientTo: color,
                     })
                   }
-                  className="h-8 cursor-pointer p-1"
                 />
               </div>
             </div>
@@ -1112,18 +1106,17 @@ export function TextToolbar({
             </div>
             <div className="flex items-center justify-between gap-3">
               <Label className="text-xs text-muted-foreground">Màu</Label>
-              <Input
-                type="color"
+              <ToolbarColorInput
+                label="Màu bóng chữ"
                 value={safeColor(style.textShadowColor, DEFAULT_TEXT_SHADOW_COLOR)}
-                onChange={(event) =>
+                onChange={(color) =>
                   onUpdateStyle({
-                    textShadowColor: event.target.value,
+                    textShadowColor: color,
                     textShadowBlur: style.textShadowBlur ?? 8,
                     textShadowX: style.textShadowX ?? 2,
                     textShadowY: style.textShadowY ?? 4,
                   })
                 }
-                className="h-8 w-12 cursor-pointer p-1"
               />
             </div>
             <div className="flex flex-col gap-2">

@@ -25,7 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  entityHasImageSource,
+  entityHasUsableImageAsset,
   getAssetEntityIds,
   getEntityImageReferences,
   getEntityImageReferencesWithAssets,
@@ -294,12 +294,16 @@ export function BulkImageUpload() {
   }, [pending, visiblePending]);
 
   const finishImportPrep = (next: PendingFile[]) => {
-    setPending(next);
-    setVisibleCount(Math.min(PREVIEW_PAGE_SIZE, next.length));
-    const matched = next.filter((item) => item.manualEntityId).length;
-    const needsReview = next.filter((item) => item.match.needsReview).length;
+    const autoAssigned =
+      entities.length === 1
+        ? next.map((item) => ({ ...item, manualEntityId: item.manualEntityId ?? entities[0].entityId }))
+        : next;
+    setPending(autoAssigned);
+    setVisibleCount(Math.min(PREVIEW_PAGE_SIZE, autoAssigned.length));
+    const matched = autoAssigned.filter((item) => item.manualEntityId).length;
+    const needsReview = autoAssigned.filter((item) => item.match.needsReview).length;
     toast.success(
-      `${next.length} ảnh, khớp tự động ${matched}/${next.length}, cần review ${needsReview}`,
+      `${autoAssigned.length} ảnh, khớp tự động ${matched}/${autoAssigned.length}, cần review ${needsReview}`,
     );
   };
 
@@ -458,7 +462,7 @@ export function BulkImageUpload() {
     return map;
   }, [allAssets]);
   const entitiesWithoutImage = useMemo(
-    () => entities.filter((entity) => !entityHasImageSource(entity, assetEntityIds)),
+    () => entities.filter((entity) => !entityHasUsableImageAsset(entity, assetEntityIds)),
     [assetEntityIds, entities],
   );
   const driveImportCandidates = useMemo(
@@ -602,7 +606,7 @@ export function BulkImageUpload() {
             const staleAssets = (assetsByEntityId.get(entity.entityId) ?? []).filter(
               isImageReferenceAsset,
             );
-            await db.transaction("rw", [db.assets, db.blobs], async () => {
+            await db.transaction("rw", db.assets, db.blobs, async () => {
               if (staleAssets.length) {
                 await db.assets.bulkDelete(staleAssets.map((asset) => asset.assetId));
               }
@@ -677,7 +681,7 @@ export function BulkImageUpload() {
           <CardHeader className="pb-3">
             <CardTitle>Ghép ảnh vào quán</CardTitle>
             <CardDescription>
-              Tải ảnh từ Drive theo cột Link Drive/imageRef trong sheet. Chọn file thủ công chỉ dùng khi cần.
+              Tải ảnh từ Drive theo cột Link Drive/imageRef trong sheet, hoặc chọn file thủ công từ máy.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
@@ -799,7 +803,7 @@ export function BulkImageUpload() {
                   <AlertTriangle className="text-destructive" />
                 )}
               </div>
-              <div className="text-sm text-muted-foreground">Thiếu nguồn ảnh</div>
+              <div className="text-sm text-muted-foreground">Thiếu ảnh đọc được</div>
             </div>
             {pending.length > 0 ? (
               <div className="rounded-lg border p-3">
@@ -1039,7 +1043,7 @@ export function BulkImageUpload() {
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between gap-3">
-            <CardTitle>Quán thiếu nguồn ảnh</CardTitle>
+            <CardTitle>Quán thiếu ảnh đọc được</CardTitle>
             <Badge variant={entitiesWithoutImage.length === 0 ? "default" : "destructive"}>
               {entitiesWithoutImage.length}/{entities.length}
             </Badge>
@@ -1048,7 +1052,7 @@ export function BulkImageUpload() {
         <CardContent>
           {entitiesWithoutImage.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Tất cả quán đã có asset hoặc link/folder ảnh.
+              Tất cả quán đã có ảnh đọc được.
             </p>
           ) : (
             <div className="grid max-h-64 grid-cols-1 gap-2 overflow-y-auto text-sm md:grid-cols-2 xl:grid-cols-3">

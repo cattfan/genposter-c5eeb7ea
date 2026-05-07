@@ -50,10 +50,11 @@ import {
 import { PageContainer, PageHeader } from "@/components/PageHeader";
 import { BulkImageUpload } from "@/features/data/BulkImageUpload";
 import {
-  entityHasImageSource,
+  entityHasUsableImageAsset,
   getAssetEntityIds,
   getEntityImageReferences,
   getEntityImageReferencesWithAssets,
+  isUsableImageAsset,
   looksLikeDirectImageReference,
   looksLikeDriveReference,
 } from "@/features/data/imageReferences";
@@ -842,7 +843,7 @@ function DataPage() {
   const assetGroups = useMemo(() => {
     const groups = new Map<string, { entity?: Entity; entityId: string; assets: Asset[] }>();
 
-    for (const asset of assets) {
+    for (const asset of assets.filter(isUsableImageAsset)) {
       const entity = entityMap.get(asset.entityId);
       const key = entity?.entityId ?? `missing:${asset.entityId}`;
       const current = groups.get(key) ?? {
@@ -873,7 +874,7 @@ function DataPage() {
     return map;
   }, [assets]);
   const missingImageCount = useMemo(
-    () => entities.filter((entity) => !entityHasImageSource(entity, assetEntityIds)).length,
+    () => entities.filter((entity) => !entityHasUsableImageAsset(entity, assetEntityIds)).length,
     [assetEntityIds, entities],
   );
   const imageReferenceEntityCount = useMemo(
@@ -1376,7 +1377,7 @@ function DataPage() {
       <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <DataStat label="Quán/entity" value={entities.length} icon={<Store />} />
         <DataStat label="Nguồn ảnh trong sheet" value={imageReferenceEntityCount} icon={<LinkIcon />} />
-        <DataStat label="Asset ảnh đã tải" value={assets.length} icon={<ImageIcon />} />
+        <DataStat label="Ảnh đọc được" value={assets.filter(isUsableImageAsset).length} icon={<ImageIcon />} />
         <DataStat label="Sheet dữ liệu" value={sheetCount || 0} icon={<FileSpreadsheet />} />
       </div>
 
@@ -1389,7 +1390,7 @@ function DataPage() {
           <TabsTrigger value="import">Import</TabsTrigger>
           <TabsTrigger value="images">Ghép ảnh ({driveDownloadCandidateCount})</TabsTrigger>
           <TabsTrigger value="entities">Quán ({entities.length})</TabsTrigger>
-          <TabsTrigger value="assets">Ảnh ({assets.length})</TabsTrigger>
+          <TabsTrigger value="assets">Ảnh ({assets.filter(isUsableImageAsset).length})</TabsTrigger>
         </TabsList>
 
         <TabsContent value="import" className="mt-0 flex flex-col gap-4">
@@ -1848,7 +1849,7 @@ function DataPage() {
               </CardContent>
             </Card>
 
-            {assets.length === 0 ? (
+            {assetGroups.length === 0 ? (
               <Card>
                 <CardContent className="p-10 text-center text-sm text-muted-foreground">
                   Chưa có ảnh import.

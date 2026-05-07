@@ -1,5 +1,6 @@
-// Enhanced ColorPicker with swatches, recent colors, and hex input.
-import { useEffect, useRef, useState } from "react";
+// Enhanced ColorPicker with smooth drag preview, swatches, recent colors, and hex input.
+import { useCallback, useEffect, useRef, useState } from "react";
+import { HexColorPicker } from "react-colorful";
 import { Input } from "@/components/ui/input";
 
 const SWATCHES = [
@@ -13,14 +14,26 @@ const SWATCHES = [
 ];
 
 const MAX_RECENT = 12;
+const noop = () => {};
 
 interface ColorPickerProps {
   value: string;
   onChange: (color: string) => void;
+  onPreview?: (color: string) => void;
+  onCommit?: (color: string) => void;
   className?: string;
 }
 
-export function ColorPicker({ value, onChange, className }: ColorPickerProps) {
+function normalizeHex(value: string, fallback = "#000000") {
+  if (/^#[0-9a-fA-F]{6}$/.test(value)) return value.toLowerCase();
+  if (/^#[0-9a-fA-F]{3}$/.test(value)) {
+    const [, r, g, b] = value.toLowerCase();
+    return `#${r}${r}${g}${g}${b}${b}`;
+  }
+  return fallback;
+}
+
+export function ColorPicker({ value, onChange, onPreview, onCommit, className }: ColorPickerProps) {
   const [recent, setRecent] = useState<string[]>(() => {
     try {
       return JSON.parse(localStorage.getItem("genposter-recent-colors") ?? "[]");
@@ -28,53 +41,102 @@ export function ColorPicker({ value, onChange, className }: ColorPickerProps) {
       return [];
     }
   });
-  const [hexInput, setHexInput] = useState(value);
+  const safeValue = normalizeHex(value);
+  const previewColor = onPreview ?? noop;
+  const [draft, setDraft] = useState(safeValue);
+  const [hexInput, setHexInput] = useState(safeValue);
   const inputRef = useRef<HTMLInputElement>(null);
+  const frameRef = useRef<number | null>(null);
+  const latestPreviewRef = useRef(safeValue);
 
   useEffect(() => {
-    setHexInput(value);
+    const normalized = normalizeHex(value);
+    setDraft(normalized);
+    setHexInput(normalized);
+    latestPreviewRef.current = normalized;
   }, [value]);
 
-  const addRecent = (color: string) => {
-    const next = [color, ...recent.filter((c) => c !== color)].slice(0, MAX_RECENT);
-    setRecent(next);
-    try {
-      localStorage.setItem("genposter-recent-colors", JSON.stringify(next));
-    } catch { /* ignore */ }
-  };
+  useEffect(
+    () => () => {
+      if (frameRef.current !== null) window.cancelAnimationFrame(frameRef.current);
+    },
+    [],
+  );
+
+  const addRecent = useCallback((color: string) => {
+    const normalized = normalizeHex(color, color);
+    setRecent((current) => {
+      const next = [normalized, ...current.filter((c) => c !== normalized)].slice(0, MAX_RECENT);
+      try {
+        localStorage.setItem("genposter-recent-colors", JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
+  const schedulePreview = useCallback(
+    (color: string) => {
+      const normalized = normalizeHex(color, color);
+      latestPreviewRef.current = normalized;
+      setDraft(normalized);
+      if (frameRef.current !== null) return;
+      frameRef.current = window.requestAnimationFrame(() => {
+        frameRef.current = null;
+        previewColor(latestPreviewRef.current);
+      });
+    },
+    [previewColor],
+  );
+
+  const commitColor = useCallback(
+    (color = latestPreviewRef.current) => {
+      const normalized = normalizeHex(color, color);
+      if (frameRef.current !== null) {
+        window.cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+      }
+      latestPreviewRef.current = normalized;
+      setDraft(normalized);
+      setHexInput(normalized);
+      addRecent(normalized);
+      if (onCommit) onCommit(normalized);
+      else onChange(normalized);
+    },
+    [addRecent, onChange, onCommit],
+  );
 
   const handlePick = (color: string) => {
-    addRecent(color);
-    onChange(color);
+    schedulePreview(color);
+    commitColor(color);
   };
 
   const handleHexCommit = () => {
     let hex = hexInput.trim();
     if (!hex.startsWith("#")) hex = "#" + hex;
-    if (/^#[0-9a-fA-F]{3,8}$/.test(hex)) {
-      addRecent(hex);
-      onChange(hex);
+    if (/^#[0-9a-fA-F]{3}$|^#[0-9a-fA-F]{6}$/.test(hex)) {
+      commitColor(normalizeHex(hex));
     } else {
-      setHexInput(value);
+      setHexInput(draft);
     }
   };
 
   return (
     <div className={`space-y-2 ${className ?? ""}`}>
-      {/* Native color input + hex */}
+      <div
+        className="[&_.react-colorful]:w-full [&_.react-colorful]:h-36 [&_.react-colorful__hue]:h-3 [&_.react-colorful__last-control]:rounded-b-md [&_.react-colorful__pointer]:size-4 [&_.react-colorful__pointer]:border-2"
+        onPointerUp={() => commitColor()}
+        onPointerCancel={() => commitColor()}
+      >
+        <HexColorPicker color={draft} onChange={schedulePreview} />
+      </div>
+
+      {/* Preview + hex */}
       <div className="flex items-center gap-2">
-        <label className="relative flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded border">
-          <input
-            type="color"
-            value={value}
-            onChange={(e) => handlePick(e.target.value)}
-            className="absolute inset-0 cursor-pointer opacity-0"
-          />
-          <div
-            className="size-6 rounded-sm"
-            style={{ background: value }}
-          />
-        </label>
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded border">
+          <div className="size-6 rounded-sm" style={{ background: draft }} />
+        </div>
         <Input
           ref={inputRef}
           value={hexInput}

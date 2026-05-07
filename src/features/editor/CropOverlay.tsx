@@ -4,6 +4,67 @@ import type { ImageCrop } from "@/models";
 
 type Handle = "nw" | "ne" | "sw" | "se";
 
+type PointerSessionHandlers = {
+  onMove?: (event: PointerEvent) => void;
+  onEnd?: (event: PointerEvent | Event) => void;
+  onCancel?: (event: PointerEvent | Event) => void;
+};
+
+function startPointerSession(
+  event: React.PointerEvent<HTMLElement>,
+  { onMove, onEnd, onCancel }: PointerSessionHandlers,
+) {
+  const target = event.currentTarget;
+  const pointerId = event.pointerId;
+  let ended = false;
+  try {
+    target.setPointerCapture(pointerId);
+  } catch {
+    // Ignore already-released pointers.
+  }
+
+  const cleanup = () => {
+    target.removeEventListener("pointermove", handleMove);
+    target.removeEventListener("pointerup", handleEnd);
+    target.removeEventListener("pointercancel", handleCancel);
+    target.removeEventListener("lostpointercapture", handleCancel);
+    window.removeEventListener("blur", handleCancel);
+    try {
+      if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId);
+    } catch {
+      // Already released.
+    }
+  };
+
+  const finish = (handler: PointerSessionHandlers["onEnd"], nextEvent: PointerEvent | Event) => {
+    if (ended) return;
+    ended = true;
+    cleanup();
+    handler?.(nextEvent);
+  };
+
+  function handleMove(nextEvent: PointerEvent) {
+    if (nextEvent.pointerId !== pointerId) return;
+    onMove?.(nextEvent);
+  }
+
+  function handleEnd(nextEvent: PointerEvent) {
+    if (nextEvent.pointerId !== pointerId) return;
+    finish(onEnd, nextEvent);
+  }
+
+  function handleCancel(nextEvent: PointerEvent | Event) {
+    if (nextEvent instanceof PointerEvent && nextEvent.pointerId !== pointerId) return;
+    finish(onCancel ?? onEnd, nextEvent);
+  }
+
+  target.addEventListener("pointermove", handleMove);
+  target.addEventListener("pointerup", handleEnd);
+  target.addEventListener("pointercancel", handleCancel);
+  target.addEventListener("lostpointercapture", handleCancel);
+  window.addEventListener("blur", handleCancel);
+}
+
 export function CropOverlay({
   src,
   initial,
@@ -35,7 +96,7 @@ export function CropOverlay({
     return () => window.removeEventListener("keydown", onKey);
   }, [crop, onCommit, onCancel]);
 
-  const startDrag = (e: React.MouseEvent, handle: Handle | "move") => {
+  const startDrag = (e: React.PointerEvent<HTMLElement>, handle: Handle | "move") => {
     e.stopPropagation();
     e.preventDefault();
     const rect = ref.current?.getBoundingClientRect();
@@ -43,7 +104,7 @@ export function CropOverlay({
     const startX = e.clientX;
     const startY = e.clientY;
     const orig = { ...crop };
-    const onMove = (ev: MouseEvent) => {
+    const onMove = (ev: PointerEvent) => {
       const dx = (ev.clientX - startX) / rect.width;
       const dy = (ev.clientY - startY) / rect.height;
       let { x, y, w, h } = orig;
@@ -66,12 +127,7 @@ export function CropOverlay({
       }
       setCrop({ x, y, w, h });
     };
-    const onUp = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    startPointerSession(e, { onMove });
   };
 
   const handles: { h: Handle; style: React.CSSProperties }[] = [
@@ -90,7 +146,7 @@ export function CropOverlay({
         zIndex: 50,
         background: "rgba(0,0,0,0.5)",
       }}
-      onMouseDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
     >
       {/* Ảnh đầy đủ phía dưới (nhìn xuyên qua mask) */}
       <img
@@ -109,7 +165,7 @@ export function CropOverlay({
       />
       {/* Khung crop */}
       <div
-        onMouseDown={(e) => startDrag(e, "move")}
+        onPointerDown={(e) => startDrag(e, "move")}
         style={{
           position: "absolute",
           left: `${crop.x * 100}%`,
@@ -139,7 +195,7 @@ export function CropOverlay({
         {handles.map((hd) => (
           <div
             key={hd.h}
-            onMouseDown={(e) => startDrag(e, hd.h)}
+            onPointerDown={(e) => startDrag(e, hd.h)}
             style={{
               position: "absolute",
               width: 12,
