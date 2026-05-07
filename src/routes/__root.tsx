@@ -48,6 +48,10 @@ export const Route = createRootRoute({
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       { rel: "stylesheet", href: GOOGLE_FONTS_URL },
+      {
+        rel: "icon",
+        href: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%237c3aed'/%3E%3Ccircle cx='22' cy='24' r='7' fill='%23fff'/%3E%3Cpath d='M19 43h26L35 30l-7 8l-4-5z' fill='%23fff'/%3E%3C/svg%3E",
+      },
     ],
   }),
   shellComponent: RootShell,

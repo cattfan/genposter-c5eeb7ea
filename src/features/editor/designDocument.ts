@@ -104,7 +104,7 @@ export function createBlankDesignDocument(params?: {
 
 function isGeneratedCoverBackgroundSlot(slot: Slot, canvas: CanvasSize) {
   if (slot.kind !== "image" || slot.bindingPath !== "asset.cover") return false;
-  const name = slot.name.toLowerCase();
+  const name = (slot.name ?? "").toLowerCase();
   const coversCanvas =
     slot.x <= canvas.width * 0.05 &&
     slot.y <= canvas.height * 0.05 &&

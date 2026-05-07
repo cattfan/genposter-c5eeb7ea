@@ -55,7 +55,7 @@ interface Props {
 
 function isGeneratedCoverBackgroundSlot(slot: Slot, template: PageTemplate) {
   if (slot.kind !== "image" || slot.bindingPath !== "asset.cover") return false;
-  const name = slot.name.toLowerCase();
+  const name = (slot.name ?? "").toLowerCase();
   const coversCanvas =
     slot.x <= template.canvas.width * 0.05 &&
     slot.y <= template.canvas.height * 0.05 &&
@@ -141,8 +141,8 @@ export function PageRenderer({
         const firstEntityId = sectionItems.find((item) => item.entityId)?.entityId;
         if (firstEntityId) return entityMap.get(firstEntityId);
       }
-      if (effectiveSlotItems.length > 0) return undefined;
       if (slot.__cardEntityId) return entityMap.get(slot.__cardEntityId);
+      if (effectiveSlotItems.length > 0) return undefined;
       return entity;
     },
     [effectiveSlotItems.length, entity, entityMap, sectionItemsMap, slotEntityOverride],

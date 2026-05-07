@@ -5,6 +5,7 @@ import * as LucideIcons from "lucide-react";
 import { getIconData } from "@iconify/utils/lib/icon-set/get-icon";
 import { iconToSVG } from "@iconify/utils/lib/svg/build";
 import { iconToHTML } from "@iconify/utils/lib/svg/html";
+import type { IconifyJSON } from "@iconify/types";
 import type { AssetItem } from "@/models";
 
 const NOW = 1;
@@ -18,13 +19,7 @@ export type HeroiconComponent = ForwardRefExoticComponent<
 
 type IconStyleGroup = "line" | "solid" | "color";
 type IconifyCollectionKey = "mdi" | "fa6-solid" | "solar" | "fluent-emoji-flat";
-type IconifyCollection = {
-  prefix?: string;
-  width?: number;
-  height?: number;
-  icons: Record<string, unknown>;
-  aliases?: Record<string, unknown>;
-};
+type IconifyCollection = IconifyJSON;
 type IconifyMetadata = {
   categories?: Record<string, string[]>;
 };

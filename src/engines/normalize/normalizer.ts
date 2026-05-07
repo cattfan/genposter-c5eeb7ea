@@ -1,6 +1,10 @@
 import { nanoid } from "nanoid";
 import type { Asset, Entity } from "@/models";
-import { looksLikeDirectImageReference, looksLikeDriveReference } from "@/features/data/imageReferences";
+import {
+  cleanImageReferenceValue,
+  looksLikeDirectImageReference,
+  looksLikeDriveReference,
+} from "@/features/data/imageReferences";
 import { FIELD_ALIASES, FIELD_LABELS_VI, METADATA_FIELDS, normalizeKey, parseBool, parseList, parseNumber } from "./aliases";
 
 export interface RawRow {
@@ -59,8 +63,8 @@ export function normalizeRows(rows: RawRow[], mapping: FieldMapping, sheetName?:
     }
 
     const entityId = nanoid();
-    const imageRaw = std.image ? String(std.image).trim() : "";
-    const imagesRaw = parseList(std.images);
+    const imageRaw = cleanImageReferenceValue(std.image);
+    const imagesRaw = parseList(std.images).map(cleanImageReferenceValue).filter(Boolean);
     const allImageRefs = [imageRaw, ...imagesRaw].filter(Boolean);
     const downloadableImageRefs = allImageRefs.filter(
       (url) => looksLikeDriveReference(url) || !looksLikeDirectImageReference(url),
@@ -75,7 +79,12 @@ export function normalizeRows(rows: RawRow[], mapping: FieldMapping, sheetName?:
       if (v == null || v === "") continue;
       if (METADATA_FIELDS.has(k)) {
         const n = parseNumber(v, NaN);
-        metadata[k] = Number.isFinite(n) && k === "day" ? n : String(v).trim();
+        metadata[k] =
+          Number.isFinite(n) && k === "day"
+            ? n
+            : k === "imageRef"
+              ? cleanImageReferenceValue(v) || String(v).trim()
+              : String(v).trim();
       } else if (!(k in FIELD_ALIASES) && k !== "image" && k !== "images") {
         // Cột "lạ" không có trong alias chuẩn → giữ nguyên trong metadata để filterRules dùng
         metadata[k] = String(v).trim();

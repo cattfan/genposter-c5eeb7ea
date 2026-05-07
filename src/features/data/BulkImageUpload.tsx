@@ -303,14 +303,14 @@ export function BulkImageUpload() {
     const matched = autoAssigned.filter((item) => item.manualEntityId).length;
     const needsReview = autoAssigned.filter((item) => item.match.needsReview).length;
     toast.success(
-      `${autoAssigned.length} ảnh, khớp tự động ${matched}/${autoAssigned.length}, cần review ${needsReview}`,
+      `${autoAssigned.length} ảnh, tự tìm được quán ${matched}/${autoAssigned.length}, cần xem lại ${needsReview}`,
     );
   };
 
   const onFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     if (entities.length === 0) {
-      toast.error("Chưa có quán nào. Hãy import dữ liệu trước.");
+      toast.error("Chưa có dữ liệu nào. Hãy nhập dữ liệu trước.");
       return;
     }
 
@@ -335,7 +335,7 @@ export function BulkImageUpload() {
 
   const onPickDirectory = async () => {
     if (entities.length === 0) {
-      toast.error("Chưa có quán nào. Hãy import dữ liệu trước.");
+      toast.error("Chưa có dữ liệu nào. Hãy nhập dữ liệu trước.");
       return;
     }
 
@@ -384,7 +384,7 @@ export function BulkImageUpload() {
     );
     const matched = matches.filter((match) => match.autoAssign && match.matchedEntityId).length;
     const needsReview = matches.filter((match) => match.needsReview).length;
-    toast.success(`Đã match lại: ${matched}/${matches.length}, cần review ${needsReview}`);
+    toast.success(`Đã dò lại ảnh: tìm được ${matched}/${matches.length}, cần xem lại ${needsReview}`);
   };
 
   const setManual = (idx: number, entityId: string | null) => {
@@ -439,11 +439,11 @@ export function BulkImageUpload() {
 
       await db.assets.bulkPut(newAssets);
       toast.success(
-        `Đã import ${newAssets.length} ảnh vào ${new Set(newAssets.map((asset) => asset.entityId)).size} quán`,
+        `Đã nhập ${newAssets.length} ảnh vào ${new Set(newAssets.map((asset) => asset.entityId)).size} quán`,
       );
       setPending([]);
     } catch (error) {
-      toast.error("Lỗi khi import: " + (error as Error).message);
+      toast.error("Lỗi khi nhập ảnh: " + (error as Error).message);
     } finally {
       setBusy(false);
     }
@@ -502,16 +502,16 @@ export function BulkImageUpload() {
   const saveDriveRoot = async () => {
     const settings = await getSettings();
     await saveSettings({ ...settings, driveRootFolderUrl: driveRootUrl.trim() || undefined });
-    toast.success("Đã lưu root folder Drive");
+    toast.success("Đã lưu thư mục Drive gốc");
   };
 
   const importDriveImages = async () => {
     if (entities.length === 0) {
-      toast.error("Chưa có quán nào. Hãy import dữ liệu trước.");
+      toast.error("Chưa có dữ liệu nào. Hãy nhập dữ liệu trước.");
       return;
     }
     if (driveImportCandidates.length === 0) {
-      toast.success("Không có quán thiếu asset có Link Drive để tải.");
+      toast.success("Không có quán thiếu ảnh có link Drive để tải.");
       return;
     }
 
@@ -522,7 +522,7 @@ export function BulkImageUpload() {
       ),
     );
     if (hasNameOnlyRef && !rootUrl) {
-      toast.error("Có cột Link Drive dạng tên folder. Dán root folder Drive public trước.");
+      toast.error("Có cột ảnh dạng tên folder. Dán thư mục Drive gốc public trước, hoặc chọn thư mục ảnh từ máy.");
       return;
     }
 
@@ -679,9 +679,9 @@ export function BulkImageUpload() {
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle>Ghép ảnh vào quán</CardTitle>
+            <CardTitle>Bước 3: Ghép ảnh vào dữ liệu</CardTitle>
             <CardDescription>
-              Tải ảnh từ Drive theo cột Link Drive/imageRef trong sheet, hoặc chọn file thủ công từ máy.
+              Cách dễ nhất là chọn thư mục ảnh từ máy. Drive chỉ dùng khi bạn có thư mục public.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
@@ -706,7 +706,7 @@ export function BulkImageUpload() {
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative inline-flex">
                 <Button type="button" disabled={matching}>
-                  <ImagePlus /> Chọn ảnh
+                  <ImagePlus /> Chọn ảnh từ máy
                 </Button>
                 <input
                   type="file"
@@ -722,23 +722,23 @@ export function BulkImageUpload() {
                 />
               </div>
               <Button type="button" variant="outline" onClick={onPickDirectory} disabled={matching}>
-                <FolderOpen /> Chọn thư mục
+                <FolderOpen /> Chọn cả thư mục ảnh
               </Button>
               <Button
                 variant="outline"
                 onClick={rerunMatch}
                 disabled={pending.length === 0 || matching}
               >
-                <RefreshCw /> Match lại
+                <RefreshCw /> Dò lại ảnh
               </Button>
             </div>
 
             <div className="rounded-lg border bg-muted/20 p-4">
               <div className="mb-3 flex flex-col gap-1">
-                <Label>Root folder Google Drive public</Label>
+                <Label>Thư mục Drive gốc (tuỳ chọn)</Label>
                 <p className="text-xs text-muted-foreground">
-                  Nếu cột Link Drive là URL file/folder thì không cần root. Nếu là tên folder, app sẽ
-                  tìm trong root này.
+                  Không bắt buộc. Nếu chưa có Drive public, cứ chọn thư mục ảnh từ máy ở trên.
+                  Chỉ dán mục này khi muốn app tự tải ảnh từ Google Drive.
                 </p>
               </div>
               <div className="flex flex-col gap-2 sm:flex-row">
@@ -765,8 +765,8 @@ export function BulkImageUpload() {
               </Button>
               {shouldHighlightDriveDownload && (
                 <div className="mt-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-primary">
-                  Có {driveImportCandidates.length} quán có link ảnh trong sheet. Bấm nút này để tải
-                  ảnh về local.
+                  Có {driveImportCandidates.length} quán có tên folder/link ảnh trong sheet. Bạn có
+                  thể chọn thư mục ảnh từ máy, hoặc tải từ Drive nếu đã có thư mục Drive gốc public.
                 </div>
               )}
             </div>
@@ -790,7 +790,7 @@ export function BulkImageUpload() {
               <div className="text-sm text-muted-foreground">Ảnh đọc được</div>
               {allAssets.length !== usableAssets.length ? (
                 <div className="mt-1 text-xs text-muted-foreground">
-                  {allAssets.length - usableAssets.length} link cần tải về local
+                  {allAssets.length - usableAssets.length} link ảnh cần tải về máy trước khi dùng
                 </div>
               ) : null}
             </div>
@@ -804,6 +804,11 @@ export function BulkImageUpload() {
                 )}
               </div>
               <div className="text-sm text-muted-foreground">Thiếu ảnh đọc được</div>
+              {entitiesWithoutImage.length > 0 ? (
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Chưa ghép ảnh. Hãy chọn thư mục ảnh từ máy, hoặc tải Drive nếu có thư mục public.
+                </div>
+              ) : null}
             </div>
             {pending.length > 0 ? (
               <div className="rounded-lg border p-3">
@@ -897,10 +902,10 @@ export function BulkImageUpload() {
         <Card>
           <CardHeader className="flex flex-col gap-3 pb-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <CardTitle>Review trước khi import</CardTitle>
+              <CardTitle>Xem lại ảnh trước khi nhập</CardTitle>
               <CardDescription>
-                {pending.length} file, {matchedCount} đã gán, {pending.length - matchedCount} chưa
-                gán.
+                {pending.length} ảnh, {matchedCount} đã tìm được quán, {pending.length - matchedCount} chưa
+                tìm thấy.
               </CardDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -922,7 +927,7 @@ export function BulkImageUpload() {
                 Bỏ danh sách
               </Button>
               <Button size="sm" onClick={importAll} disabled={busy || matchedCount === 0}>
-                <Upload /> Import {matchedCount} ảnh
+                <Upload /> Nhập {matchedCount} ảnh
               </Button>
             </div>
           </CardHeader>
@@ -933,7 +938,7 @@ export function BulkImageUpload() {
                   <tr>
                     <th className="p-3 text-left font-medium text-muted-foreground">Ảnh</th>
                     <th className="p-3 text-left font-medium text-muted-foreground">File</th>
-                    <th className="p-3 text-left font-medium text-muted-foreground">Match</th>
+                    <th className="p-3 text-left font-medium text-muted-foreground">Độ khớp</th>
                     <th className="p-3 text-left font-medium text-muted-foreground">Quán</th>
                     <th className="p-3 text-left font-medium text-muted-foreground">Vai trò</th>
                     <th className="p-3" />
@@ -977,7 +982,7 @@ export function BulkImageUpload() {
                             {item.match.reason === "no_match" && "Không khớp"}
                           </Badge>
                           {item.match.needsReview ? (
-                            <span className="text-[11px] text-muted-foreground">Cần review</span>
+                            <span className="text-[11px] text-muted-foreground">Cần xem lại</span>
                           ) : null}
                         </div>
                       </td>
@@ -1010,14 +1015,14 @@ export function BulkImageUpload() {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="cover">cover</SelectItem>
-                            <SelectItem value="facade">facade</SelectItem>
-                            <SelectItem value="food_closeup">food_closeup</SelectItem>
-                            <SelectItem value="space">space</SelectItem>
-                            <SelectItem value="portrait">portrait</SelectItem>
-                            <SelectItem value="square_thumb">square_thumb</SelectItem>
-                            <SelectItem value="section_image">section_image</SelectItem>
-                            <SelectItem value="generic">generic</SelectItem>
+                            <SelectItem value="cover">Ảnh chính</SelectItem>
+                            <SelectItem value="facade">Mặt tiền</SelectItem>
+                            <SelectItem value="food_closeup">Món/chi tiết</SelectItem>
+                            <SelectItem value="space">Không gian</SelectItem>
+                            <SelectItem value="portrait">Chân dung</SelectItem>
+                            <SelectItem value="square_thumb">Ảnh vuông</SelectItem>
+                            <SelectItem value="section_image">Ảnh phụ</SelectItem>
+                            <SelectItem value="generic">Khác</SelectItem>
                           </SelectContent>
                         </Select>
                       </td>
@@ -1026,7 +1031,7 @@ export function BulkImageUpload() {
                           size="icon"
                           variant="ghost"
                           onClick={() => removeRow(idx)}
-                          aria-label="Bỏ ảnh khỏi danh sách import"
+                          aria-label="Bỏ ảnh khỏi danh sách nhập"
                         >
                           <X />
                         </Button>

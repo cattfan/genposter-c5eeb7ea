@@ -60,6 +60,7 @@ import {
   getEntityScopedTextBindingBasePath,
   isAssetRandomScopeBindingPath,
   parseAssetRandomScopeBindingPath,
+  parseEntityListBindingPath,
   parseEntityScopedTextBindingPath,
   resolveTextBinding,
 } from "@/engines/binding/dataBinding";
@@ -148,6 +149,11 @@ interface SlotFormatAssignment {
   snapshot: SlotFormatSnapshot;
   layoutBounds?: FormatBounds;
   dataGroupId?: string;
+}
+
+interface GenerateReadiness {
+  canGenerate: boolean;
+  reason: string;
 }
 
 const cloneSlotStyle = (style: Slot["style"] | undefined): Slot["style"] | undefined =>
@@ -291,6 +297,19 @@ function slotNeedsEntityImage(slot: Slot): boolean {
     bindingPath === "asset.cover" ||
     bindingPath.startsWith("asset.byRole:")
   );
+}
+
+function textBindingOptionLabel(value: string, label: string): string {
+  if (value === "_static") return "Giữ nguyên chữ";
+  return `Gắn ${label.toLowerCase()}`;
+}
+
+function imageBindingOptionLabel(value: string): string {
+  if (value === "_static") return "Giữ ảnh hiện tại";
+  if (value === "asset.cover") return "Ảnh cover của quán";
+  if (value === "asset.random") return "Ảnh ngẫu nhiên của quán";
+  if (value === ASSET_RANDOM_SCOPE_BINDING_VALUE) return "Ảnh ngẫu nhiên theo nguồn/thư mục";
+  return value;
 }
 
 export function PackTabContent({
@@ -533,18 +552,51 @@ export function PackTabContent({
     () => buildConfiguredEntityPool(activeAvailableEntities, activeGenerateConfig),
     [activeAvailableEntities, activeGenerateConfig],
   );
-  const estimateGeneratedPageCount = useMemo(() => {
-    if (packPages.length === 0) return 0;
-    return packPages.reduce((sum, page) => {
-      const config = resolveGeneratePageConfig(
-        globalGenerateConfig,
-        pageConfigs[page.pageTemplateId],
-      );
-      const pageEntities = buildSourceFilteredEntities(entities, config);
-      return sum + buildConfiguredEntityPool(pageEntities, config).length;
-    }, 0);
-  }, [packPages, entities, globalGenerateConfig, pageConfigs]);
-  const hasAnyConfiguredEntities = estimateGeneratedPageCount > 0;
+  const hasActiveDataFilters =
+    activeGenerateConfig.selectedSheet !== ALL_VALUE ||
+    activeGenerateConfig.filterMoHinh !== ALL_VALUE ||
+    activeGenerateConfig.filterPhongCach !== ALL_VALUE;
+  const generationBaseEntities = useMemo(
+    () => entities.filter((entity) => entity.status === "active"),
+    [entities],
+  );
+  const pageTemplatesForGenerate = useMemo(
+    () => tpls.map((tpl) => previewPageDrafts[tpl.pageTemplateId] ?? tpl),
+    [tpls, previewPageDrafts],
+  );
+  const previewGenerateJob = useMemo(() => {
+    if (!selectedPack) return null;
+    return generatePackJob({
+      pack: selectedPack,
+      pageTemplates: pageTemplatesForGenerate,
+      entities,
+      assets,
+      mode: "one-entity-per-pack",
+      entityPool: generationBaseEntities,
+      bindOverrides: packOv,
+      partnerQuotaPerPage: globalGenerateConfig.partnerQuotaPerPage,
+      prioritizePartner,
+      onlyPartner,
+      maxEntities,
+      selectedSheet: globalGenerateConfig.selectedSheet,
+      filterMoHinh: globalGenerateConfig.filterMoHinh,
+      filterPhongCach: globalGenerateConfig.filterPhongCach,
+      pageConfigs,
+    });
+  }, [
+    selectedPack,
+    pageTemplatesForGenerate,
+    entities,
+    assets,
+    generationBaseEntities,
+    packOv,
+    globalGenerateConfig,
+    prioritizePartner,
+    onlyPartner,
+    maxEntities,
+    pageConfigs,
+  ]);
+  const estimateGeneratedPageCount = previewGenerateJob?.pages.length ?? 0;
 
   const updateActiveGenerateConfig = (patch: Partial<GeneratePageConfig>) => {
     if (activePageConfigEnabled && activePage) {
@@ -591,6 +643,24 @@ export function PackTabContent({
         ...patch,
       },
     }));
+  };
+  const applyActiveSourceToAllPages = () => {
+    setSelectedSheet(activeGenerateConfig.selectedSheet);
+    setFilterMoHinh(activeGenerateConfig.filterMoHinh);
+    setFilterPhongCach(activeGenerateConfig.filterPhongCach);
+    setLastActiveSheet(activeGenerateConfig.selectedSheet);
+    setPageConfigs((prev) => {
+      const next: Record<string, GeneratePageConfig> = {};
+      Object.entries(prev).forEach(([pageTemplateId, config]) => {
+        const rest = { ...config };
+        delete rest.selectedSheet;
+        delete rest.filterMoHinh;
+        delete rest.filterPhongCach;
+        if (Object.keys(rest).length > 0) next[pageTemplateId] = rest;
+      });
+      return next;
+    });
+    toast.success("Đã áp dụng nguồn dữ liệu này cho tất cả trang");
   };
   const toggleActivePageConfig = (enabled: boolean) => {
     if (!activePage) return;
@@ -854,6 +924,10 @@ export function PackTabContent({
     [selectedImageSlots],
   );
   const textSlotBindingValue = (slot: Slot) =>
+    parseEntityListBindingPath(slot.bindingPath)
+      ? "__list"
+      : getEntityScopedTextBindingBasePath(slot.bindingPath) || "_static";
+  const textSlotFieldBindingValue = (slot: Slot) =>
     getEntityScopedTextBindingBasePath(slot.bindingPath) || "_static";
   const textSlotSourceValue = (slot: Slot) =>
     parseEntityScopedTextBindingPath(slot.bindingPath)?.sheetName ?? "__current";
@@ -955,7 +1029,7 @@ export function PackTabContent({
     if (surfaceSelectionRef.current) surfaceSelectionRef.current.lastSignature = signature;
     setSelectedSlotIds(Array.from(new Set(ids)));
   };
-  const startSurfaceMarqueeSelection = (event: React.MouseEvent<HTMLDivElement>) => {
+  const startSurfaceMarqueeSelection = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     const target = event.target as HTMLElement;
     if (target.closest("[data-bind-hit-target]") || target.closest("[data-bind-canvas-root]")) {
@@ -964,10 +1038,33 @@ export function PackTabContent({
 
     event.preventDefault();
     const surface = event.currentTarget;
+    const pointerId = event.pointerId;
     const start = getSurfacePoint(surface, event.clientX, event.clientY);
     surfaceSelectionRef.current = { start, active: false, lastSignature: "" };
+    try {
+      surface.setPointerCapture(pointerId);
+    } catch {
+      // Pointer capture is best-effort; the fallback listeners still stop the session.
+    }
 
-    const onMouseMove = (moveEvent: MouseEvent) => {
+    const cleanup = () => {
+      surface.removeEventListener("pointermove", onPointerMove);
+      surface.removeEventListener("pointerup", onPointerUp);
+      surface.removeEventListener("pointercancel", onCancel);
+      surface.removeEventListener("lostpointercapture", onCancel);
+      window.removeEventListener("blur", onCancel);
+      window.removeEventListener("keydown", onKeyDown);
+      try {
+        if (surface.hasPointerCapture(pointerId)) surface.releasePointerCapture(pointerId);
+      } catch {
+        // Ignore release errors from browsers that already ended the capture.
+      }
+      surfaceSelectionRef.current = null;
+      setSurfaceMarqueeRect(null);
+    };
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== pointerId) return;
       const state = surfaceSelectionRef.current;
       if (!state) return;
       const current = getSurfacePoint(surface, moveEvent.clientX, moveEvent.clientY);
@@ -980,10 +1077,9 @@ export function PackTabContent({
       moveEvent.preventDefault();
     };
 
-    const onMouseUp = (upEvent: MouseEvent) => {
+    const onPointerUp = (upEvent: PointerEvent) => {
+      if (upEvent.pointerId !== pointerId) return;
       const state = surfaceSelectionRef.current;
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
       if (state?.active) {
         const current = getSurfacePoint(surface, upEvent.clientX, upEvent.clientY);
         updateSurfaceMarqueeSelection(surface, normalizeSurfaceSelectionRect(state.start, current));
@@ -991,12 +1087,20 @@ export function PackTabContent({
       } else {
         setSelectedSlotIds([]);
       }
-      surfaceSelectionRef.current = null;
-      setSurfaceMarqueeRect(null);
+      cleanup();
     };
 
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
+    const onCancel = () => cleanup();
+    const onKeyDown = (keyEvent: KeyboardEvent) => {
+      if (keyEvent.key === "Escape") cleanup();
+    };
+
+    surface.addEventListener("pointermove", onPointerMove);
+    surface.addEventListener("pointerup", onPointerUp);
+    surface.addEventListener("pointercancel", onCancel);
+    surface.addEventListener("lostpointercapture", onCancel);
+    window.addEventListener("blur", onCancel);
+    window.addEventListener("keydown", onKeyDown);
   };
   const applyBindingToSlots = (
     slots: Slot[],
@@ -1018,12 +1122,13 @@ export function PackTabContent({
   };
   const applyTextBindingSelection = (slot: Slot, value: string) => {
     if (!activePage) return;
+    if (value === "__list") return;
     const bindingPath = value === "_static" ? undefined : buildTextBindingPathForSlot(slot, value);
     applyBindingToSlots([slot], activePage.pageTemplateId, bindingPath);
   };
   const applyTextSourceSelection = (slot: Slot, sheetName: string) => {
     if (!activePage) return;
-    const currentField = textSlotBindingValue(slot);
+    const currentField = textSlotFieldBindingValue(slot);
     if (currentField === "_static") return;
     const bindingPath = buildEntityScopedTextBindingPath({
       path: currentField,
@@ -1069,7 +1174,7 @@ export function PackTabContent({
   const copySelectedSlotFormat = () => {
     const sourceSlots = sortSlotsForFormat(selectedBindableSlots);
     if (sourceSlots.length === 0) {
-      toast.error("Chọn ít nhất 1 khối để copy định dạng");
+      toast.error("Chọn ít nhất 1 khối để sao chép kiểu & liên kết");
       return;
     }
 
@@ -1111,13 +1216,13 @@ export function PackTabContent({
       .filter((snapshot): snapshot is SlotFormatSnapshot => !!snapshot);
 
     if (snapshots.length === 0) {
-      toast.error("Khối đang chọn không có định dạng để copy");
+      toast.error("Khối đang chọn không có kiểu hoặc liên kết để sao chép");
       return;
     }
 
     const label = snapshots.length === 1 ? snapshots[0].sourceLabel : `${snapshots.length} khối`;
     setFormatClipboard({ label, snapshots });
-    toast.success(`Đã copy định dạng ${label}`);
+    toast.success(`Đã sao chép kiểu & liên kết của ${label}`);
   };
   const buildFormatAssignments = (targets: Slot[]) => {
     if (!formatClipboard) return new Map<string, SlotFormatAssignment>();
@@ -1279,17 +1384,17 @@ export function PackTabContent({
   const applyCopiedSlotFormat = (targets: Slot[], scopeLabel: string) => {
     if (!activePage || !effectiveActive) return;
     if (!formatClipboard) {
-      toast.error("Chưa copy định dạng");
+      toast.error("Chưa sao chép kiểu & liên kết");
       return;
     }
     if (targets.length === 0) {
-      toast.error("Chọn khối cần áp dụng định dạng");
+      toast.error("Chọn khối cần dán kiểu & liên kết");
       return;
     }
 
     const assignments = buildFormatAssignments(targets);
     if (assignments.size === 0) {
-      toast.error("Không có khối cùng loại để áp dụng định dạng");
+      toast.error("Không có khối cùng loại để dán kiểu & liên kết");
       return;
     }
 
@@ -1364,10 +1469,10 @@ export function PackTabContent({
       return { ...prev, [activePage.pageTemplateId]: current };
     });
     if (!changed) {
-      toast.info("Các khối đang chọn đã giống định dạng đã copy");
+      toast.info("Các khối đang chọn đã giống kiểu & liên kết đã sao chép");
       return;
     }
-    toast.success(`Đã áp dụng định dạng cho ${assignments.size} khối ${scopeLabel}`, {
+    toast.success(`Đã dán kiểu & liên kết cho ${assignments.size} khối ${scopeLabel}`, {
       action: {
         label: "Hoàn tác",
         onClick: undoPreviewPageDrafts,
@@ -1447,6 +1552,72 @@ export function PackTabContent({
       ),
     [packPages, packOv, previewPageDrafts],
   );
+  const hasTextOrImageSlots = useMemo(
+    () =>
+      packPages.some((page) =>
+        (resolvePageWorkingTemplate(
+          page,
+          packOv[page.pageTemplateId],
+          previewPageDrafts[page.pageTemplateId],
+        )?.slots ?? []).some((slot) => getSlotBindMode(slot) !== null),
+      ),
+    [packPages, packOv, previewPageDrafts],
+  );
+  const generateReadiness: GenerateReadiness = useMemo(() => {
+    if (!selectedPack) return { canGenerate: false, reason: "Chưa chọn bộ mẫu" };
+    if (packPages.length === 0) return { canGenerate: false, reason: "Bộ mẫu chưa có trang" };
+    if (generationBaseEntities.length === 0) {
+      return { canGenerate: false, reason: "Chưa có dữ liệu. Hãy nhập Google Sheet trước." };
+    }
+    if (!hasTextOrImageSlots) {
+      return { canGenerate: false, reason: "Bộ mẫu chưa có khung chữ hoặc ảnh để đổ dữ liệu" };
+    }
+    if (totalBound === 0) {
+      return { canGenerate: false, reason: "Chưa liên kết khung chữ/ảnh với dữ liệu" };
+    }
+    if (activeAvailableEntities.length === 0) {
+      return {
+        canGenerate: false,
+        reason: hasActiveDataFilters
+          ? "Bộ lọc không có dòng phù hợp"
+          : "Trang này chưa chọn nguồn",
+      };
+    }
+    if (estimateGeneratedPageCount === 0) {
+      return { canGenerate: false, reason: "Bộ lọc hiện tại không có dòng phù hợp để tạo ảnh" };
+    }
+    return {
+      canGenerate: true,
+      reason: `Sẵn sàng tạo ${estimateGeneratedPageCount} trang từ ${activeFilteredEntities.length} dòng của trang này`,
+    };
+  }, [
+    selectedPack,
+    packPages.length,
+    generationBaseEntities.length,
+    hasTextOrImageSlots,
+    totalBound,
+    activeAvailableEntities.length,
+    hasActiveDataFilters,
+    estimateGeneratedPageCount,
+    activeFilteredEntities.length,
+  ]);
+  const activeSourceLabel =
+    activeGenerateConfig.selectedSheet === ALL_VALUE ? "Tất cả nguồn dữ liệu" : activeGenerateConfig.selectedSheet;
+  const selectedSlotStatusLabel = (slot: Slot) => {
+    if (!slot.bindingPath) return "Tĩnh";
+    const listConfig = parseEntityListBindingPath(slot.bindingPath);
+    if (listConfig) return "Danh sách";
+    const textValue = textSlotFieldBindingValue(slot);
+    if (textValue !== "_static") {
+      return (
+        TEXT_BINDING_OPTIONS.find((option) => (option.value || "_static") === textValue)?.label ??
+        "Dữ liệu"
+      );
+    }
+    const imageValue = imageSlotBindingValue(slot);
+    if (imageValue !== "_static") return imageBindingOptionLabel(imageValue);
+    return "Tĩnh";
+  };
 
   const dataColumns = useMemo(() => {
     const set = new Set<string>();
@@ -1798,30 +1969,32 @@ export function PackTabContent({
 
   const onGenerate = async () => {
     if (!selectedPack) return toast.error("Chưa chọn bộ mẫu");
-    if (!hasAnyConfiguredEntities) {
-      return toast.error("Không có dữ liệu phù hợp cho các trang đang chọn");
+    if (!generateReadiness.canGenerate) {
+      return toast.error(generateReadiness.reason);
     }
-    const pageTemplatesForGenerate = tpls.map(
-      (tpl) => previewPageDrafts[tpl.pageTemplateId] ?? tpl,
-    );
-    const generationBaseEntities = entities.filter((entity) => entity.status === "active");
-    let job = generatePackJob({
-      pack: selectedPack,
-      pageTemplates: pageTemplatesForGenerate,
-      entities,
-      assets,
-      mode: "one-entity-per-pack",
-      entityPool: generationBaseEntities,
-      bindOverrides: packOv,
-      partnerQuotaPerPage: globalGenerateConfig.partnerQuotaPerPage,
-      prioritizePartner,
-      onlyPartner,
-      maxEntities,
-      selectedSheet: globalGenerateConfig.selectedSheet,
-      filterMoHinh: globalGenerateConfig.filterMoHinh,
-      filterPhongCach: globalGenerateConfig.filterPhongCach,
-      pageConfigs,
-    });
+    let job = previewGenerateJob
+      ? {
+          ...previewGenerateJob,
+          jobId: nanoid(),
+          createdAt: Date.now(),
+        }
+      : generatePackJob({
+          pack: selectedPack,
+          pageTemplates: pageTemplatesForGenerate,
+          entities,
+          assets,
+          mode: "one-entity-per-pack",
+          entityPool: generationBaseEntities,
+          bindOverrides: packOv,
+          partnerQuotaPerPage: globalGenerateConfig.partnerQuotaPerPage,
+          prioritizePartner,
+          onlyPartner,
+          maxEntities,
+          selectedSheet: globalGenerateConfig.selectedSheet,
+          filterMoHinh: globalGenerateConfig.filterMoHinh,
+          filterPhongCach: globalGenerateConfig.filterPhongCach,
+          pageConfigs,
+        });
     if (job.pages.length === 0) {
       toast.error("Không có trang nào được tạo. Kiểm tra cấu hình dữ liệu từng trang.");
       return;
@@ -2165,6 +2338,7 @@ export function PackTabContent({
                               page,
                               preset.bindOverrides?.[page.pageTemplateId],
                             );
+                            if (!previewTemplate) return null;
                             const previewScale = Math.min(
                               150 / previewTemplate.canvas.width,
                               190 / previewTemplate.canvas.height,
@@ -2226,68 +2400,9 @@ export function PackTabContent({
             {/* Cột 1: Cấu hình */}
             <Card className="col-span-12 lg:sticky lg:top-4 lg:col-span-3 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-hidden">
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm">Cấu hình bộ</CardTitle>
+                <CardTitle className="text-sm">Tạo bộ ảnh</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:pr-3">
-                {activePage && (
-                  <label className="flex cursor-pointer items-start gap-2 rounded-lg border bg-muted/20 p-3 text-sm">
-                    <Checkbox
-                      checked={activePageConfigEnabled}
-                      onCheckedChange={(checked) => toggleActivePageConfig(checked === true)}
-                      className="mt-0.5"
-                    />
-                    <span className="min-w-0">
-                      <span className="block font-medium">Cấu hình riêng trang này</span>
-                      <span className="block text-[11px] text-muted-foreground">
-                        {activePageConfigEnabled
-                          ? `Trang ${activePageIdx + 1} đang dùng cấu hình riêng.`
-                          : "Tắt để dùng cấu hình chung của bộ."}
-                      </span>
-                    </span>
-                  </label>
-                )}
-                <label className="flex items-center gap-2 text-sm">
-                  <Checkbox
-                    checked={activeGenerateConfig.prioritizePartner}
-                    onCheckedChange={(v) =>
-                      updateActiveGenerateConfig({ prioritizePartner: v === true })
-                    }
-                  />
-                  Ưu tiên đối tác
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <Checkbox
-                    checked={activeGenerateConfig.onlyPartner}
-                    onCheckedChange={(v) => updateActiveGenerateConfig({ onlyPartner: v === true })}
-                  />
-                  Chỉ dùng dữ liệu đối tác
-                </label>
-
-                <div>
-                  <Label className="text-xs">Số đối tác / trang</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    max={Math.max(0, activeTargetCount)}
-                    value={
-                      activeGenerateConfig.onlyPartner
-                        ? 0
-                        : activeGenerateConfig.partnerQuotaPerPage
-                    }
-                    disabled={activeGenerateConfig.onlyPartner}
-                    onChange={(e) =>
-                      updateActiveGenerateConfig({
-                        partnerQuotaPerPage: Math.max(0, Number(e.target.value) || 0),
-                      })
-                    }
-                  />
-                  <p className="text-[11px] text-muted-foreground mt-1">
-                    {activeGenerateConfig.onlyPartner
-                      ? "Đang bật 'Chỉ dùng dữ liệu đối tác' nên giới hạn này được bỏ qua."
-                      : `Trang hiện tại có tối đa ${activeTargetCount} khối nhận dữ liệu. App sẽ tự giới hạn nếu vượt quá.`}
-                  </p>
-                </div>
-
                 <div>
                   <Label className="text-xs">Số lượng tạo bộ ảnh</Label>
                   <div className="mt-1 flex items-center gap-2">
@@ -2334,16 +2449,69 @@ export function PackTabContent({
                   </div>
                 </div>
 
-                <label className="flex cursor-pointer items-start gap-2 rounded-lg border p-3 text-sm">
-                  <Checkbox
-                    checked={varyFontsFromSecondBundle}
-                    onCheckedChange={(checked) => setVaryFontsFromSecondBundle(checked === true)}
-                    className="mt-0.5"
-                  />
-                  <span className="min-w-0">
-                    <span className="block font-medium">Đổi kiểu chữ nghệ thuật từ bộ 2</span>
-                  </span>
-                </label>
+                <details className="rounded-lg border bg-muted/10 p-3 text-sm">
+                  <summary className="cursor-pointer font-medium">Nâng cao</summary>
+                  <div className="mt-3 space-y-3">
+                    <label className="flex items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={activeGenerateConfig.prioritizePartner}
+                        onCheckedChange={(v) =>
+                          updateActiveGenerateConfig({ prioritizePartner: v === true })
+                        }
+                      />
+                      Ưu tiên dữ liệu đối tác
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={activeGenerateConfig.onlyPartner}
+                        onCheckedChange={(v) =>
+                          updateActiveGenerateConfig({ onlyPartner: v === true })
+                        }
+                      />
+                      Chỉ dùng dữ liệu đối tác
+                    </label>
+
+                    <div>
+                      <Label className="text-xs">Số đối tác / trang</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={Math.max(0, activeTargetCount)}
+                        value={
+                          activeGenerateConfig.onlyPartner
+                            ? 0
+                            : activeGenerateConfig.partnerQuotaPerPage
+                        }
+                        disabled={activeGenerateConfig.onlyPartner}
+                        onChange={(e) =>
+                          updateActiveGenerateConfig({
+                            partnerQuotaPerPage: Math.max(0, Number(e.target.value) || 0),
+                          })
+                        }
+                      />
+                      <p className="text-[11px] text-muted-foreground mt-1">
+                        {activeGenerateConfig.onlyPartner
+                          ? "Đang chỉ dùng dữ liệu đối tác nên không cần giới hạn thêm."
+                          : `Trang hiện tại có tối đa ${activeTargetCount} khung nhận dữ liệu.`}
+                      </p>
+                    </div>
+
+                    <label className="flex cursor-pointer items-start gap-2 rounded-md border bg-background/60 p-2 text-sm">
+                      <Checkbox
+                        checked={varyFontsFromSecondBundle}
+                        onCheckedChange={(checked) =>
+                          setVaryFontsFromSecondBundle(checked === true)
+                        }
+                        className="mt-0.5"
+                      />
+                      <span className="min-w-0">
+                        <span className="block font-medium">
+                          Biến thể font nghệ thuật từ bộ thứ 2
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                </details>
 
                 <div className="border-t pt-3 space-y-1.5 text-xs text-muted-foreground">
                   <div className="flex justify-between">
@@ -2355,7 +2523,7 @@ export function PackTabContent({
                     <b className="text-foreground">{activeFilteredEntities.length}</b>
                   </div>
                   <div className="flex justify-between">
-                    <span>Trang cấu hình riêng</span>
+                    <span>Trang dùng nguồn riêng</span>
                     <b className="text-foreground">{enabledPageConfigCount}</b>
                   </div>
                   <div className="flex justify-between">
@@ -2363,7 +2531,7 @@ export function PackTabContent({
                     <b className="text-foreground">{packPages.length}</b>
                   </div>
                   <div className="flex justify-between">
-                    <span>Khối đã liên kết</span>
+                    <span>Khung đã gắn dữ liệu</span>
                     <b className="text-foreground">{totalBound}</b>
                   </div>
                   <div className="flex justify-between">
@@ -2375,11 +2543,25 @@ export function PackTabContent({
                 <div className="border-t pt-3 space-y-2">
                   <Button
                     onClick={onGenerate}
-                    disabled={!packId || !hasAnyConfiguredEntities}
+                    disabled={!generateReadiness.canGenerate}
                     className="w-full"
+                    title={generateReadiness.reason}
                   >
                     <Sparkles className="size-4 mr-2" /> Tạo bộ ảnh
                   </Button>
+                  <p
+                    className={
+                      "text-xs " +
+                      (generateReadiness.canGenerate ? "text-muted-foreground" : "text-destructive")
+                    }
+                  >
+                    {generateReadiness.reason}
+                  </p>
+                  {generationBaseEntities.length === 0 && (
+                    <Button asChild variant="outline" size="sm" className="w-full">
+                      <a href="/data">Nhập dữ liệu từ Google Sheet</a>
+                    </Button>
+                  )}
                   {Object.keys(packOv).length > 0 && (
                     <Button
                       variant="ghost"
@@ -2438,7 +2620,8 @@ export function PackTabContent({
                     className="h-7 text-xs"
                     title="Bật/tắt khung an toàn và đường căn chỉnh"
                   >
-                    <Eye className="size-3 mr-1" /> Khung: {showSafeFrame ? "Bật" : "Tắt"}
+                    <Eye className="size-3 mr-1" /> Đường căn chỉnh:{" "}
+                    {showSafeFrame ? "Bật" : "Tắt"}
                   </Button>
                 </div>
               </CardHeader>
@@ -2475,6 +2658,11 @@ export function PackTabContent({
                                 {ovCount}
                               </span>
                             )}
+                            {pageConfigs[tpl.pageTemplateId] && (
+                              <span className="text-[10px] bg-background/30 rounded px-1">
+                                Nguồn riêng
+                              </span>
+                            )}
                           </button>
                         );
                       })}
@@ -2482,7 +2670,7 @@ export function PackTabContent({
 
                     {effectiveActive && (
                       <div
-                        onMouseDownCapture={startSurfaceMarqueeSelection}
+                        onPointerDownCapture={startSurfaceMarqueeSelection}
                         className="relative grid select-none place-items-center overflow-auto rounded-lg border bg-background p-4"
                         style={{ minHeight: 480 }}
                       >
@@ -2545,15 +2733,65 @@ export function PackTabContent({
             {/* Cột 3: Bind panel + sheet fields */}
             <Card className="col-span-12 lg:sticky lg:top-4 lg:col-span-3 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-hidden">
               <CardHeader className="border-b pb-2">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <Link2 className="size-4" /> Liên kết dữ liệu
-                </CardTitle>
+                <div className="flex items-center justify-between gap-2">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <Link2 className="size-4" /> Nguồn dữ liệu của trang này
+                  </CardTitle>
+                  {activePage && (
+                    <Badge variant={activePageConfigEnabled ? "default" : "outline"}>
+                      Trang này
+                    </Badge>
+                  )}
+                </div>
               </CardHeader>
               <CardContent className="space-y-3 pt-3 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:pr-3">
                 <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Nguồn & bộ lọc
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Nguồn & bộ lọc
+                      </div>
+                      {activePage && (
+                        <div className="mt-1 text-[11px] text-muted-foreground">
+                          Trang {activePageIdx + 1} đang dùng: {activeSourceLabel}
+                        </div>
+                      )}
+                    </div>
+                    {activePage && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2 text-[11px]"
+                        onClick={applyActiveSourceToAllPages}
+                      >
+                        Áp dụng cho tất cả trang
+                      </Button>
+                    )}
                   </div>
+                  {activePage && (
+                    <label className="flex cursor-pointer items-start gap-2 rounded-md border bg-background/60 p-2 text-xs">
+                      <Checkbox
+                        checked={activePageConfigEnabled}
+                        onCheckedChange={(checked) => toggleActivePageConfig(checked === true)}
+                        className="mt-0.5"
+                      />
+                      <span className="min-w-0">
+                        <span className="block font-medium">Dùng nguồn riêng cho trang này</span>
+                        <span className="block text-[11px] text-muted-foreground">
+                          Bật khi mỗi trang trong bộ lấy dữ liệu từ tab hoặc bộ lọc khác nhau.
+                        </span>
+                      </span>
+                    </label>
+                  )}
+                  {generationBaseEntities.length === 0 && (
+                    <div className="rounded-md border border-dashed bg-background p-3 text-xs text-muted-foreground">
+                      Chưa có dữ liệu để chọn nguồn.
+                      <Button asChild variant="link" size="sm" className="h-auto px-1 py-0 text-xs">
+                        <a href="/data">Nhập dữ liệu từ Google Sheet</a>
+                      </Button>
+                    </div>
+                  )}
                   <div>
                     <Label className="text-xs">Nguồn dữ liệu</Label>
                     <Select
@@ -2652,7 +2890,7 @@ export function PackTabContent({
                             variant="outline"
                             className="col-span-2 h-8 justify-center truncate px-2 text-[11px]"
                           >
-                            Đã copy: {formatClipboard.label}
+                            Đã sao chép: {formatClipboard.label}
                           </Badge>
                         )}
                         <Button
@@ -2661,8 +2899,9 @@ export function PackTabContent({
                           size="sm"
                           className="h-8 justify-start px-2 text-[11px]"
                           onClick={copySelectedSlotFormat}
+                          title="Sao chép cả kiểu hiển thị và cách gắn dữ liệu của khối đang chọn"
                         >
-                          <Copy className="mr-1 size-3" /> Copy định dạng
+                          <Copy className="mr-1 size-3" /> Sao chép kiểu & liên kết
                         </Button>
                         <Button
                           type="button"
@@ -2671,8 +2910,13 @@ export function PackTabContent({
                           className="h-8 justify-start px-2 text-[11px]"
                           disabled={!formatClipboard}
                           onClick={() => applyCopiedSlotFormat(selectedBindableSlots, "đang chọn")}
+                          title={
+                            formatClipboard
+                              ? "Dán kiểu và liên kết vào khối đang chọn"
+                              : "Chưa sao chép kiểu & liên kết"
+                          }
                         >
-                          <Wand2 className="mr-1 size-3" /> Áp dụng
+                          <Wand2 className="mr-1 size-3" /> Dán vào khối đang chọn
                         </Button>
                         {selectedBindableSlots.length > 1 && (
                           <Button
@@ -2696,29 +2940,18 @@ export function PackTabContent({
                             <Link2Off className="mr-1 size-3" /> Bỏ nhóm
                           </Button>
                         )}
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 justify-start px-2 text-[11px]"
-                          disabled={!canUndoPreviewDraft}
-                          onClick={undoPreviewPageDrafts}
-                          title="Hoàn tác chỉnh sửa gần nhất (Ctrl+Z)"
-                        >
-                          <Undo2 className="mr-1 size-3" /> Hoàn tác
-                        </Button>
                         {relatedFormatTargetSlots.length > 1 && (
                           <Button
                             type="button"
                             variant="ghost"
                             size="sm"
                             className="h-8 justify-start px-2 text-[11px]"
-                            disabled={!formatClipboard}
-                            onClick={() =>
-                              applyCopiedSlotFormat(relatedFormatTargetSlots, "trong cụm")
-                            }
-                          >
-                            Áp dụng cụm
+                          disabled={!formatClipboard}
+                          onClick={() =>
+                            applyCopiedSlotFormat(relatedFormatTargetSlots, "trong cụm")
+                          }
+                        >
+                            Dán vào cụm
                           </Button>
                         )}
                       </div>
@@ -2726,7 +2959,7 @@ export function PackTabContent({
                     {sortedSelectedTextSlots.length > 0 && (
                       <div className="space-y-2">
                         <Label className="text-xs">
-                          Trường chữ{" "}
+                          Khung chữ{" "}
                           {sortedSelectedTextSlots.length > 1
                             ? `(${sortedSelectedTextSlots.length} khối)`
                             : ""}
@@ -2740,6 +2973,9 @@ export function PackTabContent({
                               <div className="min-w-0 truncate text-xs font-medium">
                                 {index + 1}. {textSlotLabel(slot, index)}
                               </div>
+                              <Badge variant="outline" className="shrink-0 text-[10px]">
+                                {selectedSlotStatusLabel(slot)}
+                              </Badge>
                             </div>
                             <Select
                               value={textSlotBindingValue(slot)}
@@ -2749,41 +2985,42 @@ export function PackTabContent({
                                 <SelectValue placeholder="Chọn trường" />
                               </SelectTrigger>
                               <SelectContent>
+                                <SelectItem value="__list">
+                                  Danh sách nhiều dòng
+                                </SelectItem>
                                 {TEXT_BINDING_OPTIONS.map((option) => {
                                   const value = option.value || "_static";
                                   return (
                                     <SelectItem key={`${slot.slotId}-${value}`} value={value}>
-                                      {option.label}
+                                      {textBindingOptionLabel(value, option.label)}
                                     </SelectItem>
                                   );
                                 })}
                               </SelectContent>
                             </Select>
-                            <div>
-                              <Label className="text-xs">Nguồn dữ liệu</Label>
-                              <Select
-                                value={textSlotSourceValue(slot)}
-                                onValueChange={(sheetName) =>
-                                  applyTextSourceSelection(slot, sheetName)
-                                }
-                                disabled={textSlotBindingValue(slot) === "_static"}
-                              >
-                                <SelectTrigger
-                                  className="h-8"
-                                  disabled={textSlotBindingValue(slot) === "_static"}
+                            {textSlotFieldBindingValue(slot) !== "_static" && (
+                              <div>
+                                <Label className="text-xs">Nguồn dữ liệu</Label>
+                                <Select
+                                  value={textSlotSourceValue(slot)}
+                                  onValueChange={(sheetName) =>
+                                    applyTextSourceSelection(slot, sheetName)
+                                  }
                                 >
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__current">Theo nguồn chung</SelectItem>
-                                  {sheetOptions.map((sheet) => (
-                                    <SelectItem key={sheet} value={sheet}>
-                                      {sheet}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
+                                  <SelectTrigger className="h-8">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__current">Theo nguồn của trang</SelectItem>
+                                    {sheetOptions.map((sheet) => (
+                                      <SelectItem key={sheet} value={sheet}>
+                                        {sheet}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -2791,7 +3028,7 @@ export function PackTabContent({
                     {sortedSelectedImageSlots.length > 0 && (
                       <div className="space-y-2">
                         <Label className="text-xs">
-                          Trường ảnh{" "}
+                          Khung ảnh{" "}
                           {sortedSelectedImageSlots.length > 1
                             ? `(${sortedSelectedImageSlots.length} khối)`
                             : ""}
@@ -2809,8 +3046,13 @@ export function PackTabContent({
                               key={slot.slotId}
                               className="space-y-2 rounded-lg border bg-muted/20 p-2"
                             >
-                              <div className="min-w-0 truncate text-xs font-medium">
-                                {index + 1}. {imageSlotLabel(slot, index)}
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="min-w-0 truncate text-xs font-medium">
+                                  {index + 1}. {imageSlotLabel(slot, index)}
+                                </div>
+                                <Badge variant="outline" className="shrink-0 text-[10px]">
+                                  {selectedSlotStatusLabel(slot)}
+                                </Badge>
                               </div>
                               <Select
                                 value={value}
@@ -2827,7 +3069,7 @@ export function PackTabContent({
                                       key={`${slot.slotId}-${option.value || "_static"}`}
                                       value={option.value || "_static"}
                                     >
-                                      {option.label}
+                                      {imageBindingOptionLabel(option.value || "_static")}
                                     </SelectItem>
                                   ))}
                                 </SelectContent>
@@ -2886,22 +3128,23 @@ export function PackTabContent({
                         })}
                       </div>
                     )}
-                    {selectedTextSlots.length === 1 && (
-                      <TextListBindingPanel
-                        selectedSlot={selectedTextSlots[0]}
-                        fieldOptions={textListFieldOptions}
-                        entityPool={previewEntityPool}
-                        prioritizePartnerDefault={prioritizePartner}
-                        onApply={(bindingPath) => {
-                          applyBindingToSlots(
-                            [selectedTextSlots[0]],
-                            activePage.pageTemplateId,
-                            bindingPath,
-                          );
-                          toast.success("Đã áp danh sách vào khung chữ");
-                        }}
-                      />
-                    )}
+                    {selectedTextSlots.length === 1 &&
+                      textSlotBindingValue(selectedTextSlots[0]) === "__list" && (
+                        <TextListBindingPanel
+                          selectedSlot={selectedTextSlots[0]}
+                          fieldOptions={textListFieldOptions}
+                          entityPool={previewEntityPool}
+                          prioritizePartnerDefault={prioritizePartner}
+                          onApply={(bindingPath) => {
+                            applyBindingToSlots(
+                              [selectedTextSlots[0]],
+                              activePage.pageTemplateId,
+                              bindingPath,
+                            );
+                            toast.success("Đã áp danh sách vào khung chữ");
+                          }}
+                        />
+                      )}
                     {selectedTextSlots.length === 1 && (
                       <div className="grid grid-cols-1 gap-2">
                         <TextRewritePanel

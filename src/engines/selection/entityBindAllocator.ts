@@ -12,16 +12,11 @@ export interface AllocateEntityBindingsResult {
   warnings: string[];
 }
 
-function shuffleEntities(entities: Entity[]): Entity[] {
-  const next = entities.slice();
-  for (let index = next.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(Math.random() * (index + 1));
-    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
-  }
-  return next;
+function sortByName(entities: Entity[]): Entity[] {
+  return entities.slice().sort((a, b) => a.name.localeCompare(b.name, "vi"));
 }
 
-function shufflePartnersByPriority(entities: Entity[]): Entity[] {
+function sortPartnersByPriority(entities: Entity[]): Entity[] {
   const buckets = new Map<number, Entity[]>();
   for (const entity of entities) {
     const priority = Number(entity.partnerPriority ?? 0);
@@ -32,16 +27,16 @@ function shufflePartnersByPriority(entities: Entity[]): Entity[] {
 
   return Array.from(buckets.entries())
     .sort((a, b) => b[0] - a[0])
-    .flatMap(([, bucket]) => shuffleEntities(bucket));
+    .flatMap(([, bucket]) => sortByName(bucket));
 }
 
 export function buildEntityAllocationOrder(
   entities: Entity[],
   prioritizePartner: boolean,
 ): Entity[] {
-  const partners = shufflePartnersByPriority(entities.filter((entity) => entity.partnerFlag));
-  const others = shuffleEntities(entities.filter((entity) => !entity.partnerFlag));
-  return prioritizePartner ? [...partners, ...others] : shuffleEntities([...partners, ...others]);
+  const partners = sortPartnersByPriority(entities.filter((entity) => entity.partnerFlag));
+  const others = sortByName(entities.filter((entity) => !entity.partnerFlag));
+  return prioritizePartner ? [...partners, ...others] : sortByName([...partners, ...others]);
 }
 
 function pickEntityFromList(
@@ -61,13 +56,15 @@ function pickEntityByPartnerMode(params: {
   candidates: Entity[];
   pageUsedIds: Set<string>;
   batchState: EntityBindBatchState;
-  partnerMode: "partner" | "non-partner";
+  partnerMode: "partner" | "non-partner" | "any";
 }): Entity | undefined {
   const { candidates, pageUsedIds, batchState, partnerMode } = params;
   const pool =
     partnerMode === "partner"
       ? candidates.filter((entity) => entity.partnerFlag)
-      : candidates.filter((entity) => !entity.partnerFlag);
+      : partnerMode === "non-partner"
+        ? candidates.filter((entity) => !entity.partnerFlag)
+        : candidates;
 
   return (
     pickEntityFromList(pool, pageUsedIds, batchState, true) ??
@@ -121,7 +118,7 @@ export function allocateEntityBindingsForTemplate(params: {
       candidates: target.candidateEntities,
       pageUsedIds,
       batchState,
-      partnerMode: remainingPartnerQuota > 0 ? "partner" : "non-partner",
+      partnerMode: remainingPartnerQuota > 0 ? "partner" : "any",
     });
 
     if (!chosen && remainingPartnerQuota > 0) {
@@ -132,13 +129,13 @@ export function allocateEntityBindingsForTemplate(params: {
         candidates: target.candidateEntities,
         pageUsedIds,
         batchState,
-        partnerMode: "non-partner",
+        partnerMode: "any",
       });
     }
 
     if (!chosen) {
       warnings.push(
-        `Page "${template.name}": khong du entity khong doi tac de giu quota ${clampedQuota}/trang.`,
+        `Page "${template.name}": khong du entity de gan du lieu.`,
       );
       assignments.set(target.targetId, null);
       continue;

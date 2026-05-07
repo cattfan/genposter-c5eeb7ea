@@ -61,6 +61,9 @@ export function generatePackJob(input: GenerateInput): GenerationJob {
     prioritizePartner = true,
     onlyPartner = false,
     maxEntities,
+    selectedSheet,
+    filterMoHinh,
+    filterPhongCach,
     pageConfigs = {},
   } = input;
 
@@ -446,13 +449,19 @@ function selectPageEntityPool(
   };
 
   const partnerTaken = partnerQuota > 0 ? take(partnerEntities, partnerQuota, true) : 0;
-  take(nonPartnerEntities, required - selected.length, true);
+  if (partnerQuota > 0) {
+    take(nonPartnerEntities, required - selected.length, true);
+  } else {
+    take(orderedEntities, required - selected.length, true);
+  }
   take(orderedEntities, required - selected.length, true);
 
   if (selected.length < required && partnerQuota > partnerTaken) {
     take(partnerEntities, partnerQuota - partnerTaken, false);
   }
-  take(nonPartnerEntities, required - selected.length, false);
+  if (partnerQuota > 0) {
+    take(nonPartnerEntities, required - selected.length, false);
+  }
   take(orderedEntities, required - selected.length, false);
   return selected;
 }

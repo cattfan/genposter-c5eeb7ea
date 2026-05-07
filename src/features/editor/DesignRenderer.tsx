@@ -162,7 +162,7 @@ function shouldSuppressGeneratedCoverSrc(element: DesignElement): boolean {
   return (
     element.binding?.path === "asset.cover" &&
     (legacyMeta.isUploadedBackground === true ||
-      element.name.toLowerCase().includes("mood_background"))
+      (element.name ?? "").toLowerCase().includes("mood_background"))
   );
 }
 
@@ -201,13 +201,16 @@ const DesignElementNode = memo(
     scale: number;
     showGuides: boolean;
     suppressShapeText?: boolean;
-  }) {
+    }) {
     const style = baseElementStyle(element, scale);
     const legacyMeta = (element.meta?.legacy ?? {}) as Record<string, unknown>;
-    const rawSrc = shouldSuppressGeneratedCoverSrc(element) ? undefined : element.src;
-    const resolvedSrc = useResolvedImageSrc(
-      element.kind === "image" || element.kind === "shape" ? rawSrc : undefined,
-    );
+    const rawSrc =
+      element.kind === "image" || element.kind === "shape"
+        ? shouldSuppressGeneratedCoverSrc(element)
+          ? undefined
+          : element.src
+        : undefined;
+    const resolvedSrc = useResolvedImageSrc(rawSrc);
 
     if (isGeneratedBackgroundOverlayElement(element)) {
       return null;

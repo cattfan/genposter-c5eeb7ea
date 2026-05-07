@@ -108,6 +108,7 @@ import type {
   DesignDocument,
   DesignElement,
   DesignPage,
+  DesignShapeElement,
   DesignTextElement,
   DesignTextRun,
   EditorMode,
@@ -700,9 +701,10 @@ function buildElementStylePatch(
   } as Partial<DesignElement>;
   const textRunPatch = pickTextRunStylePatch(patch);
   if ((element.kind === "text" || element.kind === "shape") && Object.keys(textRunPatch).length) {
+    const nextTextElement = next as Partial<DesignTextElement | DesignShapeElement>;
     const text = element.text ?? "";
     if (text.length > 0 && element.textRuns?.length) {
-      next.textRuns = applyTextRunStyle(
+      nextTextElement.textRuns = applyTextRunStyle(
         text,
         element.textRuns,
         { start: 0, end: text.length },
@@ -1116,7 +1118,7 @@ export function DesignWorkspace({
   const elementTransformingRef = useRef(false);
   const lastComputedDocumentSignatureRef = useRef("");
   const onSaveRef = useRef(onSave);
-  const autosaveTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const autosaveTimerRef = useRef<number | null>(null);
   const saveInFlightRef = useRef(false);
   const queuedSaveRef = useRef<{ document: DesignDocument; signature: string } | null>(null);
   const autosaveErrorToastShownRef = useRef(false);
@@ -4377,13 +4379,12 @@ export function DesignWorkspace({
                                       { history: false },
                                     )
                                   }
-                                  onCommit={(color) =>
+                                  onCommit={(value) =>
                                     commitElementStyle(primary.elementId, {
-                                      textStrokeColor: color,
                                       textStrokeWidth:
-                                        Number(primary.style?.textStrokeWidth ?? 0) > 0
-                                          ? primary.style?.textStrokeWidth
-                                          : 2,
+                                        Math.max(0, value) > 0
+                                          ? Math.max(0, value)
+                                          : Number(primary.style?.textStrokeWidth ?? 0),
                                     })
                                   }
                                 />
@@ -5883,7 +5884,13 @@ function DesignStage({
                         e.elementId === primaryId && (e.kind === "text" || e.kind === "shape"),
                     )
                   : null;
-                if (!editableEl || selectedIds.length !== 1) return null;
+                if (
+                  !editableEl ||
+                  selectedIds.length !== 1 ||
+                  (editableEl.kind !== "text" && editableEl.kind !== "shape")
+                ) {
+                  return null;
+                }
                 return (
                   <TextToolbar
                     element={editableEl}
@@ -6055,17 +6062,20 @@ function NumberField({
   label,
   value,
   onChange,
+  onCommit,
   suffix = "px",
   precision = 0,
 }: {
   label: string;
   value: number;
   onChange: (value: number) => void;
+  onCommit?: (value: number) => void;
   suffix?: string;
   precision?: number;
 }) {
   const factor = Math.pow(10, precision);
   const displayValue = Number.isFinite(value) ? Math.round(value * factor) / factor : 0;
+  const parseValue = (input: string) => Number(input) || 0;
   return (
     <div className="flex flex-col gap-1">
       <Label className="text-[11px] font-medium text-muted-foreground">{label}</Label>
@@ -6075,7 +6085,14 @@ function NumberField({
           value={displayValue}
           step={precision > 0 ? 1 / factor : 1}
           className="h-8 pr-8 text-xs tabular-nums"
-          onChange={(event) => onChange(Number(event.target.value) || 0)}
+          onChange={(event) => onChange(parseValue(event.target.value))}
+          onBlur={(event) => onCommit?.(parseValue(event.target.value))}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              onCommit?.(parseValue(event.currentTarget.value));
+              event.currentTarget.blur();
+            }
+          }}
         />
         {suffix ? (
           <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">

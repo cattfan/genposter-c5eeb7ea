@@ -42,7 +42,7 @@ export function NumField({
 
 function isGeneratedCoverBackgroundSlot(slot: Slot, template: PageTemplate): boolean {
   if (slot.kind !== "image" || slot.bindingPath !== "asset.cover") return false;
-  const name = slot.name.toLowerCase();
+  const name = (slot.name ?? "").toLowerCase();
   const coversCanvas =
     slot.x <= template.canvas.width * 0.05 &&
     slot.y <= template.canvas.height * 0.05 &&

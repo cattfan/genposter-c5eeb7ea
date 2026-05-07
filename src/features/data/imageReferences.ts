@@ -1,5 +1,13 @@
 import type { Asset, Entity } from "@/models";
 
+export function cleanImageReferenceValue(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .replace(/^["'“”‘’]+|["'“”‘’]+$/g, "")
+    .replace(/[\\/\s]+$/g, "")
+    .trim();
+}
+
 function normalizeReferenceKey(value: string) {
   return value
     .trim()
@@ -18,12 +26,12 @@ function valueParts(value: unknown): string[] {
 
   return String(value)
     .split(/[,;|]/)
-    .map((part) => part.trim())
+    .map(cleanImageReferenceValue)
     .filter(Boolean);
 }
 
 export function looksLikeDriveReference(value: string) {
-  const trimmed = value.trim();
+  const trimmed = cleanImageReferenceValue(value);
   return (
     /drive\.google\.com|docs\.google\.com\/uc|googleusercontent\.com/i.test(trimmed) ||
     /^[a-zA-Z0-9_-]{20,}$/.test(trimmed)
@@ -31,7 +39,7 @@ export function looksLikeDriveReference(value: string) {
 }
 
 export function looksLikeDirectImageReference(value: string) {
-  const trimmed = value.trim();
+  const trimmed = cleanImageReferenceValue(value);
   return /^(https?:\/\/|\/|\.\/|\.\.\/).+\.(png|jpe?g|webp|gif|bmp|avif)([?#].*)?$/i.test(
     trimmed,
   );
@@ -86,8 +94,9 @@ export function isUsableImageAsset(asset: Asset | undefined): asset is Asset {
 }
 
 export function isImageReferenceAsset(asset: Asset | undefined): asset is Asset {
-  if (!asset?.sourceValue || isUsableImageAsset(asset)) return false;
-  return looksLikeImageReference(asset.sourceValue);
+  const sourceValue = asset?.sourceValue;
+  if (!asset || !sourceValue || isUsableImageAsset(asset)) return false;
+  return looksLikeImageReference(sourceValue);
 }
 
 export function getEntityImageReferencesWithAssets(entity: Entity, assets: Asset[]): string[] {

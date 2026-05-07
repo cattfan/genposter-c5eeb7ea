@@ -22,6 +22,7 @@ import {
 import { LayoutGuides } from "@/features/render/LayoutGuides";
 import { useResolvedImageSrc } from "@/storage/imageSrc";
 import { expandPageWithCardGroups } from "@/engines/binding/cardRepeater";
+import type { ExpandedSlot } from "@/engines/binding/cardRepeater";
 import { renderRichTextRuns } from "@/features/editor/richText";
 
 const IMAGE_PLACEHOLDER_BACKGROUND =
@@ -156,7 +157,7 @@ export function BindCanvas({
     () =>
       selectedSlotIds
         .map((slotId) => visibleSlotById.get(slotId))
-        .filter((slot): slot is Slot & { cardIndex: number } => !!slot),
+        .filter((slot): slot is ExpandedSlot => !!slot),
     [selectedSlotIds, visibleSlotById],
   );
 
@@ -189,14 +190,39 @@ export function BindCanvas({
   );
 
   const startMarqueeSelection = useCallback(
-    (event: React.MouseEvent<HTMLDivElement>) => {
+    (event: React.PointerEvent<HTMLDivElement>) => {
       if (event.button !== 0) return;
+      const target = event.target as HTMLElement;
+      if (target.closest("[data-bind-hit-target]")) return;
       event.preventDefault();
       const canvas = event.currentTarget;
+      const pointerId = event.pointerId;
       const start = getCanvasPoint(canvas, event.clientX, event.clientY, scale);
       marqueeRef.current = { start, active: false, lastSignature: "" };
+      try {
+        canvas.setPointerCapture(pointerId);
+      } catch {
+        // Pointer capture is best-effort; fallback cleanup handlers still run.
+      }
 
-      const onMouseMove = (moveEvent: MouseEvent) => {
+      const cleanup = () => {
+        canvas.removeEventListener("pointermove", onPointerMove);
+        canvas.removeEventListener("pointerup", onPointerUp);
+        canvas.removeEventListener("pointercancel", onCancel);
+        canvas.removeEventListener("lostpointercapture", onCancel);
+        window.removeEventListener("blur", onCancel);
+        window.removeEventListener("keydown", onKeyDown);
+        try {
+          if (canvas.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId);
+        } catch {
+          // Browser already released capture.
+        }
+        marqueeRef.current = null;
+        setMarqueeRect(null);
+      };
+
+      const onPointerMove = (moveEvent: PointerEvent) => {
+        if (moveEvent.pointerId !== pointerId) return;
         const state = marqueeRef.current;
         if (!state) return;
         const current = getCanvasPoint(canvas, moveEvent.clientX, moveEvent.clientY, scale);
@@ -209,29 +235,38 @@ export function BindCanvas({
         moveEvent.preventDefault();
       };
 
-      const onMouseUp = (upEvent: MouseEvent) => {
+      const onPointerUp = (upEvent: PointerEvent) => {
+        if (upEvent.pointerId !== pointerId) return;
         const state = marqueeRef.current;
-        window.removeEventListener("mousemove", onMouseMove);
-        window.removeEventListener("mouseup", onMouseUp);
         if (state?.active) {
           const current = getCanvasPoint(canvas, upEvent.clientX, upEvent.clientY, scale);
           updateMarqueeSelection(normalizeSelectionRect(state.start, current));
           upEvent.preventDefault();
+        } else {
+          onSelectSlot(null, "replace");
         }
-        marqueeRef.current = null;
-        setMarqueeRect(null);
+        cleanup();
       };
 
-      window.addEventListener("mousemove", onMouseMove);
-      window.addEventListener("mouseup", onMouseUp);
+      const onCancel = () => cleanup();
+      const onKeyDown = (keyEvent: KeyboardEvent) => {
+        if (keyEvent.key === "Escape") cleanup();
+      };
+
+      canvas.addEventListener("pointermove", onPointerMove);
+      canvas.addEventListener("pointerup", onPointerUp);
+      canvas.addEventListener("pointercancel", onCancel);
+      canvas.addEventListener("lostpointercapture", onCancel);
+      window.addEventListener("blur", onCancel);
+      window.addEventListener("keydown", onKeyDown);
     },
-    [scale, updateMarqueeSelection],
+    [scale, updateMarqueeSelection, onSelectSlot],
   );
 
   return (
     <div
       data-bind-canvas-root="true"
-      onMouseDownCapture={startMarqueeSelection}
+      onPointerDownCapture={startMarqueeSelection}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onSelectSlot(null, "replace");
       }}
@@ -331,6 +366,7 @@ export function BindCanvas({
           slot={slot}
           scale={scale}
           flatPreview={flatPreview}
+          label={bindingStatusLabel(slot)}
         />
       ))}
       {selectedBounds && (
@@ -348,6 +384,23 @@ function isBindableSlot(slot: Slot): boolean {
     slot.kind === "shape" ||
     slot.kind === "section"
   );
+}
+
+function bindingStatusLabel(slot: Slot): string {
+  const bindingPath = slot.bindingPath ?? "";
+  if (!bindingPath) return "Tĩnh";
+  if (bindingPath.startsWith("entity.list:")) return "Danh sách";
+  if (bindingPath.includes("entity.name")) return "Tên quán";
+  if (bindingPath.includes("entity.address")) return "Địa chỉ";
+  if (bindingPath.includes("entity.phone")) return "Số điện thoại";
+  if (bindingPath.includes("entity.priceRange")) return "Giá";
+  if (bindingPath.includes("entity.openingHours")) return "Giờ mở cửa";
+  if (bindingPath.includes("entity.signatureDish")) return "Món nổi bật";
+  if (bindingPath.startsWith("asset.cover")) return "Ảnh cover";
+  if (bindingPath.startsWith("asset.random_scope")) return "Ảnh theo nguồn/thư mục";
+  if (bindingPath.startsWith("asset.random")) return "Ảnh ngẫu nhiên";
+  if (bindingPath.startsWith("asset.")) return "Ảnh";
+  return "Dữ liệu";
 }
 
 function getCanvasPoint(canvas: HTMLElement, clientX: number, clientY: number, scale: number) {
@@ -380,7 +433,7 @@ function rectIntersectsSlot(rect: SelectionRect, slot: Slot): boolean {
   return rect.left <= slotRight && right >= slot.x && rect.top <= slotBottom && bottom >= slot.y;
 }
 
-function getDataGroupSlotIds(slot: Slot, slots: Array<Slot & { cardIndex: number }>): string[] {
+function getDataGroupSlotIds(slot: Slot, slots: ExpandedSlot[]): string[] {
   if (slot.dataGroupId) {
     const dataGroupIds = slots
       .filter((item) => item.dataGroupId === slot.dataGroupId)
@@ -390,7 +443,7 @@ function getDataGroupSlotIds(slot: Slot, slots: Array<Slot & { cardIndex: number
   return [slot.slotId];
 }
 
-function getRelatedSlotIds(slot: Slot, slots: Array<Slot & { cardIndex: number }>): string[] {
+function getRelatedSlotIds(slot: Slot, slots: ExpandedSlot[]): string[] {
   const dataGroupIds = getDataGroupSlotIds(slot, slots);
   if (dataGroupIds.length > 1) return dataGroupIds;
   if (slot.groupId) {
@@ -408,7 +461,7 @@ function getRelatedSlotIds(slot: Slot, slots: Array<Slot & { cardIndex: number }
   return [slot.slotId];
 }
 
-function buildSelectionBounds(slots: Array<Slot & { cardIndex: number }>) {
+function buildSelectionBounds(slots: ExpandedSlot[]) {
   const left = Math.min(...slots.map((slot) => slot.x));
   const top = Math.min(...slots.map((slot) => slot.y));
   const right = Math.max(...slots.map((slot) => slot.x + slot.width));
@@ -423,7 +476,7 @@ function SlotHitTarget({
   flatPreview,
   onSelect,
 }: {
-  slot: Slot & { cardIndex: number };
+  slot: ExpandedSlot;
   scale: number;
   selected: boolean;
   flatPreview?: boolean;
@@ -478,10 +531,12 @@ function SelectedSlotOverlay({
   slot,
   scale,
   flatPreview,
+  label,
 }: {
-  slot: Slot & { cardIndex: number };
+  slot: ExpandedSlot;
   scale: number;
   flatPreview?: boolean;
+  label: string;
 }) {
   const transform = `${slot.rotation ? `rotate(${slot.rotation}deg)` : ""}${buildFlipTransform(
     slot.style,
@@ -504,7 +559,29 @@ function SelectedSlotOverlay({
         pointerEvents: "none",
         zIndex: 2147483646,
       }}
-    />
+    >
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          top: -22,
+          maxWidth: 160,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          borderRadius: 999,
+          background: "hsl(var(--primary))",
+          color: "hsl(var(--primary-foreground))",
+          fontSize: 10,
+          fontWeight: 700,
+          lineHeight: "18px",
+          padding: "0 8px",
+          boxShadow: "0 4px 12px rgba(15,23,42,0.12)",
+        }}
+      >
+        {label}
+      </div>
+    </div>
   );
 }
 
