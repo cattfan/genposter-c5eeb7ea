@@ -1,6 +1,12 @@
 // Resolver cho click-to-bind: lấy giá trị thực từ entity/asset theo bindingPath
 import type { Asset, AssetRole, Entity, Slot } from "@/models";
 import { filterRenderableAssets, getAssetImageSource } from "./assetImage";
+import {
+  resolveAssetsFromContext,
+  resolveEntitiesFromContext,
+  type BindingSourceContext,
+  type BindingSourceDescriptor,
+} from "./sourceContext";
 
 export interface BindingFieldOption {
   value: string;
@@ -541,6 +547,8 @@ export function resolveEntityComposeBinding(
 export interface ResolveTextBindingOptions {
   seed?: string;
   entities?: Entity[];
+  sources?: BindingSourceContext;
+  source?: BindingSourceDescriptor;
 }
 
 function pickScopedTextEntity(
@@ -571,12 +579,23 @@ export function resolveTextBinding(
   if (!bindingPath) return fallback ?? "";
   const scoped = parseEntityScopedTextBindingPath(bindingPath);
   const effectivePath = scoped?.path ?? bindingPath;
+  const sourceEntities = options?.source
+    ? resolveEntitiesFromContext(
+        { primary: options.source },
+        { entities: options?.entities ?? entityPool ?? [], assets: [] },
+      )
+    : options?.sources?.primary
+      ? resolveEntitiesFromContext(options.sources, {
+          entities: options?.entities ?? entityPool ?? [],
+          assets: [] ,
+        })
+      : undefined;
   const scopedPool = scoped?.sheetName
-    ? (options?.entities ?? entityPool ?? []).filter(
+    ? (sourceEntities ?? options?.entities ?? entityPool ?? []).filter(
         (item) => item.status === "active" && item.sheetName === scoped.sheetName,
       )
-    : entityPool;
-  const effectiveEntity = pickScopedTextEntity(scoped, entity, entityPool, options);
+    : sourceEntities ?? entityPool;
+  const effectiveEntity = pickScopedTextEntity(scoped, entity, scopedPool, options);
   if (isEntityListBindingPath(effectivePath)) {
     const pool =
       scopedPool && scopedPool.length > 0
@@ -600,6 +619,7 @@ export function resolveTextBinding(
 interface ResolveImageBindingOptions {
   seed?: string;
   entities?: Entity[];
+  source?: BindingSourceDescriptor;
 }
 
 function entityScopeValues(entity: Entity | undefined, asset: Asset): string[] {

@@ -25,6 +25,7 @@ import { expandPageWithCardGroups } from "@/engines/binding/cardRepeater";
 import type { ExpandedSlot } from "@/engines/binding/cardRepeater";
 import { isDataGroupMarkerSlot } from "@/engines/binding/slotMarkers";
 import { renderRichTextRuns } from "@/features/editor/richText";
+import { mergeBindingSources } from "@/engines/binding/sourceContext";
 
 const IMAGE_PLACEHOLDER_BACKGROUND =
   "repeating-linear-gradient(135deg, rgba(99,102,241,0.035) 0, rgba(99,102,241,0.035) 12px, rgba(248,250,252,0.28) 12px, rgba(248,250,252,0.28) 24px)";
@@ -71,6 +72,7 @@ export function BindCanvas({
     const ordered = [entity, ...(entityPool ?? [])].filter((item): item is Entity => !!item);
     return new Map(ordered.map((item) => [item.entityId, item]));
   }, [entity, entityPool]);
+  const bindingSources = useMemo(() => mergeBindingSources(template.dataSources?.primary, template.dataSources?.secondary), [template.dataSources]);
   const imageResolveEntities = useMemo(
     () => (sourceEntities?.length ? sourceEntities : Array.from(entityLookup.values())),
     [entityLookup, sourceEntities],
@@ -107,6 +109,18 @@ export function BindCanvas({
       slotEntityOverride.get(slot.slotId) ??
       slotEntityOverride.get(slot.originalSlotId ?? slot.slotId);
     if (override?.entityId) return entityLookup.get(override.entityId);
+    if (slot.dataSourceId) {
+      const source =
+        bindingSources.primary?.id === slot.dataSourceId
+          ? bindingSources.primary
+          : bindingSources.secondary?.find((item) => item.id === slot.dataSourceId);
+      const sourceEntity = source?.sheetName
+        ? imageResolveEntities.find((item) => item.sheetName === source.sheetName)
+        : source?.entityIds?.length
+          ? imageResolveEntities.find((item) => source.entityIds?.includes(item.entityId))
+          : undefined;
+      if (sourceEntity) return sourceEntity;
+    }
     if (slot.sectionRefId) {
       const sectionEntity = (slotItems ?? []).find(
         (item) => item.sectionId === slot.sectionRefId,
@@ -852,6 +866,7 @@ function BindSlot({
     !planned?.src && (slot.kind === "image" || slot.kind === "shape") && slot.bindingPath
       ? resolveImageBinding(slot.bindingPath, entity, assets, rawSrc, {
           entities: imageResolveEntities,
+          source: slot.dataSourceId ? { id: slot.dataSourceId, kind: "sheet", label: slot.dataSourceId } : undefined,
           seed: `${seedKey ?? "bind"}:${slot.slotId}`,
         })
       : undefined;
@@ -879,6 +894,7 @@ function BindSlot({
     const shapeText = slot.bindingPath?.startsWith("entity.")
       ? resolveTextBinding(slot.bindingPath, entity, slot.staticText, entityPool, {
           entities: imageResolveEntities,
+          source: slot.dataSourceId ? { id: slot.dataSourceId, kind: "sheet", label: slot.dataSourceId } : undefined,
           seed: `${seedKey ?? "bind"}:${slot.slotId}:shape-text`,
         })
       : (slot.staticText ?? "");
@@ -1048,6 +1064,7 @@ function BindSlot({
     const text = slot.bindingPath
       ? resolveTextBinding(slot.bindingPath, entity, slot.staticText, entityPool, {
           entities: imageResolveEntities,
+          source: slot.dataSourceId ? { id: slot.dataSourceId, kind: "sheet", label: slot.dataSourceId } : undefined,
           seed: `${seedKey ?? "bind"}:${slot.slotId}:text`,
         })
       : (slot.staticText ?? "Văn bản");

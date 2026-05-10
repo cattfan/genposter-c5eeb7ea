@@ -55,14 +55,31 @@ export interface Asset {
   height?: number;
 }
 
+export type DataSourceKind = "page_primary" | "page_secondary" | "sheet" | "entity_pool" | "asset_pool";
+
+export interface DataSourceBinding {
+  sourceId: string;
+  kind: DataSourceKind;
+  label: string;
+  sheetName?: string;
+  entityIds?: string[];
+  assetIds?: string[];
+  notes?: string;
+}
+
+export interface PageDataSources {
+  primary?: DataSourceBinding;
+  secondary?: DataSourceBinding[];
+}
+
 export type BulletType = "dot" | "dash" | "number" | "icon" | "none";
 
 export interface SectionItem {
   sectionItemId: ID;
   entityId: ID;
-  line1?: string; // tên
-  line2?: string; // địa chỉ / mô tả
-  line3?: string; // giá / hotline
+  line1?: string;
+  line2?: string;
+  line3?: string;
   icon?: string;
   bulletType?: BulletType;
   emphasis?: "normal" | "bold" | "highlight";
@@ -72,7 +89,6 @@ export interface SectionItem {
 export type SlotKind = "text" | "image" | "group" | "repeater" | "section" | "shape" | "icon";
 
 export interface SlotStyle {
-  // text
   fontFamily?: string;
   fontSize?: number;
   fontWeight?: number | string;
@@ -93,49 +109,39 @@ export interface SlotStyle {
   textStroke?: string;
   textStrokeColor?: string;
   textStrokeWidth?: number;
-  // gradient (text & shape fill)
   gradientFrom?: string;
   gradientTo?: string;
-  gradientAngle?: number; // deg
+  gradientAngle?: number;
   gradientEnabled?: boolean;
-  // image
   fit?: "cover" | "contain" | "stretch";
   borderRadius?: number;
   shadow?: string;
   opacity?: number;
   overlayColor?: string;
-  // shape
   fill?: string;
   stroke?: string;
   strokeWidth?: number;
-  // border (image & shape)
   borderColor?: string;
   borderWidth?: number;
   borderStyle?: "solid" | "dashed" | "dotted";
-  // common
   background?: string;
   padding?: number;
   rotation?: number;
-  // image filters (CSS filter)
-  brightness?: number; // 1 = normal
+  brightness?: number;
   contrast?: number;
   saturate?: number;
-  blur?: number; // px
-  hueRotate?: number; // deg
-  grayscale?: number; // 0..1
-  // flip
+  blur?: number;
+  hueRotate?: number;
+  grayscale?: number;
   flipH?: boolean;
   flipV?: boolean;
-  // drop shadow
   shadowColor?: string;
   shadowBlur?: number;
   shadowX?: number;
   shadowY?: number;
-  // visibility (Designer toolkit)
   hidden?: boolean;
 }
 
-// Crop ảnh: % so với ảnh gốc (0..1)
 export interface ImageCrop {
   x: number;
   y: number;
@@ -147,7 +153,7 @@ export type OverflowRule = "shrink" | "ellipsis" | "max_lines" | "hard_fail";
 
 export interface Slot {
   slotId: ID;
-  name?: string; // tên hiển thị trong panel Layers (designer đặt thủ công)
+  name?: string;
   pageId?: ID;
   sectionId?: ID;
   x: number;
@@ -160,28 +166,23 @@ export interface Slot {
   groupId?: ID;
   dataGroupId?: ID;
   kind: SlotKind;
-  // dữ liệu tĩnh (nếu không bind)
   staticText?: string;
   textRuns?: DesignTextRun[];
-  staticImage?: string; // url hoặc blob key
+  staticImage?: string;
   shapeKind?: "rectangle" | "circle" | "triangle" | "line" | "divider" | "badge";
-  // bind
-  bindingPath?: string; // ví dụ "entity.name", "asset.url", "section.items[0].line1"
+  bindingPath?: string;
   fieldParts?: BlueprintFieldPart[];
   allowedAssetRoles?: AssetRole[];
   style?: SlotStyle;
   visibilityRule?: string;
   overflowRule?: OverflowRule;
-  // repeater
   repeaterCount?: number;
   repeaterItemHeight?: number;
   repeaterGap?: number;
-  // section ref
   sectionRefId?: ID;
-  // ảnh upload từ máy → mặc định là layer nền, không cho nhân bản
   isUploadedBackground?: boolean;
-  // crop ảnh (chỉ dùng cho kind=image)
   crop?: ImageCrop;
+  dataSourceId?: ID;
 }
 
 export type PartnerMode = "strict_partner" | "priority_partner" | "balanced_partner";
@@ -190,7 +191,7 @@ export type ImageMode = "section_mood" | "anchor_entity";
 export type FilterOp = "eq" | "in" | "gte" | "lte" | "contains";
 
 export interface FilterRule {
-  field: string; // tên cột — đọc từ entity[field] hoặc entity.metadata[field]
+  field: string;
   op: FilterOp;
   value: string | number | string[];
 }
@@ -200,7 +201,7 @@ export type SectionLayoutMode = "stack" | "zigzag" | "grid" | "poster_list";
 export interface Section {
   sectionId: ID;
   title: string;
-  categoryQuery?: string; // ví dụ "category=cafe"
+  categoryQuery?: string;
   subCategoryQuery?: string;
   maxItems: number;
   minItems: number;
@@ -210,9 +211,7 @@ export interface Section {
   sortRule?: "partner_first" | "diversity" | "alpha" | "none";
   partnerMode: PartnerMode;
   overflowPolicy?: OverflowRule;
-  // Lọc thêm theo cột tuỳ ý (vd day=1, category=homestay)
   filterRules?: FilterRule[];
-  // Cách bố trí item trong section khi render (stack | zigzag trái/phải | grid)
   layoutMode?: SectionLayoutMode;
 }
 
@@ -257,207 +256,6 @@ export interface DesignTextRun {
   style: Partial<ElementStyle>;
 }
 
-export type DesignElementKind =
-  | "text"
-  | "image"
-  | "shape"
-  | "icon"
-  | "svg"
-  | "group"
-  | "frame"
-  | "table";
-
-export interface DesignElementBase {
-  elementId: ID;
-  pageId: ID;
-  parentId?: ID;
-  kind: DesignElementKind;
-  name?: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  rotation?: number;
-  zIndex?: number;
-  locked?: boolean;
-  hidden?: boolean;
-  style?: ElementStyle;
-  binding?: DataBindingRef;
-  assetId?: ID;
-  children?: ID[];
-  meta?: Record<string, unknown>;
-}
-
-export interface DesignTextElement extends DesignElementBase {
-  kind: "text";
-  text: string;
-  textRuns?: DesignTextRun[];
-}
-
-export interface DesignImageElement extends DesignElementBase {
-  kind: "image";
-  src?: string;
-  crop?: ImageCrop;
-}
-
-export interface DesignShapeElement extends DesignElementBase {
-  kind: "shape";
-  shapeKind?: NonNullable<Slot["shapeKind"]>;
-  src?: string;
-  crop?: ImageCrop;
-  text?: string;
-  textRuns?: DesignTextRun[];
-}
-
-export interface DesignIconElement extends DesignElementBase {
-  kind: "icon";
-  iconName: string;
-  svgContent?: string;
-}
-
-export interface DesignSvgElement extends DesignElementBase {
-  kind: "svg";
-  svgContent: string;
-}
-
-export interface DesignGroupElement extends DesignElementBase {
-  kind: "group";
-}
-
-export interface DesignFrameElement extends DesignElementBase {
-  kind: "frame";
-  background?: string;
-  padding?: number;
-}
-
-export interface DesignTableCell {
-  cellId: ID;
-  text?: string;
-  colSpan?: number;
-  rowSpan?: number;
-  style?: Partial<ElementStyle>;
-}
-
-export interface DesignTableElement extends DesignElementBase {
-  kind: "table";
-  columns: number;
-  rows: number;
-  cells: DesignTableCell[];
-}
-
-export type DesignElement =
-  | DesignTextElement
-  | DesignImageElement
-  | DesignShapeElement
-  | DesignIconElement
-  | DesignSvgElement
-  | DesignGroupElement
-  | DesignFrameElement
-  | DesignTableElement;
-
-export interface DesignPage {
-  pageId: ID;
-  name: string;
-  width: number;
-  height: number;
-  background?: string;
-  backgroundImage?: string;
-  safeZone?: {
-    top: number;
-    right: number;
-    bottom: number;
-    left: number;
-  };
-  guides?: DesignGuide[];
-}
-
-export type AssetItemKind = "image" | "svg" | "icon" | "logo";
-
-export interface AssetItem {
-  assetId: ID;
-  name: string;
-  kind: AssetItemKind;
-  sourceType: "local" | "url" | "inline";
-  sourceValue: string;
-  blobKey?: string;
-  mime?: string;
-  width?: number;
-  height?: number;
-  tags?: string[];
-  thumbnail?: string;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface FontAsset {
-  fontAssetId: ID;
-  family: string;
-  sourceValue: string;
-  blobKey?: string;
-  format?: string;
-  weight?: number;
-  style?: "normal" | "italic";
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface BrandStylePreset {
-  presetId: ID;
-  name: string;
-  target: "text" | "shape" | "frame";
-  style: Partial<ElementStyle>;
-}
-
-export interface BrandKit {
-  brandKitId: ID;
-  name: string;
-  colors: string[];
-  logoAssetIds: ID[];
-  fontAssetIds: ID[];
-  presets: BrandStylePreset[];
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface DesignDocument {
-  designDocumentId: ID;
-  name: string;
-  pages: DesignPage[];
-  elements: DesignElement[];
-  assetIds?: ID[];
-  brandKitId?: ID;
-  activePageId?: ID;
-  mode: EditorMode;
-  sourcePageTemplateId?: ID;
-  sourceJobId?: ID;
-  documentSettings?: {
-    gridSize: number;
-    snapToGrid: boolean;
-    showGrid: boolean;
-    showSafeZone: boolean;
-    showGuides: boolean;
-  };
-  createdAt: number;
-  updatedAt: number;
-  version: 1;
-}
-
-export interface CardGroupConfig {
-  /** ID của group (Slot.groupId) sẽ được lặp. */
-  groupId: ID;
-  /** Số card sẽ clone (gồm cả bản gốc). VD repeatCount=4 → 1 gốc + 3 clone. */
-  repeatCount: number;
-  /** Khoảng cách giữa 2 card liên tiếp (px ở canvas size, scale theo render). */
-  gap: number;
-  /** Chiều lặp card. */
-  direction: "vertical" | "horizontal";
-  /** (Tùy chọn) lọc entity nguồn — nếu trống dùng entityPool truyền vào renderer. */
-  entitySource?: {
-    sheetName?: string;
-    filterRules?: FilterRule[];
-  };
-}
-
 export interface PageTemplate {
   pageTemplateId: ID;
   name: string;
@@ -470,8 +268,19 @@ export interface PageTemplate {
   updatedAt: number;
   createdAt: number;
   thumbnail?: string;
-  /** Danh sách Card Repeater: mỗi mục biến 1 group slot thành N card lặp. */
+  dataSources?: PageDataSources;
   cardGroups?: CardGroupConfig[];
+}
+
+export interface CardGroupConfig {
+  groupId: ID;
+  repeatCount: number;
+  gap: number;
+  direction: "vertical" | "horizontal";
+  entitySource?: {
+    sheetName?: string;
+    filterRules?: FilterRule[];
+  };
 }
 
 export interface PackTemplate {
@@ -481,7 +290,7 @@ export interface PackTemplate {
   goal?: string;
   tone?: string;
   cta?: string;
-  orderedPages: ID[]; // pageTemplateId
+  orderedPages: ID[];
   requiredPages: ID[];
   optionalPages: ID[];
   captionProfile?: {
@@ -569,15 +378,10 @@ export interface RenderedPage {
   warnings: string[];
   items: RenderedItem[];
   renderedAt: number;
-  /** Entity gắn vào page này (chỉ dùng cho luồng pack-bind theo entity). */
   entityId?: ID;
-  /** Tên entity để hiển thị nhanh trên card kết quả. */
   entityName?: string;
-  /** Pool entity theo thứ tự dùng riêng cho page render, nhất là binding entity.list. */
   entityPoolIds?: ID[];
-  /** Override binding tạm thời designer áp lên page này khi generate. */
   bindOverrides?: Record<string, string | undefined>;
-  /** Bản chỉnh cục bộ của page output trong /generate, không đụng template gốc. */
   workingTemplate?: PageTemplate;
 }
 
@@ -655,10 +459,10 @@ export type AiProviderPreset = "deepseek" | "lovable" | "custom";
 
 export interface AiProviderConfig {
   preset: AiProviderPreset;
-  baseUrl: string; // vd https://api.deepseek.com/v1 hoặc http://localhost:20128/v1
-  model: string; // vd deepseek-chat, cx/gpt-5.4
-  apiKey?: string; // optional, có provider local không cần
-  visionModel?: string; // optional override cho ảnh; nếu trống dùng model
+  baseUrl: string;
+  model: string;
+  apiKey?: string;
+  visionModel?: string;
 }
 
 export interface DriveDownloadCheckpoint {

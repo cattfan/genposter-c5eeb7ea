@@ -34,6 +34,7 @@ import { useResolvedImageSrc } from "@/storage/imageSrc";
 import { expandPageWithCardGroups } from "@/engines/binding/cardRepeater";
 import { isDataGroupMarkerSlot } from "@/engines/binding/slotMarkers";
 import { renderRichTextRuns } from "@/features/editor/richText";
+import { mergeBindingSources } from "@/engines/binding/sourceContext";
 
 const IMAGE_PLACEHOLDER_BACKGROUND =
   "repeating-linear-gradient(135deg, rgba(59,130,246,0.08) 0, rgba(59,130,246,0.08) 14px, #f8fafc 14px, #f8fafc 28px)";
@@ -89,6 +90,26 @@ export function PageRenderer({
     [entities],
   );
   const assetMap = useMemo(() => new Map(assets.map((item) => [item.assetId, item])), [assets]);
+  const bindingSources = useMemo(
+    () => mergeBindingSources(template.dataSources?.primary, template.dataSources?.secondary),
+    [template.dataSources],
+  );
+  const sourceEntityMap = useMemo(() => {
+    const map = new Map<string, Entity[]>();
+    const primaryEntities = bindingSources.primary?.sheetName
+      ? entities.filter((item) => item.sheetName === bindingSources.primary?.sheetName)
+      : entities;
+    map.set(bindingSources.primary?.id ?? "primary", primaryEntities);
+    for (const source of bindingSources.secondary ?? []) {
+      const sourceEntities = source.sheetName
+        ? entities.filter((item) => item.sheetName === source.sheetName)
+        : source.entityIds?.length
+          ? entities.filter((item) => source.entityIds?.includes(item.entityId))
+          : entities;
+      map.set(source.id, sourceEntities);
+    }
+    return map;
+  }, [bindingSources, entities]);
 
   const { width, height, background, backgroundImage } = template.canvas;
   const resolvedBg = useResolvedImageSrc(backgroundImage);
@@ -137,6 +158,9 @@ export function PageRenderer({
         slotEntityOverride.get(slot.slotId) ??
         slotEntityOverride.get(slot.originalSlotId ?? slot.slotId);
       if (override?.entityId) return entityMap.get(override.entityId);
+      if (slot.dataSourceId && sourceEntityMap.has(slot.dataSourceId)) {
+        return sourceEntityMap.get(slot.dataSourceId)?.[0];
+      }
       if (slot.sectionRefId) {
         const sectionItems = sectionItemsMap.get(slot.sectionRefId) ?? [];
         const firstEntityId = sectionItems.find((item) => item.entityId)?.entityId;
@@ -146,7 +170,7 @@ export function PageRenderer({
       if (effectiveSlotItems.length > 0) return undefined;
       return entity;
     },
-    [effectiveSlotItems.length, entity, entityMap, sectionItemsMap, slotEntityOverride],
+    [effectiveSlotItems.length, entity, entityMap, sectionItemsMap, slotEntityOverride, sourceEntityMap],
   );
 
   const imageSeedKey = seedKey ?? `${template.pageTemplateId}:${page?.pageIndex ?? "preview"}`;
@@ -305,6 +329,7 @@ function SlotRenderer({
     } else if (slot.bindingPath) {
       const result = resolveImageBinding(slot.bindingPath, entity, assets, shapeRawSrc, {
         entities: allEntities,
+        source: slot.dataSourceId ? { id: slot.dataSourceId, kind: "sheet", label: slot.dataSourceId } : undefined,
         seed: `${seedKey}:${slot.slotId}:shape`,
       });
       if (result.src) shapeRawSrc = result.src;
@@ -325,6 +350,7 @@ function SlotRenderer({
     } else if (slot.bindingPath) {
       const result = resolveImageBinding(slot.bindingPath, entity, assets, imageRawSrc, {
         entities: allEntities,
+        source: slot.dataSourceId ? { id: slot.dataSourceId, kind: "sheet", label: slot.dataSourceId } : undefined,
         seed: `${seedKey}:${slot.slotId}:image`,
       });
       if (result.src) {
@@ -368,6 +394,7 @@ function SlotRenderer({
     const shapeText = slot.bindingPath?.startsWith("entity.")
       ? resolveTextBinding(slot.bindingPath, entity, slot.staticText, entityPool, {
           entities: allEntities,
+          source: slot.dataSourceId ? { id: slot.dataSourceId, kind: "sheet", label: slot.dataSourceId } : undefined,
           seed: `${seedKey}:${slot.slotId}:shape-text`,
         })
       : (slot.staticText ?? "");
@@ -546,6 +573,7 @@ function SlotRenderer({
     const text = slot.bindingPath
       ? resolveTextBinding(slot.bindingPath, entity, slot.staticText, entityPool, {
           entities: allEntities,
+          source: slot.dataSourceId ? { id: slot.dataSourceId, kind: "sheet", label: slot.dataSourceId } : undefined,
           seed: `${seedKey}:${slot.slotId}:text`,
         })
       : (slot.staticText ?? "Văn bản");
