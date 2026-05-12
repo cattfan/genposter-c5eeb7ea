@@ -194,25 +194,29 @@ function SlotEditor({
       const startX = e.clientX;
       const startY = e.clientY;
       const orig = { x: slot.x, y: slot.y, w: slot.width, h: slot.height };
+      const isLine = slot.shapeKind === "line" || slot.shapeKind === "divider";
       const onMove = (ev: MouseEvent) => {
         const dx = (ev.clientX - startX) / zoom;
         const dy = (ev.clientY - startY) / zoom;
         let { x, y, w, h } = orig;
         if (handle.includes("e")) w = Math.max(20, orig.w + dx);
-        if (handle.includes("s")) h = Math.max(20, orig.h + dy);
         if (handle.includes("w")) {
           w = Math.max(20, orig.w - dx);
           x = orig.x + (orig.w - w);
         }
-        if (handle.includes("n")) {
-          h = Math.max(20, orig.h - dy);
-          y = orig.y + (orig.h - h);
+        // For line/divider shapes, only allow horizontal resize (width)
+        if (!isLine) {
+          if (handle.includes("s")) h = Math.max(20, orig.h + dy);
+          if (handle.includes("n")) {
+            h = Math.max(20, orig.h - dy);
+            y = orig.y + (orig.h - h);
+          }
         }
         onUpdate({
           x: Math.round(x),
           y: Math.round(y),
           width: Math.round(w),
-          height: Math.round(h),
+          height: isLine ? Math.round(orig.h) : Math.round(h),
         });
       };
       const onUp = () => {
@@ -388,10 +392,13 @@ function SlotEditor({
       content = (
         <div
           style={{
-            width: "100%",
+            position: "absolute",
+            left: 0,
+            right: 0,
+            top: "50%",
+            transform: "translateY(-50%)",
             height: Math.max(2, (slot.style?.strokeWidth ?? 2) * zoom),
             background: fill,
-            marginTop: `calc(50% - ${Math.max(1, (slot.style?.strokeWidth ?? 2) * zoom) / 2}px)`,
           }}
         />
       );
@@ -450,8 +457,9 @@ function SlotEditor({
     );
   }
 
-  // 8 resize handles
-  const handles: { h: Handle; style: React.CSSProperties; cursor: string }[] = [
+  // 8 resize handles (line/divider only show e/w for horizontal resize)
+  const isLineShape = slot.shapeKind === "line" || slot.shapeKind === "divider";
+  const allHandles: { h: Handle; style: React.CSSProperties; cursor: string }[] = [
     { h: "nw", style: { left: -5, top: -5 }, cursor: "nwse-resize" },
     { h: "n", style: { left: "50%", top: -5, marginLeft: -5 }, cursor: "ns-resize" },
     { h: "ne", style: { right: -5, top: -5 }, cursor: "nesw-resize" },
@@ -461,6 +469,9 @@ function SlotEditor({
     { h: "sw", style: { left: -5, bottom: -5 }, cursor: "nesw-resize" },
     { h: "w", style: { left: -5, top: "50%", marginTop: -5 }, cursor: "ew-resize" },
   ];
+  const handles = isLineShape
+    ? allHandles.filter((hd) => hd.h === "e" || hd.h === "w")
+    : allHandles;
 
   const slotEl = (
     <div

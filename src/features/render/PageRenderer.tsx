@@ -406,15 +406,19 @@ function SlotRenderer({
     const textCss = buildTextStyle(slot.style, scale);
 
     if (isLine) {
+      const lineHeight = Math.max(1, (slot.style?.strokeWidth ?? 2) * scale);
       return (
         <div
           style={{
-            ...baseStyle,
+            position: "absolute",
+            left: slot.x * scale,
+            width: slot.width * scale,
+            height: lineHeight,
+            top: (slot.y + slot.height / 2) * scale - lineHeight / 2,
+            transform: baseStyle.transform,
+            transformOrigin: baseStyle.transformOrigin,
+            opacity: baseStyle.opacity,
             background: gradient ?? slot.style?.fill ?? "#000",
-            height: Math.max(1, (slot.style?.strokeWidth ?? 2) * scale),
-            top:
-              (slot.y + slot.height / 2) * scale -
-              Math.max(1, (slot.style?.strokeWidth ?? 2) * scale) / 2,
           }}
         >
           <DebugBadge debug={debug} text="line" />

@@ -348,15 +348,19 @@ const DesignElementNode = memo(
       ) as CSSProperties["objectFit"];
 
       if (element.shapeKind === "line" || element.shapeKind === "divider") {
+        const lineHeight = Math.max(1, (element.style?.strokeWidth ?? 2) * scale);
         return (
           <div
             data-rendered-element-id={element.elementId}
             style={{
-              ...style,
-              height: Math.max(1, (element.style?.strokeWidth ?? 2) * scale),
-              top:
-                (element.y + element.height / 2) * scale -
-                Math.max(1, (element.style?.strokeWidth ?? 2) * scale) / 2,
+              position: "absolute",
+              left: element.x * scale,
+              width: element.width * scale,
+              height: lineHeight,
+              top: (element.y + element.height / 2) * scale - lineHeight / 2,
+              transform: style.transform,
+              transformOrigin: style.transformOrigin,
+              opacity: style.opacity,
               background: fill,
             }}
           >

@@ -87,7 +87,8 @@ import { usePackBindOverrides } from "@/features/generate/usePackBindOverrides";
 import {
   nodeToPngBlob,
   downloadPng,
-  downloadZip,
+  downloadMultiBundleZip,
+  formatZipFileName,
   formatExportError,
 } from "@/features/render/exportPng";
 import { db } from "@/storage/db";
@@ -99,7 +100,8 @@ import {
   restoreTemplateGroups,
 } from "@/features/generate/templateState";
 import {
-  buildPublishBundle,
+  buildPartnerWorkbookBlob,
+  buildFallbackCaptionBlob,
 } from "@/features/generate/exportArtifacts";
 import { applyFontVariationToGeneratedJob } from "@/features/generate/fontVariation";
 import {
@@ -2280,54 +2282,92 @@ export function PackTabContent({
   }, [assets, bundleGroups, entities, packOv]);
 
   const exportZip = async () => {
-    if (!currentJob) return;
+    if (!currentJob || !jobPack) return;
     const sel = currentJob.pages.filter((p) => p.selected);
     if (sel.length === 0) return toast.error("Chưa chọn trang nào");
     toast.info(`Đang xuất ${sel.length} trang...`);
     try {
-      const images: Array<{
-        fileName: string;
-        blob: Blob;
-        pageIndex: number;
-        templateId?: string;
-        templateName?: string;
+      // Group selected pages by bundle
+      const allBundleMeta = buildBundleGroups(currentJob, jobPack, tpls, entities);
+      const bundlesWithSelected = allBundleMeta
+        .map((group) => ({
+          ...group,
+          pages: group.pages.filter((meta) => sel.some((s) => s.pageIndex === meta.page.pageIndex)),
+        }))
+        .filter((group) => group.pages.length > 0);
+
+      if (bundlesWithSelected.length === 0) return toast.error("Không tìm thấy ảnh đang hiển thị để xuất");
+
+      // Step 1: Render all images
+      const bundleImageData: Array<{
+        group: (typeof bundlesWithSelected)[number];
+        imageBlobs: Array<{ blob: Blob; ext: string }>;
       }> = [];
-      for (const p of sel) {
-        const node = packRefs.current.get(p.pageIndex);
-        if (!node) continue;
-        const blob = await nodeToPngBlob(node, 2);
-        images.push({
-          fileName: p.pageFile,
-          blob,
-          pageIndex: p.pageIndex,
-          templateId: p.pageTemplateId,
-          templateName: p.workingTemplate?.name,
-        });
+
+      for (const group of bundlesWithSelected) {
+        const imageBlobs: Array<{ blob: Blob; ext: string }> = [];
+        for (const meta of group.pages) {
+          const node = packRefs.current.get(meta.page.pageIndex);
+          if (!node) continue;
+          try {
+            const blob = await nodeToPngBlob(node, 2);
+            imageBlobs.push({ blob, ext: "png" });
+          } catch {
+            // Skip pages that fail to render
+          }
+        }
+        if (imageBlobs.length > 0) {
+          bundleImageData.push({ group, imageBlobs });
+        }
       }
-      if (images.length === 0) return toast.error("Không tìm thấy ảnh đang hiển thị để xuất");
 
-      const bundle = await buildPublishBundle({
-        packName: currentJob.packTemplateName,
-        pages: sel.map((p) => ({
-          pageFile: p.pageFile,
-          pageIndex: p.pageIndex,
-          pageName: p.workingTemplate?.name,
-          entityId: p.entityId,
-          entityName: p.entityName,
-          items: p.items,
-        })),
-        entities,
-        images,
-        variantCount: 4,
-      });
+      if (bundleImageData.length === 0) return toast.error("Không tìm thấy ảnh đang hiển thị để xuất");
 
-      await downloadZip(
-        bundle.files,
-        `${formatTemplateDisplayName(currentJob.packTemplateName, "bo-anh")}.zip`,
-      );
+      // Step 2: Build bundle files (caption + xlsx) - all synchronous, no AI
+      const bundleArtifacts: Array<{ files: Array<{ name: string; blob: Blob }> }> = [];
+
+      for (let i = 0; i < bundleImageData.length; i++) {
+        const { group, imageBlobs } = bundleImageData[i];
+        const bundlePages = group.pages.map((meta) => ({
+          pageFile: meta.displayPageName,
+          pageIndex: meta.page.pageIndex,
+          pageName: meta.pageTemplate?.name ?? meta.page.workingTemplate?.name,
+          entityId: meta.page.entityId,
+          entityName: meta.page.entityName,
+          items: meta.page.items,
+        }));
+
+        const files: Array<{ name: string; blob: Blob }> = imageBlobs.map((img, idx) => ({
+          name: `${idx + 1}.${img.ext}`,
+          blob: img.blob,
+        }));
+
+        // Caption (local fallback, no AI - instant)
+        const captionBlob = buildFallbackCaptionBlob({
+          packName: jobPack.name,
+          bundleLabel: group.bundleLabel,
+          pages: bundlePages,
+          entities,
+          variantCount: 3,
+        });
+        files.push({ name: "caption.txt", blob: captionBlob });
+
+        // doitac.xlsx (sync, fast)
+        const xlsxBlob = buildPartnerWorkbookBlob({ pages: bundlePages, entities });
+        files.push({ name: "doitac.xlsx", blob: xlsxBlob });
+
+        bundleArtifacts.push({ files });
+      }
+
+      const templateName = formatTemplateDisplayName(currentJob.packTemplateName, "bo-anh");
+      const zipFileName = bundleArtifacts.length === 1
+        ? `${formatZipFileName(templateName, { version: bundlesWithSelected[0].bundleIndex })}.zip`
+        : `${formatZipFileName(templateName)}.zip`;
+
+      await downloadMultiBundleZip(bundleArtifacts, zipFileName);
       await db.jobs.put({ ...currentJob, status: "exported" });
       toast.success(
-        `Đã xuất ZIP · ${bundle.files.length} file · caption.txt có ${bundle.hashtags.length} hashtag`,
+        `Đã xuất ZIP · ${bundleArtifacts.length} bộ · ${bundleArtifacts.reduce((sum, b) => sum + b.files.length, 0)} file`,
       );
     } catch (error) {
       toast.error("Không thể xuất ZIP: " + formatExportError(error));
@@ -2339,26 +2379,19 @@ export function PackTabContent({
     setBundleExportingIndex(bundle.bundleIndex);
     toast.info(`Đang tải ${bundle.bundleLabel}...`);
     try {
-      const images: Array<{
-        fileName: string;
-        blob: Blob;
-        pageIndex: number;
-        templateId?: string;
-        templateName?: string;
-      }> = [];
+      const imageBlobs: Array<{ blob: Blob; ext: string }> = [];
       for (const meta of bundle.pages) {
         const node = packRefs.current.get(meta.page.pageIndex);
         if (!node) continue;
-        const blob = await nodeToPngBlob(node, 2);
-        images.push({
-          fileName: meta.displayPageName,
-          blob,
-          pageIndex: meta.page.pageIndex,
-          templateId: meta.page.pageTemplateId,
-          templateName: meta.pageTemplate?.name ?? meta.page.workingTemplate?.name,
-        });
+        try {
+          const blob = await nodeToPngBlob(node, 2);
+          imageBlobs.push({ blob, ext: "png" });
+        } catch {
+          // Skip pages that fail to render
+        }
       }
-      if (images.length === 0) return toast.error("Không tìm thấy ảnh trong bộ này để tải");
+      if (imageBlobs.length === 0) return toast.error("Không tìm thấy ảnh trong bộ này để tải");
+
       const bundlePages = bundle.pages.map((meta) => ({
         pageFile: meta.displayPageName,
         pageIndex: meta.page.pageIndex,
@@ -2368,22 +2401,30 @@ export function PackTabContent({
         items: meta.page.items,
       }));
 
-      const publishBundle = await buildPublishBundle({
+      // Build files: 1.png, 2.png, ..., caption.txt, doitac.xlsx
+      const files: Array<{ name: string; blob: Blob }> = imageBlobs.map((img, idx) => ({
+        name: `${idx + 1}.${img.ext}`,
+        blob: img.blob,
+      }));
+
+      // Caption (local fallback, no AI - instant)
+      const captionBlob = buildFallbackCaptionBlob({
         packName: jobPack.name,
         bundleLabel: bundle.bundleLabel,
         pages: bundlePages,
         entities,
-        images,
         variantCount: 3,
       });
+      files.push({ name: "caption.txt", blob: captionBlob });
 
-      await downloadZip(
-        publishBundle.files,
-        `${bundle.bundleLabel.toLowerCase().replace(/\s+/g, "-")}.zip`,
-      );
-      toast.success(
-        `Đã tải ${bundle.bundleLabel} · caption.txt có ${publishBundle.hashtags.length} hashtag`,
-      );
+      const xlsxBlob = buildPartnerWorkbookBlob({ pages: bundlePages, entities });
+      files.push({ name: "doitac.xlsx", blob: xlsxBlob });
+
+      const templateName = formatTemplateDisplayName(jobPack.name, "bo-anh");
+      const zipFileName = `${formatZipFileName(templateName, { version: bundle.bundleIndex })}.zip`;
+
+      await downloadMultiBundleZip([{ files }], zipFileName);
+      toast.success(`Đã tải ${bundle.bundleLabel}`);
     } catch (error) {
       toast.error("Không thể tải bộ: " + formatExportError(error));
     } finally {

@@ -19,7 +19,7 @@ import { toast } from "sonner";
 import { generatePackJob } from "@/engines/selection/generate";
 import { useJobStore } from "@/features/generate/jobStore";
 import { PageRenderer } from "@/features/render/PageRenderer";
-import { nodeToPngBlob, downloadPng, downloadZip } from "@/features/render/exportPng";
+import { nodeToPngBlob, downloadPng, downloadMultiBundleZip, formatZipFileName } from "@/features/render/exportPng";
 import {
   Sparkles,
   Download,
@@ -67,6 +67,7 @@ import {
 } from "@/features/generate/exportArtifacts";
 import { applyFontVariantToTemplate } from "@/features/generate/fontVariation";
 import { designDocumentToPageTemplate } from "@/features/editor/designDocument";
+import { formatTemplateDisplayName } from "@/lib/templateNames";
 
 export const Route = createFileRoute("/generate")({
   component: GeneratePage,
@@ -142,14 +143,30 @@ function GeneratePage() {
     const sel = currentJob.pages.filter((p) => p.selected);
     if (sel.length === 0) return toast.error("Chưa chọn trang nào");
     toast.info(`Đang xuất ${sel.length} trang...`);
-    const files: Array<{ name: string; blob: Blob }> = [];
+    const images: Array<{ fileName: string; blob: Blob; pageIndex: number }> = [];
     for (const p of sel) {
       const node = renderRefs.current.get(p.pageIndex);
       if (!node) continue;
       const blob = await nodeToPngBlob(node, 2);
-      files.push({ name: p.pageFile, blob });
+      images.push({ fileName: p.pageFile, blob, pageIndex: p.pageIndex });
     }
-    await downloadZip(files, `${currentJob.packTemplateName}.zip`);
+    const bundle = await buildPublishBundle({
+      packName: currentJob.packTemplateName,
+      pages: sel.map((p) => ({
+        pageFile: p.pageFile,
+        pageIndex: p.pageIndex,
+        pageName: p.workingTemplate?.name,
+        entityId: p.entityId,
+        entityName: p.entityName,
+        items: p.items,
+      })),
+      entities,
+      images,
+      variantCount: 4,
+    });
+    const templateName = formatTemplateDisplayName(currentJob.packTemplateName, "bo-anh");
+    const zipFileName = `${formatZipFileName(templateName, { version: 1 })}.zip`;
+    await downloadMultiBundleZip([{ files: bundle.files }], zipFileName);
     await db.jobs.put({ ...currentJob, status: "exported" });
     toast.success("Đã xuất ZIP và lưu lượt tạo");
   };
@@ -691,7 +708,9 @@ function GeneratePage() {
       images,
       variantCount: 4,
     });
-    await downloadZip(bundle.files, `${entityPreviewTemplate.name}-du-lieu.zip`);
+    const templateName = formatTemplateDisplayName(entityPreviewTemplate.name, "bo-anh");
+    const zipFileName = `${formatZipFileName(templateName, { version: 1 })}.zip`;
+    await downloadMultiBundleZip([{ files: bundle.files }], zipFileName);
     toast.success(`Đã xuất ZIP · ${bundle.files.length} file`);
   };
 

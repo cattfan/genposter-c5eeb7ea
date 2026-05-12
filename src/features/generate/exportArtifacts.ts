@@ -49,6 +49,27 @@ export async function buildTikTokCaptionBlob(input: {
   return new Blob([text], { type: "text/plain;charset=utf-8" });
 }
 
+/**
+ * Build caption blob using only local fallback templates (no AI call).
+ * Use this for batch/multi-bundle exports to avoid slow network calls.
+ */
+export function buildFallbackCaptionBlob(input: {
+  packName: string;
+  bundleLabel?: string;
+  pages: ExportPageEntityData[];
+  entities: Entity[];
+  variantCount?: number;
+}): Blob {
+  const usedEntities = collectUsedEntities(input.pages, input.entities);
+  const variantCount = Math.max(1, Math.min(6, input.variantCount ?? 4));
+  const variants = buildFallbackCaptions(input.packName, input.bundleLabel, usedEntities, variantCount);
+  const text = variants
+    .slice(0, variantCount)
+    .map((variant, index) => formatCaptionVariant(variant, index + 1, input.bundleLabel))
+    .join("\n\n---\n\n");
+  return new Blob([text], { type: "text/plain;charset=utf-8" });
+}
+
 export async function buildTikTokCaptionText(input: {
   packName: string;
   bundleLabel?: string;
@@ -457,7 +478,7 @@ export async function buildPublishBundle(
 
   const bundleSlug = buildBundleSlug(input.bundleLabel);
   const imageFiles = input.images.map((entry, index) => ({
-    name: `3x4-${index + 1}-${bundleSlug}.${getImageExtension(entry.fileName, entry.blob)}`,
+    name: `${index + 1}.${getImageExtension(entry.fileName, entry.blob)}`,
     blob: entry.blob,
     pageIndex: entry.pageIndex,
     templateId: entry.templateId,
