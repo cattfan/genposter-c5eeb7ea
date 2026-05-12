@@ -25,10 +25,10 @@ export async function nodeToPngBlob(node: HTMLElement, scale = 2): Promise<Blob>
   await document.fonts?.ready;
   const dataUrl = await toPng(node, {
     pixelRatio: scale,
-    cacheBust: true,
-    skipFonts: false,
+    cacheBust: false,
+    skipFonts: true,
     imagePlaceholder: TRANSPARENT_IMAGE_PLACEHOLDER,
-    onImageErrorHandler: () => undefined,
+    includeQueryParams: true,
   });
   const res = await fetch(dataUrl);
   return await res.blob();
