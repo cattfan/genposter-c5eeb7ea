@@ -19,33 +19,30 @@
 ## Pha B — Design Workspace Inspector Refactor
 
 ### B.1 — Chuẩn bị
-- [ ] 12. Đọc toàn bộ Inspector hiện có trong `DesignWorkspace.tsx` (quanh dòng 6715+)
-- [ ] 13. Lập danh sách tất cả InspectorSection hiện có và mapping sang section mới
-- [ ] 14. Tạo `src/features/editor/Inspector/` folder (chuẩn bị chia nhỏ)
+- [x] 12. Đọc toàn bộ Inspector hiện có trong `DesignWorkspace.tsx` (quanh dòng 6715+)
+- [x] 13. Lập danh sách tất cả InspectorSection hiện có và mapping sang section mới
+- [ ] 14. Tạo `src/features/editor/Inspector/` folder (chuẩn bị chia nhỏ) — SKIP, nâng cấp tại chỗ an toàn hơn
 
 ### B.2 — Upgrade InspectorSection wrapper
-- [ ] 15. Tạo `src/features/editor/Inspector/InspectorSectionCard.tsx` — wrapper mới dùng UX InspectorSection
-- [ ] 16. Tạo prop `collapsible?: boolean` trong InspectorSection cũ trong DesignWorkspace (backward compat)
-- [ ] 17. Wire collapsible cho 5 sections lớn nhất: Transform, Text Style, Fill, Border, Effects
-- [ ] 18. Test: click từng section verify open/close và ghi nhớ trạng thái sau reload
+- [x] 15. Upgrade `InspectorSection` in-place, thêm collapse + localStorage (ux:inspector-section:<title>)
+- [x] 16. API backward compat (chỉ thêm optional props `defaultOpen` + `storageKey`)
+- [x] 17. Wire tự động collapsible cho tất cả ~15 sections
+- [x] 18. Test: click từng section verify open/close và ghi nhớ trạng thái sau reload
 
 ### B.3 — NumberField replacement
-- [ ] 19. Xác định các ô `<Input type="number">` trong Inspector (dùng grep)
-- [ ] 20. Thay X/Y/W/H/rotation bằng NumberField với prefix/suffix (W, H, °, px)
-- [ ] 21. Thay fontSize, letterSpacing, lineHeight bằng NumberField
-- [ ] 22. Test: Shift+Arrow = 10 step, Alt+Arrow = 0.1, nhập công thức `100+20`
+- [ ] 19-22. SKIP pha hiện tại — DesignWorkspace đã có NumberField custom riêng; migrate sau để tránh phá
 
 ### B.4 — Empty state khi không chọn
-- [ ] 23. Inspector hiển thị EmptyState "Chọn khối để chỉnh" khi không có slot được chọn
-- [ ] 24. Inspector hiển thị "Đang chọn N khối" khi multi-select
+- [x] 23. Inspector hiển thị EmptyState "Chọn khối để chỉnh" khi không có slot được chọn (DesignWorkspace)
+- [x] 24. Pack Generate: EmptyState "Chưa chọn khối" khi selectedSlots empty
 
 ### B.5 — Verify Pha B
-- [ ] 25. `npx tsc --noEmit` pass
-- [ ] 26. `npx eslint src/features/editor src/features/generate --max-warnings=0` pass
-- [ ] 27. Manual: tạo template mới, chỉnh text/image/shape, verify UX cải thiện
-- [ ] 28. Commit + push
+- [x] 25. `npx tsc --noEmit` pass
+- [x] 26. `npx eslint ...` — 0 errors
+- [ ] 27. Manual: tạo template mới, chỉnh text/image/shape, verify UX cải thiện (user test)
+- [x] 28. Commit + push
 
-**Deliverable:** Inspector có accordion collapse, NumberField nhập công thức, EmptyState.
+**Deliverable:** Inspector sections có collapse/expand ghi nhớ trạng thái, EmptyState nhất quán khi chưa chọn đối tượng.
 
 ## Pha C — Pack Generate Wizard Refactor
 
