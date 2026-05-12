@@ -30,6 +30,33 @@ export interface EntityBindingTarget {
   candidateEntities: Entity[];
 }
 
+function slotSourceValue(value: string | undefined): string | undefined {
+  if (!value || value === "__all__") return undefined;
+  return value;
+}
+
+function entityMatchesSlotSource(entity: Entity, slot: Slot): boolean {
+  const config = slot.dataSourceConfig;
+  if (!config) return true;
+  const selectedSheet = slotSourceValue(config.selectedSheet);
+  const filterMoHinh = slotSourceValue(config.filterMoHinh);
+  const filterPhongCach = slotSourceValue(config.filterPhongCach);
+  if (selectedSheet && entity.sheetName !== selectedSheet) return false;
+  if (filterMoHinh && entity.categoryMain !== filterMoHinh) return false;
+  if (filterPhongCach && entity.categorySub !== filterPhongCach) return false;
+  return true;
+}
+
+function filterPoolForSlots(pool: Entity[], slots: Slot[]): Entity[] {
+  const scopedSlots = slots.filter((slot) => slot.dataSourceConfig);
+  if (scopedSlots.length === 0) return pool;
+  let next = pool;
+  for (const slot of scopedSlots) {
+    next = next.filter((entity) => entityMatchesSlotSource(entity, slot));
+  }
+  return next;
+}
+
 /**
  * Filter pool entity theo cardGroup.entitySource.
  */
@@ -592,7 +619,7 @@ export function buildEntityBindingTargets(
     targets.push({
       targetId: cluster.key,
       slotIds: cluster.slots.map((slot) => slot.slotId),
-      candidateEntities: entityPool,
+      candidateEntities: filterPoolForSlots(entityPool, cluster.slots),
     });
   }
 
@@ -614,7 +641,7 @@ export function buildEntityBindingTargets(
         slotIds: groupSlots.map((slot) =>
           cardIndex === 0 ? slot.slotId : `${slot.slotId}__c${cardIndex}`,
         ),
-        candidateEntities: pool,
+        candidateEntities: filterPoolForSlots(pool, groupSlots),
       });
     }
   }

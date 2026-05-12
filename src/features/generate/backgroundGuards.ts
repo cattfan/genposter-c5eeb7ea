@@ -27,7 +27,7 @@ export function isLikelyGeneratePageBackgroundSlot(
   const coversMostOfPage = slotArea >= canvasArea * 0.58;
   const backgroundName = normalizeBackgroundName(slot.name);
 
-  return nearlyFullBleed && (coversMostOfPage || backgroundName);
+  return backgroundName && nearlyFullBleed && coversMostOfPage;
 }
 
 function normalizeBackgroundName(value: string | undefined): boolean {

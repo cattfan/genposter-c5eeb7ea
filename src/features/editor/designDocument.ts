@@ -128,6 +128,7 @@ function slotBindingToRef(slot: Slot, canvas: CanvasSize): DataBindingRef | unde
       allowedAssetRoles: slot.allowedAssetRoles,
       overflowRule: slot.overflowRule,
       visibilityRule: slot.visibilityRule,
+      dataSourceConfig: slot.dataSourceConfig,
     },
   };
 }
@@ -253,13 +254,17 @@ function restoreElementRelationships(elements: DesignElement[]): DesignElement[]
 
 function bindingRefToSlot(
   binding: DataBindingRef | undefined,
-): Pick<Slot, "bindingPath" | "allowedAssetRoles" | "overflowRule" | "visibilityRule"> {
+): Pick<
+  Slot,
+  "bindingPath" | "allowedAssetRoles" | "overflowRule" | "visibilityRule" | "dataSourceConfig"
+> {
   if (!binding || binding.source !== "legacy_template") {
     return {
       bindingPath: undefined,
       allowedAssetRoles: undefined,
       overflowRule: undefined,
       visibilityRule: undefined,
+      dataSourceConfig: undefined,
     };
   }
 
@@ -268,6 +273,7 @@ function bindingRefToSlot(
     allowedAssetRoles: binding.meta?.allowedAssetRoles as Slot["allowedAssetRoles"] | undefined,
     overflowRule: binding.meta?.overflowRule as Slot["overflowRule"] | undefined,
     visibilityRule: binding.meta?.visibilityRule as Slot["visibilityRule"] | undefined,
+    dataSourceConfig: binding.meta?.dataSourceConfig as Slot["dataSourceConfig"] | undefined,
   };
 }
 

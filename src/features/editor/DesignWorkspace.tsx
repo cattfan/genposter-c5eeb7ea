@@ -5972,7 +5972,8 @@ function DesignStage({
                     <div
                       data-design-element
                       data-design-element-id={element.elementId}
-                      onContextMenu={() => {
+                      onContextMenu={(event) => {
+                        event.stopPropagation();
                         if (!selected) onSelect(element.elementId, false);
                       }}
                       onDoubleClick={(event) => {
@@ -5985,6 +5986,7 @@ function DesignStage({
                         }
                       }}
                       onPointerDown={(event) => {
+                        if (event.button !== 0) return;
                         if (isEditingText || toolIsPan) return;
                         event.stopPropagation();
                         const additive = event.shiftKey || event.ctrlKey || event.metaKey;
@@ -6267,6 +6269,7 @@ function DesignStage({
                           />
                           <button
                             onPointerDown={(event) => {
+                              if (event.button !== 0) return;
                               event.stopPropagation();
                               const canvas = (event.currentTarget as HTMLElement).closest(
                                 "[data-design-canvas]",
@@ -6346,6 +6349,7 @@ function DesignStage({
                               };
                               startPointerSession(event, { onMove, onEnd, onCancel });
                             }}
+                            onContextMenu={(event) => event.stopPropagation()}
                             style={{
                               position: "absolute",
                               left: "50%",
@@ -6371,6 +6375,7 @@ function DesignStage({
                             <button
                               key={handle.key}
                               onPointerDown={(event) => {
+                                if (event.button !== 0) return;
                                 event.stopPropagation();
                                 const canvas = (event.currentTarget as HTMLElement).closest(
                                   "[data-design-canvas]",
@@ -6468,6 +6473,7 @@ function DesignStage({
                                 };
                                 startPointerSession(event, { onMove, onEnd, onCancel });
                               }}
+                              onContextMenu={(event) => event.stopPropagation()}
                               style={{
                                 position: "absolute",
                                 width: 16,
@@ -6514,6 +6520,7 @@ function DesignStage({
                     <button
                       key={handle.key}
                       onPointerDown={(event) => {
+                        if (event.button !== 0) return;
                         event.stopPropagation();
                         const canvas = (event.currentTarget as HTMLElement).closest(
                           "[data-design-canvas]",
@@ -6606,6 +6613,7 @@ function DesignStage({
                         };
                         startPointerSession(event, { onMove, onEnd, onCancel });
                       }}
+                      onContextMenu={(event) => event.stopPropagation()}
                       style={{
                         position: "absolute",
                         width: 16,

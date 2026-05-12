@@ -275,6 +275,9 @@ function generateEntityBindJob(
     return true;
   };
 
+  const templateHasSlotSourceConfig = (template: PageTemplate | undefined) =>
+    !!template?.slots.some((slot) => slot.dataSourceConfig);
+
   const jobSeed = String(Date.now()) + ":" + pack.packTemplateId;
 
   const pageOrderCache = new Map<string, Entity[]>();
@@ -282,7 +285,9 @@ function generateEntityBindJob(
     const cached = pageOrderCache.get(templateId);
     if (cached) return cached;
     const config = resolvePageConfig(templateId);
-    const scopedEntityPool = entityPool.filter((entity) => matchesPageSource(entity, config));
+    const scopedEntityPool = templateHasSlotSourceConfig(pageMap.get(templateId))
+      ? entityPool.slice()
+      : entityPool.filter((entity) => matchesPageSource(entity, config));
     const source = config.onlyPartner
       ? scopedEntityPool.filter((entity) => entity.partnerFlag)
       : scopedEntityPool.slice();
@@ -369,14 +374,17 @@ function generateEntityBindJob(
       orderedTpls.forEach((tpl, i) => {
         const demand = templateDemands.get(tpl.pageTemplateId) ?? 1;
         const config = resolvePageConfig(tpl.pageTemplateId);
-        const pageEntityPool = selectPageEntityPool(
-          getPageEntityOrder(tpl.pageTemplateId),
-          packOffset,
-          demand,
-          config.partnerQuotaPerPage,
-          batchState.usedEntityIds,
-          batchState.usedEntityKeys,
-        );
+        const pageOrder = getPageEntityOrder(tpl.pageTemplateId);
+        const pageEntityPool = templateHasSlotSourceConfig(tpl)
+          ? rotateEntities(pageOrder, packOffset)
+          : selectPageEntityPool(
+              pageOrder,
+              packOffset,
+              demand,
+              config.partnerQuotaPerPage,
+              batchState.usedEntityIds,
+              batchState.usedEntityKeys,
+            );
         pushPage(tpl, pageEntityPool, i, batchState);
         packOffset += demand;
       });
@@ -387,14 +395,17 @@ function generateEntityBindJob(
     orderedTpls.forEach((tpl, i) => {
       const demand = templateDemands.get(tpl.pageTemplateId) ?? 1;
       const config = resolvePageConfig(tpl.pageTemplateId);
-      const pageEntityPool = selectPageEntityPool(
-        getPageEntityOrder(tpl.pageTemplateId),
-        pageOffset,
-        demand,
-        config.partnerQuotaPerPage,
-        batchState.usedEntityIds,
-        batchState.usedEntityKeys,
-      );
+      const pageOrder = getPageEntityOrder(tpl.pageTemplateId);
+      const pageEntityPool = templateHasSlotSourceConfig(tpl)
+        ? rotateEntities(pageOrder, pageOffset)
+        : selectPageEntityPool(
+            pageOrder,
+            pageOffset,
+            demand,
+            config.partnerQuotaPerPage,
+            batchState.usedEntityIds,
+            batchState.usedEntityKeys,
+          );
       pushPage(tpl, pageEntityPool, i, batchState);
       pageOffset += demand;
     });

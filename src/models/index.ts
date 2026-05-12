@@ -192,6 +192,11 @@ export interface Slot {
   isUploadedBackground?: boolean;
   crop?: ImageCrop;
   dataSourceId?: ID;
+  dataSourceConfig?: {
+    selectedSheet?: string;
+    filterMoHinh?: string;
+    filterPhongCach?: string;
+  };
 }
 
 export type PartnerMode = "strict_partner" | "priority_partner" | "balanced_partner";

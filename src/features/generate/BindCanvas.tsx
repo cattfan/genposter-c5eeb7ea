@@ -176,11 +176,8 @@ export function BindCanvas({
     () =>
       selectedSlotIds
         .map((slotId) => visibleSlotById.get(slotId))
-        .filter(
-          (slot): slot is ExpandedSlot =>
-            !!slot && !isLikelyGeneratePageBackgroundSlot(slot, template),
-        ),
-    [selectedSlotIds, template, visibleSlotById],
+        .filter((slot): slot is ExpandedSlot => !!slot),
+    [selectedSlotIds, visibleSlotById],
   );
 
   const selectedBounds = useMemo(() => {
@@ -353,15 +350,11 @@ export function BindCanvas({
             scale={scale}
             selected={selectedSlotIds.includes(slot.slotId)}
             onSelect={(mode) =>
-              isLikelyGeneratePageBackgroundSlot(slot, template)
-                ? undefined
-                : onSelectSlot(
-                    slot.slotId,
-                    mode,
-                    mode === "replace"
-                      ? getReplaceSlotIds(slot, visiblePrimarySlots, template, slotItems)
-                      : getRelatedSlotIds(slot, visiblePrimarySlots, template, slotItems),
-                  )
+              onSelectSlot(
+                slot.slotId,
+                mode,
+                getSelectionIdsForMode(slot, mode, visiblePrimarySlots, template, slotItems),
+              )
             }
             entity={resolvedEntity}
             entityPool={entityPool}
@@ -379,6 +372,7 @@ export function BindCanvas({
         <SlotHitTarget
           key={`hit-${slot.slotId}`}
           slot={slot}
+          template={template}
           scale={scale}
           selected={selectedSlotIds.includes(slot.slotId)}
           flatPreview={flatPreview}
@@ -386,9 +380,7 @@ export function BindCanvas({
             onSelectSlot(
               slot.slotId,
               mode,
-              mode === "replace"
-                ? getReplaceSlotIds(slot, visiblePrimarySlots, template, slotItems)
-                : getRelatedSlotIds(slot, visiblePrimarySlots, template, slotItems),
+              getSelectionIdsForMode(slot, mode, visiblePrimarySlots, template, slotItems),
             )
           }
         />
@@ -400,13 +392,12 @@ export function BindCanvas({
           scale={scale}
           flatPreview={flatPreview}
           label={bindingStatusLabel(slot)}
+          showLabel={!isLikelyGeneratePageBackgroundSlot(slot, template)}
           onSelect={(mode) =>
             onSelectSlot(
               slot.slotId,
               mode,
-              mode === "replace"
-                ? getReplaceSlotIds(slot, visiblePrimarySlots, template, slotItems)
-                : getRelatedSlotIds(slot, visiblePrimarySlots, template, slotItems),
+              getSelectionIdsForMode(slot, mode, visiblePrimarySlots, template, slotItems),
             )
           }
         />
@@ -420,7 +411,7 @@ export function BindCanvas({
 }
 
 function isSelectableSlot(slot: Slot, template: PageTemplate): boolean {
-  return isDataBindableSlot(slot, template) || slot.kind === "section" || slot.kind === "group";
+  return isCanvasSelectableSlot(slot, template);
 }
 
 function isDataBindableSlot(slot: Slot, template?: PageTemplate): boolean {
@@ -428,6 +419,12 @@ function isDataBindableSlot(slot: Slot, template?: PageTemplate): boolean {
   if (isDataGroupMarkerSlot(slot)) return false;
   if (isLikelyGeneratePageBackgroundSlot(slot, template)) return false;
   return slot.kind === "text" || slot.kind === "image" || slot.kind === "shape";
+}
+
+function isCanvasSelectableSlot(slot: Slot, template: PageTemplate): boolean {
+  if (isDataGroupMarkerSlot(slot)) return false;
+  if (isLikelyGeneratePageBackgroundSlot(slot, template)) return true;
+  return isDataBindableSlot(slot, template) || slot.kind === "section" || slot.kind === "group";
 }
 
 function bindingStatusLabel(slot: Slot): string {
@@ -793,6 +790,28 @@ function getReplaceSlotIds(
   return [slot.slotId];
 }
 
+function getSelectionIdsForMode(
+  slot: Slot,
+  mode: BindCanvasSelectionMode,
+  slots: ExpandedSlot[],
+  template: PageTemplate,
+  slotItems?: RenderedItem[],
+): string[] {
+  if (mode === "replace") {
+    if (isLikelyGeneratePageBackgroundSlot(slot, template)) return [slot.slotId];
+
+    const groupSelectionIds = getActualGroupSelectionIds(slot, slots);
+    if (groupSelectionIds.length > 0) return groupSelectionIds;
+
+    const dataGroupIds = getDataGroupSlotIds(slot, slots, template);
+    if (dataGroupIds.length > 1) return dataGroupIds;
+
+    return [slot.slotId];
+  }
+
+  return getRelatedSlotIds(slot, slots, template, slotItems);
+}
+
 function getRelatedSlotIds(
   slot: Slot,
   slots: ExpandedSlot[],
@@ -840,19 +859,21 @@ function buildSelectionBounds(slots: ExpandedSlot[]) {
 
 function SlotHitTarget({
   slot,
+  template,
   scale,
   selected,
   flatPreview,
   onSelect,
 }: {
   slot: ExpandedSlot;
+  template: PageTemplate;
   scale: number;
   selected: boolean;
   flatPreview?: boolean;
   onSelect: (mode: BindCanvasSelectionMode) => void;
 }) {
-  const isBindable = isDataBindableSlot(slot) || slot.kind === "section" || slot.kind === "group";
-  if (!isBindable) return null;
+  const isSelectable = isCanvasSelectableSlot(slot, template);
+  if (!isSelectable) return null;
 
   const fontSize = (slot.style?.fontSize ?? 24) * scale;
   const minHeight = slot.kind === "text" ? Math.max(24, fontSize * 1.25) : 12;
@@ -1162,13 +1183,13 @@ function BindSlot({
   const rot = slot.rotation ? `rotate(${slot.rotation}deg)` : "";
   const transform = (rot + flip).trim() || undefined;
   const hasBinding = !!slot.bindingPath;
-  const isBindable = isDataBindableSlot(slot, template) || slot.kind === "section" || slot.kind === "group";
+  const isSelectable = isCanvasSelectableSlot(slot, template);
 
   const outline = selected
     ? "1px solid hsl(var(--primary) / 0.72)"
     : hasBinding
       ? "2px dashed hsl(var(--primary) / 0.6)"
-      : showSafeFrame && isBindable
+      : showSafeFrame && isSelectable
         ? "1px dashed hsl(var(--border))"
         : "1px dashed transparent";
 
@@ -1189,13 +1210,13 @@ function BindSlot({
     outline,
     outlineOffset: 0,
     boxSizing: "border-box",
-    cursor: isBindable ? "pointer" : "default",
-    pointerEvents: isBindable ? "auto" : "none",
+    cursor: isSelectable ? "pointer" : "default",
+    pointerEvents: isSelectable ? "auto" : "none",
   };
 
   const onClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!isBindable) return;
+    if (!isSelectable) return;
     if (e.shiftKey) {
       onSelect("group");
       return;

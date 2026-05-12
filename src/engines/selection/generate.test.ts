@@ -86,6 +86,47 @@ describe("generatePackJob entity allocation", () => {
     }
   });
 
+  it("does not repeat entities when multiple pages use the same data source", () => {
+    const pageA = template("page-a");
+    const pageB = template("page-b");
+    const pack: PackTemplate = {
+      packTemplateId: "pack",
+      name: "Pack",
+      orderedPages: [pageA.pageTemplateId, pageB.pageTemplateId],
+      requiredPages: [pageA.pageTemplateId, pageB.pageTemplateId],
+      optionalPages: [],
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const entities = [
+      { ...entity("h1", "Homestay 1", "Address 1"), sheetName: "Homestay" },
+      { ...entity("h2", "Homestay 2", "Address 2"), sheetName: "Homestay" },
+      { ...entity("h3", "Homestay 3", "Address 3"), sheetName: "Homestay" },
+    ];
+
+    const result = generatePackJob({
+      pack,
+      pageTemplates: [pageA, pageB],
+      entities: [],
+      assets: [],
+      mode: "one-entity-per-pack",
+      entityPool: entities,
+      batchCount: 2,
+      pageConfigs: {
+        [pageA.pageTemplateId]: { selectedSheet: "Homestay" },
+        [pageB.pageTemplateId]: { selectedSheet: "Homestay" },
+      },
+    });
+
+    expect(result.pages).toHaveLength(4);
+    const pagesPerBundle = pack.orderedPages.length;
+    for (let start = 0; start < result.pages.length; start += pagesPerBundle) {
+      const bundle = result.pages.slice(start, start + pagesPerBundle);
+      const keys = bundle.flatMap((page) => assignedContentKeys(page, entities));
+      expect(new Set(keys).size).toBe(keys.length);
+    }
+  });
+
   it("leaves extra groups unassigned instead of repeating a venue in one bundle", () => {
     const pageA = template("page-a", 2);
     const pack: PackTemplate = {
@@ -152,5 +193,89 @@ describe("generatePackJob entity allocation", () => {
     });
 
     expect(result.pages).toHaveLength(10);
+  });
+
+  it("supports different source filters for separate data groups on one page", () => {
+    const pageA: PageTemplate = {
+      ...template("page-a", 0),
+      slots: [
+        {
+          slotId: "breakfast-name",
+          kind: "text",
+          x: 0,
+          y: 0,
+          width: 100,
+          height: 30,
+          bindingPath: "entity.name",
+          dataGroupId: "breakfast",
+          dataSourceConfig: {
+            selectedSheet: "Quan_an",
+            filterMoHinh: "An sang",
+          },
+        },
+        {
+          slotId: "lunch-name",
+          kind: "text",
+          x: 0,
+          y: 120,
+          width: 100,
+          height: 30,
+          bindingPath: "entity.name",
+          dataGroupId: "lunch",
+          dataSourceConfig: {
+            selectedSheet: "Quan_an",
+            filterMoHinh: "An trua",
+          },
+        },
+        {
+          slotId: "dinner-name",
+          kind: "text",
+          x: 0,
+          y: 240,
+          width: 100,
+          height: 30,
+          bindingPath: "entity.name",
+          dataGroupId: "dinner",
+          dataSourceConfig: {
+            selectedSheet: "Quan_an",
+            filterMoHinh: "An toi",
+          },
+        },
+      ],
+    };
+    const pack: PackTemplate = {
+      packTemplateId: "pack",
+      name: "Pack",
+      orderedPages: [pageA.pageTemplateId],
+      requiredPages: [pageA.pageTemplateId],
+      optionalPages: [],
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const entities = [
+      { ...entity("e1", "Mì sáng", "Address 1"), categoryMain: "An sang" },
+      { ...entity("e2", "Cơm trưa", "Address 2"), categoryMain: "An trua" },
+      { ...entity("e3", "Lẩu tối", "Address 3"), categoryMain: "An toi" },
+      { ...entity("e4", "Cafe", "Address 4"), categoryMain: "Cafe" },
+    ];
+
+    const result = generatePackJob({
+      pack,
+      pageTemplates: [pageA],
+      entities: [],
+      assets: [],
+      mode: "one-entity-per-pack",
+      entityPool: entities,
+      batchCount: 1,
+    });
+
+    expect(result.pages).toHaveLength(1);
+    expect(result.pages[0]?.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ slotId: "breakfast-name", entityId: "e1" }),
+        expect.objectContaining({ slotId: "lunch-name", entityId: "e2" }),
+        expect.objectContaining({ slotId: "dinner-name", entityId: "e3" }),
+      ]),
+    );
   });
 });
