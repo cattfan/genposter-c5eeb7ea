@@ -3486,6 +3486,7 @@ export function PackTabContent({
                               event.preventDefault();
                               void exportZip();
                             }}
+                            title="Xuất toàn bộ bộ ảnh đã chọn thành file ZIP"
                           >
                             <Package className="size-4 mr-2" /> Xuất ZIP
                           </Button>
