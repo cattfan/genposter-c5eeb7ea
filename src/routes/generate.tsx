@@ -739,7 +739,11 @@ function GeneratePage() {
 
   return (
     <PageContainer className="max-w-[1600px]">
-      <PageHeader icon={<Sparkles className="size-5" />} title="Tạo nội dung" />
+      <PageHeader
+        icon={<Sparkles className="size-5" />}
+        title="Tạo nội dung"
+        description="Đổ dữ liệu thực từ entity vào khuôn mẫu để tạo bộ ảnh hàng loạt."
+      />
 
       <PackTabContent
         packs={packs ?? []}

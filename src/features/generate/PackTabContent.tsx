@@ -2759,10 +2759,12 @@ export function PackTabContent({
           <div className="grid grid-cols-12 gap-4">
             {/* Cột 1: Cấu hình */}
             <Card className="col-span-12 lg:sticky lg:top-4 lg:col-span-3 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-hidden">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm">Tạo bộ ảnh</CardTitle>
+              <CardHeader className="border-b pb-2">
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <Sparkles className="size-4 text-primary" /> Cấu hình bộ ảnh
+                </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:pr-3">
+              <CardContent className="space-y-3 pt-3 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:pr-3">
                 <div>
                   <Label className="text-xs">Số lượng tạo bộ ảnh</Label>
                   <div className="mt-1 flex items-center gap-2">

@@ -401,6 +401,7 @@ function SettingsPage() {
       <PageHeader
         icon={<SettingsIcon className="size-5" />}
         title="Cài đặt"
+        description="Cấu hình AI provider, backup dữ liệu, và các tuỳ chọn khác."
       />
 
       <Card>

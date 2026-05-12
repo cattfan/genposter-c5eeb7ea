@@ -1736,6 +1736,7 @@ function DataPage() {
       <PageHeader
         icon={<Database />}
         title="Dữ liệu"
+        description="Nhập entity và ảnh từ Google Sheet, CSV, hoặc upload trực tiếp."
       />
 
       <div className="mb-4 flex flex-col gap-4">
