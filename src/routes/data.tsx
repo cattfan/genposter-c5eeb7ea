@@ -2087,8 +2087,12 @@ function DataPage() {
                     )}
                   </>
                 ) : (
-                  <div className="grid min-h-72 place-items-center rounded-lg border border-dashed text-center text-sm text-muted-foreground">
-                    Dán link Google Sheet hoặc chọn file để xem dữ liệu mẫu.
+                  <div className="p-4">
+                    <EmptyState
+                      icon={<LinkIcon />}
+                      title="Chưa có nguồn dữ liệu"
+                      description="Dán link Google Sheet hoặc chọn file CSV ở trên để xem dữ liệu mẫu."
+                    />
                   </div>
                 )}
               </CardContent>

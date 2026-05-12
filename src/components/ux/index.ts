@@ -11,3 +11,4 @@ export { StepIndicator } from "./StepIndicator";
 export type { Step } from "./StepIndicator";
 export { ShortcutsDialog } from "./ShortcutsDialog";
 export { useShortcutsDialogHotkey } from "./useShortcutsDialogHotkey";
+export { Skeleton, SkeletonList } from "./Skeleton";

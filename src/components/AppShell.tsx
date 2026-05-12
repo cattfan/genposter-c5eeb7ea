@@ -11,6 +11,7 @@ import {
   Menu,
   Moon,
   Sun,
+  Keyboard,
   Command as CommandIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -281,6 +282,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     (tự động)
                   </span>
                 ) : null}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (typeof window !== "undefined") {
+                window.dispatchEvent(new KeyboardEvent("keydown", { key: "?", bubbles: true }));
+              }
+            }}
+            className={cn(
+              "flex w-full items-center rounded-md px-2 py-2 text-sm text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+              effectiveCollapsed ? "justify-center" : "gap-2",
+            )}
+            title="Xem danh sách phím tắt (?)"
+            aria-label="Xem danh sách phím tắt"
+          >
+            <Keyboard className="size-4 shrink-0" />
+            {!effectiveCollapsed && (
+              <span className="flex flex-1 items-center justify-between truncate">
+                <span>Phím tắt</span>
+                <kbd className="rounded border bg-sidebar-accent/40 px-1.5 py-0.5 text-[10px] font-mono text-sidebar-foreground/70">
+                  ?
+                </kbd>
               </span>
             )}
           </button>

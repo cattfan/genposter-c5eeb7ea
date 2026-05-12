@@ -45,7 +45,7 @@ import {
 import { aiLayoutToTemplateWithQuality } from "@/features/ai/templateFromImage";
 import { buildComboFromAiResult, persistCombo } from "@/features/ai/comboFromImages";
 import { PageContainer } from "@/components/PageHeader";
-import { EmptyState } from "@/components/ux";
+import { EmptyState, SkeletonList } from "@/components/ux";
 import { PackBuilder } from "@/features/packs/PackBuilder";
 import { PackPagePreview } from "@/features/packs/PackPagePreview";
 import { cn } from "@/lib/utils";
@@ -988,7 +988,9 @@ function TemplatesPage() {
       </Dialog>
 
       <div className="flex flex-col gap-4">
-        {packs?.length === 0 ? (
+        {packs === undefined ? (
+          <SkeletonList count={3} height="h-32" />
+        ) : packs.length === 0 ? (
           <EmptyState
             icon={<Package />}
             title="Chưa có bộ khuôn"

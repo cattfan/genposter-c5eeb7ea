@@ -8,7 +8,7 @@ import { useJobStore } from "@/features/generate/jobStore";
 import { toast } from "sonner";
 import { History } from "lucide-react";
 import { PageContainer, PageHeader } from "@/components/PageHeader";
-import { EmptyState } from "@/components/ux";
+import { EmptyState, SkeletonList } from "@/components/ux";
 
 export const Route = createFileRoute("/history")({
   component: HistoryPage,
@@ -25,6 +25,7 @@ function HistoryPage() {
         title="Lịch sử Job"
         description="Các lần export gần đây. Có thể mở lại để tiếp tục chỉnh sửa."
       />
+      {jobs === undefined && <SkeletonList count={3} height="h-20" />}
       {jobs && jobs.length === 0 && (
         <EmptyState
           icon={<History />}
