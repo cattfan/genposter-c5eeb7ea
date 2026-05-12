@@ -24,14 +24,24 @@ export function buildPartnerWorkbookBlob(input: {
   entities: Entity[];
 }): Blob {
   const partners = collectPartnerLikeEntities(input.pages, input.entities);
-  const dataRows =
-    partners.length > 0
-      ? [partners.map((entity) => stringifyCell(entity.name))]
-      : [["Không có đối tác hoặc dữ liệu nào trong bộ ảnh đã chọn."]];
+  const headers = ["Tên", "Danh mục", "Địa chỉ", "Đối tác"];
+  const dataRows = partners.length > 0
+    ? [
+        headers,
+        ...partners.map((entity) => [
+          entity.name || "",
+          entity.categoryMain || entity.categorySub || "",
+          entity.address || "",
+          entity.partnerFlag ? "Có" : "",
+        ]),
+      ]
+    : [["Không có đối tác hoặc dữ liệu nào trong bộ ảnh đã chọn."]];
 
   const workbook = XLSX.utils.book_new();
   const partnerSheet = XLSX.utils.aoa_to_sheet(dataRows);
-  partnerSheet["!cols"] = partners.length ? partners.map(() => ({ wch: 34 })) : [{ wch: 48 }];
+  partnerSheet["!cols"] = partners.length
+    ? [{ wch: 30 }, { wch: 18 }, { wch: 40 }, { wch: 10 }]
+    : [{ wch: 48 }];
   XLSX.utils.book_append_sheet(workbook, partnerSheet, "doitac");
 
   const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
@@ -220,29 +230,30 @@ function buildFallbackCaptions(
 ): CaptionVariant[] {
   const names = entities.map((entity) => entity.name).filter(Boolean);
   const topNames = names.slice(0, 4).join(", ");
-  const categoryText = Array.from(
-    new Set(entities.map((entity) => entity.categoryMain || entity.categorySub).filter(Boolean)),
-  ).join(", ");
-  const baseBody =
-    topNames.length > 0
-      ? `Gợi ý ${packName.toLowerCase()} với ${topNames}. Lưu lại để lên lịch ăn chơi, check-in, homestay và trải nghiệm du lịch Đà Lạt dễ hơn.`
-      : `Gợi ý ${packName.toLowerCase()} cho lịch trình du lịch Đà Lạt, review địa điểm, check-in và lưu lại những lựa chọn đáng thử.`;
-  const variants = [
+  const variants: Array<{ headline: string; body: string }> = [
     {
-      headline: `${packName} ĐÁNG LƯU NGAY`,
-      body: baseBody,
+      headline: `Đà Lạt hóa ra có cả list spot xịn mlem vậy 😎`,
+      body: topNames.length > 0
+        ? `Em thề những địa điểm này rất đáng để lưu lại đó nha. Gồm ${topNames}. Dùng cẩm nang này, cả lịch trình Đà Lạt sẽ chất hơn, nhanh hơn, không sợ trôi giữa muôn vàn lựa chọn đâu.`
+        : `Em thề những địa điểm này rất đáng để lưu lại đó nha. Dùng cẩm nang này, cả lịch trình Đà Lạt sẽ chất hơn, nhanh hơn, không sợ trôi giữa muôn vàn lựa chọn đâu.`,
     },
     {
-      headline: `ĐI ĐÀ LẠT ĐỪNG BỎ QUA LIST NÀY`,
-      body: `${baseBody} ${categoryText ? `Chủ đề nổi bật: ${categoryText}.` : ""}`.trim(),
+      headline: `Lưu ngay ${names.length || "bộ"} gợi ý Đà Lạt trước khi đi 📌`,
+      body: topNames.length > 0
+        ? `Mình tổng hợp ${packName.toLowerCase()} với ${topNames}. Ai đi Đà Lạt mà chưa biết đi đâu thì save post này lại nha!`
+        : `Mình tổng hợp ${packName.toLowerCase()} cho ai đi Đà Lạt mà chưa biết đi đâu. Save post này lại nha!`,
     },
     {
-      headline: `LỊCH ĐÀ LẠT GỌN HƠN VỚI ${names.length || "NHIỀU"} GỢI Ý`,
-      body: baseBody,
+      headline: `Đà Lạt đi hoài không chán vì có list này 🌿`,
+      body: topNames.length > 0
+        ? `Toàn chỗ chất lượng: ${topNames}. Lưu lại rồi tag đứa hay rủ đi Đà Lạt để lên lịch ngay!`
+        : `Toàn chỗ chất lượng, lưu lại rồi tag đứa hay rủ đi Đà Lạt để lên lịch ngay!`,
     },
     {
-      headline: `${bundleLabel ?? "BỘ ẢNH"} NÀY HỢP ĐỂ LƯU TRƯỚC KHI ĐI ĐÀ LẠT`,
-      body: baseBody,
+      headline: `Newbie Đà Lạt cần gì thì coi đây 🗺️`,
+      body: topNames.length > 0
+        ? `Lần đầu đi Đà Lạt? Đây là ${packName.toLowerCase()} mình recommend: ${topNames}. Đi theo list này khỏi lo lạc!`
+        : `Lần đầu đi Đà Lạt? Đây là ${packName.toLowerCase()} mình recommend. Đi theo list này khỏi lo lạc!`,
     },
   ];
 
@@ -259,7 +270,7 @@ function normalizeCaptionVariant(
   entities: Entity[],
 ): CaptionVariant {
   return {
-    headline: trimAt(headline.toUpperCase(), 89),
+    headline: trimAt(headline.trim(), 100),
     body: trimAt(body.replace(/\s+/g, " ").trim(), 300),
     hashtags: ensureHashtags(hashtags, entities),
   };
@@ -324,15 +335,8 @@ function formatCaptionVariant(
   bundleLabel: string | undefined,
 ): string {
   return [
-    `CHÚ THÍCH ${index}${bundleLabel ? ` - ${bundleLabel}` : ""}`,
-    "",
-    "Phần 1 - Tiêu đề (Headline):",
     caption.headline,
-    "",
-    "Phần 2 - Nội dung (Body/SEO):",
     caption.body,
-    "",
-    "Phần 3 - Danh sách Hashtags:",
     caption.hashtags.join(" "),
   ].join("\n");
 }
