@@ -115,7 +115,7 @@ import {
 } from "@/features/generate/generatePresetPortability";
 import { formatTemplateDisplayName } from "@/lib/templateNames";
 import { usePageCommands, type CommandEntry } from "@/components/CommandPalette";
-import { EmptyState } from "@/components/ux";
+import { EmptyState, StepIndicator } from "@/components/ux";
 
 type Filter = "all" | "selected" | "errors" | "partner";
 type SurfaceSelectionRect = { left: number; top: number; width: number; height: number };
@@ -2582,9 +2582,22 @@ export function PackTabContent({
           </div>
 
           {matchingPresets.length === 0 ? (
-            <div className="grid min-h-64 place-items-center rounded-xl border border-dashed bg-card text-sm text-muted-foreground">
-              Chưa có khuôn mẫu nào.
-            </div>
+            <EmptyState
+              icon={<Package />}
+              title="Chưa có khuôn mẫu nào"
+              description={
+                selectedPack
+                  ? "Bấm 'Tạo khuôn mới' để bắt đầu thiết kế từ bộ mẫu đã chọn."
+                  : "Chọn một bộ mẫu ở trên, rồi bấm 'Tạo khuôn mới' để bắt đầu."
+              }
+              action={
+                selectedPack ? (
+                  <Button type="button" onClick={createPresetAndOpen}>
+                    <Save className="mr-2 size-4" /> Tạo khuôn mới
+                  </Button>
+                ) : null
+              }
+            />
           ) : (
             <div className="flex flex-col gap-4">
               {matchingPresets.map((preset) => {
@@ -2705,10 +2718,42 @@ export function PackTabContent({
         </div>
       ) : (
         <>
-          <div className="mb-3 flex items-center gap-3">
-            <Button type="button" variant="outline" onClick={() => setWorkspaceOpen(false)}>
+          <div className="mb-3 flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setWorkspaceOpen(false)}
+              title="Quay lại danh sách khuôn"
+            >
               <ArrowLeft className="mr-2 size-4" /> Quay lại
             </Button>
+            <div className="min-w-0 flex-1">
+              <StepIndicator
+                steps={[
+                  {
+                    id: "pack",
+                    label: "Chọn khuôn",
+                    enabled: true,
+                  },
+                  {
+                    id: "design",
+                    label: "Đổ dữ liệu",
+                    enabled: true,
+                  },
+                  {
+                    id: "export",
+                    label: "Xem & xuất",
+                    enabled: (currentJob?.pages.length ?? 0) > 0,
+                  },
+                ]}
+                current={(currentJob?.pages.length ?? 0) > 0 ? "export" : "design"}
+                completed={["pack"]}
+                onStepClick={(id) => {
+                  if (id === "pack") setWorkspaceOpen(false);
+                }}
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-12 gap-4">
@@ -2969,8 +3014,13 @@ export function PackTabContent({
               </CardHeader>
               <CardContent className="space-y-3">
                 {packPages.length === 0 ? (
-                  <div className="border border-dashed rounded-lg h-[480px] grid place-items-center text-muted-foreground text-sm">
-                    Chọn bộ mẫu để bắt đầu
+                  <div className="border border-dashed rounded-lg h-[480px] grid place-items-center p-6">
+                    <EmptyState
+                      icon={<Package />}
+                      title="Chưa chọn bộ mẫu"
+                      description="Chọn một bộ mẫu ở cột trái để xem và chỉnh các trang."
+                      compact
+                    />
                   </div>
                 ) : (
                   <>
@@ -3086,6 +3136,40 @@ export function PackTabContent({
                   <CardTitle className="text-sm flex items-center gap-2">
                     <Link2 className="size-4" /> Liên kết dữ liệu
                   </CardTitle>
+                  {(() => {
+                    if (!effectiveActive) return null;
+                    const bindable = effectiveActive.slots.filter(
+                      (slot) => getSlotBindMode(slot, effectiveActive) !== null,
+                    ).length;
+                    const bound = effectiveActive.slots.filter(
+                      (slot) =>
+                        getSlotBindMode(slot, effectiveActive) !== null && !!slot.bindingPath,
+                    ).length;
+                    if (bindable === 0) return null;
+                    const allBound = bound === bindable;
+                    return (
+                      <div className="flex items-center gap-1 text-[11px]">
+                        <div
+                          className={`h-1.5 w-14 overflow-hidden rounded-full bg-muted`}
+                          title={`${bound}/${bindable} khối đã liên kết`}
+                        >
+                          <div
+                            className={`h-full transition-all ${
+                              allBound ? "bg-emerald-500" : "bg-primary"
+                            }`}
+                            style={{ width: `${Math.round((bound / bindable) * 100)}%` }}
+                          />
+                        </div>
+                        <span
+                          className={`font-medium tabular-nums ${
+                            allBound ? "text-emerald-700 dark:text-emerald-400" : "text-muted-foreground"
+                          }`}
+                        >
+                          {bound}/{bindable}
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </div>
               </CardHeader>
               <CardContent className="space-y-3 pt-3 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:pr-3">

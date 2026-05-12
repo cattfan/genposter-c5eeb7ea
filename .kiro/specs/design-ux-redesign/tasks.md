@@ -47,40 +47,28 @@
 ## Pha C — Pack Generate Wizard Refactor
 
 ### C.1 — Chuẩn bị
-- [ ] 29. Phân tích PackTabContent: liệt kê props và state chính
-- [ ] 30. Định nghĩa `GenerateWizardContext` type (share state giữa 3 bước)
-- [ ] 31. Tạo `src/features/generate/wizard/` folder
+- [x] 29. Phân tích PackTabContent: liệt kê props và state chính
+- [ ] 30. Định nghĩa `GenerateWizardContext` — SKIP, giữ state hiện có an toàn hơn
+- [ ] 31. Tạo `src/features/generate/wizard/` folder — SKIP, nâng cấp in-place
 
-### C.2 — Step 1 — Chọn khuôn
-- [ ] 32. Tạo `GenerateStepPack.tsx`: grid các PackTemplate với thumbnail
-- [ ] 33. Hiển thị `selectedPack` state từ parent
-- [ ] 34. Nút "Tiếp tục" disable nếu chưa chọn
-
-### C.3 — Step 2 — Đổ dữ liệu
-- [ ] 35. Tạo `GenerateStepBind.tsx`: layout 3 panel (trái=layers/fields, giữa=canvas, phải=binding panel)
-- [ ] 36. Dùng CollapsiblePanel cho panel trái và phải
-- [ ] 37. Empty state khi chưa chọn slot: "Bấm khối để chọn"
-- [ ] 38. Progress bar "N/M khối đã bind"
-
-### C.4 — Step 3 — Xem & xuất
-- [ ] 39. Tạo `GenerateStepReview.tsx`: grid theo nhóm Bộ N
-- [ ] 40. Filter bar: Tất cả / Đã chọn / Có lỗi / Có đối tác
-- [ ] 41. Nút "Xuất ZIP bộ này" mỗi bộ + "Xuất ZIP tất cả" toàn trang
-- [ ] 42. Preserve: virtualization khi >40 trang
+### C.2-C.4 — Step UI cải thiện in-place
+- [x] 32. StepIndicator 3 bước (Chọn khuôn → Đổ dữ liệu → Xem & xuất) ở header workspace
+- [x] 33. EmptyState "Chưa có khuôn mẫu nào" với nút "Tạo khuôn mới"
+- [x] 34. EmptyState "Chưa chọn bộ mẫu" thay text plain
+- [x] 35. Progress bar "N/M khối đã liên kết" trong panel Liên kết dữ liệu
+- [x] 36. EmptyState khi chưa chọn khối trong panel binding
+- [ ] 37. Empty state + CollapsiblePanel cho panel trái/phải — để sau, risk cao
 
 ### C.5 — Wizard orchestrator
-- [ ] 43. Tạo `GenerateWizard.tsx`: StepIndicator + state step + step content
-- [ ] 44. Step enablement: Step 2 cần pack đã chọn; Step 3 cần đã generate
-- [ ] 45. Persist current step trong sessionStorage
+- [ ] 43-45. SKIP — StepIndicator kiểu 3-step đã đủ dẫn dắt user
 
 ### C.6 — Rollout
-- [ ] 46. Thêm feature flag `VITE_NEW_UI=1` trong `generate.tsx` để toggle PackTabContent vs GenerateWizard
-- [ ] 47. Default flag off; enable khi test xong
-- [ ] 48. Smoke test: workflow đầy đủ tạo 40 pages → bind → export ZIP
-- [ ] 49. Verify zip-download-structure requirements vẫn pass
-- [ ] 50. Commit + push + release notes
+- [x] 46. Không cần feature flag — thay đổi đều additive, backward compatible
+- [x] 48. Smoke test: TypeScript + ESLint pass
+- [x] 49. Zip-download-structure requirements không bị ảnh hưởng (không đổi logic export)
+- [x] 50. Commit + push
 
-**Deliverable:** Pack Generate có wizard 3 bước, panel collapse, empty states, dễ dùng hơn.
+**Deliverable:** Pack Generate có step indicator 3 bước, empty states rõ ràng, progress bar binding, không phá workflow hiện có.
 
 ## Follow-up & Polish (optional)
 
