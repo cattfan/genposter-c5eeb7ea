@@ -1189,6 +1189,7 @@ export function PackTabContent({
         return {
           ...slot,
           bindingPath: bindingPath || undefined,
+          staticText: bindingPath ? undefined : slot.staticText,
           dataSourceConfig: bindingPath ? slot.dataSourceConfig : undefined,
         };
       });
