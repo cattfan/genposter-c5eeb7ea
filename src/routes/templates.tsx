@@ -45,6 +45,7 @@ import {
 import { aiLayoutToTemplateWithQuality } from "@/features/ai/templateFromImage";
 import { buildComboFromAiResult, persistCombo } from "@/features/ai/comboFromImages";
 import { PageContainer } from "@/components/PageHeader";
+import { EmptyState } from "@/components/ux";
 import { PackBuilder } from "@/features/packs/PackBuilder";
 import { PackPagePreview } from "@/features/packs/PackPagePreview";
 import { cn } from "@/lib/utils";
@@ -988,12 +989,16 @@ function TemplatesPage() {
 
       <div className="flex flex-col gap-4">
         {packs?.length === 0 ? (
-          <div className="rounded-xl border border-dashed bg-background p-10 text-center text-sm text-muted-foreground">
-            <span className="mx-auto mb-3 grid size-12 place-items-center rounded-full bg-accent text-primary">
-              <Package className="size-5" />
-            </span>
-            Chưa có bộ khuôn. Bấm "Tạo bộ mới" để bắt đầu.
-          </div>
+          <EmptyState
+            icon={<Package />}
+            title="Chưa có bộ khuôn"
+            description="Tạo bộ khuôn mới để bắt đầu thiết kế poster, hoặc nhập từ file đã xuất."
+            action={
+              <Button onClick={createNewPack}>
+                <Plus className="size-4 mr-2" /> Tạo bộ mới
+              </Button>
+            }
+          />
         ) : null}
 
         {packs?.map((pack) => {

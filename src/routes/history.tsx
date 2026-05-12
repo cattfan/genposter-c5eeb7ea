@@ -8,6 +8,7 @@ import { useJobStore } from "@/features/generate/jobStore";
 import { toast } from "sonner";
 import { History } from "lucide-react";
 import { PageContainer, PageHeader } from "@/components/PageHeader";
+import { EmptyState } from "@/components/ux";
 
 export const Route = createFileRoute("/history")({
   component: HistoryPage,
@@ -25,14 +26,11 @@ function HistoryPage() {
         description="Các lần export gần đây. Có thể mở lại để tiếp tục chỉnh sửa."
       />
       {jobs && jobs.length === 0 && (
-        <Card className="border-dashed">
-          <CardContent className="flex flex-col items-center gap-3 p-10 text-center text-muted-foreground">
-            <span className="grid size-12 place-items-center rounded-full bg-accent text-primary">
-              <History className="size-5" />
-            </span>
-            Chưa có job nào. Job được lưu khi bạn export.
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={<History />}
+          title="Chưa có lịch sử job"
+          description="Mỗi lần bạn xuất ZIP, job sẽ được lưu ở đây để mở lại và chỉnh sửa."
+        />
       )}
       <div className="space-y-2">
         {jobs?.map((j) => (

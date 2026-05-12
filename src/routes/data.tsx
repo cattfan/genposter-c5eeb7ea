@@ -47,6 +47,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { PageContainer, PageHeader } from "@/components/PageHeader";
+import { EmptyState } from "@/components/ux";
 import { BulkImageUpload } from "@/features/data/BulkImageUpload";
 import {
   cleanImageReferenceValue,
@@ -2220,8 +2221,13 @@ function DataPage() {
             </CardHeader>
             <CardContent className="p-0">
               {entities.length === 0 ? (
-                <div className="p-10 text-center text-sm text-muted-foreground">
-                  Chưa có dữ liệu đã nhập.
+                <div className="p-6">
+                  <EmptyState
+                    icon={<Database />}
+                    title="Chưa có dữ liệu đã nhập"
+                    description="Nhập Google Sheet hoặc CSV ở tab 'Nguồn dữ liệu' để bắt đầu."
+                    compact
+                  />
                 </div>
               ) : (
                 <Table>
@@ -2305,8 +2311,13 @@ function DataPage() {
 
             {assetGroups.length === 0 ? (
               <Card>
-                <CardContent className="p-10 text-center text-sm text-muted-foreground">
-                  Chưa có ảnh đã nhập.
+                <CardContent className="p-6">
+                  <EmptyState
+                    icon={<ImageIcon />}
+                    title="Chưa có ảnh đã nhập"
+                    description="Chọn quán ở trên rồi bấm 'Thêm ảnh vào quán' để upload."
+                    compact
+                  />
                 </CardContent>
               </Card>
             ) : (
