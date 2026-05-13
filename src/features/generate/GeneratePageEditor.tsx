@@ -114,9 +114,9 @@ function materializeTemplateForEditor(
       const slotEntity = planned?.entityId ? entityById.get(planned.entityId) : entity;
       const plannedAsset = planned?.assetId ? assetById.get(planned.assetId) : undefined;
 
-      // Lock background slots so they're not accidentally selected
+      // Hide background slots entirely in generated mode editor
       if (slot.isUploadedBackground || isLikelyBackground(slot, template)) {
-        return { ...slot, locked: true };
+        return { ...slot, locked: true, style: { ...slot.style, hidden: true } };
       }
 
       if (isDataGroupMarkerSlot(slot)) {
