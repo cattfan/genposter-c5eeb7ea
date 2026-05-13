@@ -115,7 +115,7 @@ import {
 } from "@/features/generate/generatePresetPortability";
 import { formatTemplateDisplayName } from "@/lib/templateNames";
 import { usePageCommands, type CommandEntry } from "@/components/CommandPalette";
-import { EmptyState, StepIndicator, createProgressToast } from "@/components/ux";
+import { EmptyState, createProgressToast } from "@/components/ux";
 
 type Filter = "all" | "selected" | "errors" | "partner";
 type SurfaceSelectionRect = { left: number; top: number; width: number; height: number };
@@ -2754,32 +2754,6 @@ export function PackTabContent({
             >
               <ArrowLeft className="mr-2 size-4" /> Quay lại
             </Button>
-            <div className="min-w-0 flex-1">
-              <StepIndicator
-                steps={[
-                  {
-                    id: "pack",
-                    label: "Chọn khuôn",
-                    enabled: true,
-                  },
-                  {
-                    id: "design",
-                    label: "Đổ dữ liệu",
-                    enabled: true,
-                  },
-                  {
-                    id: "export",
-                    label: "Xem & xuất",
-                    enabled: (currentJob?.pages.length ?? 0) > 0,
-                  },
-                ]}
-                current={(currentJob?.pages.length ?? 0) > 0 ? "export" : "design"}
-                completed={["pack"]}
-                onStepClick={(id) => {
-                  if (id === "pack") setWorkspaceOpen(false);
-                }}
-              />
-            </div>
           </div>
 
           <div className="grid grid-cols-12 gap-4">
