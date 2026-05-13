@@ -134,7 +134,7 @@ function ToolbarColorInput({
         align="start"
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
-        <ColorPicker value={value} onChange={onChange} onCommit={onChange} />
+        <ColorPicker value={value} onChange={onChange} onPreview={onChange} onCommit={onChange} />
       </PopoverContent>
     </Popover>
   );
@@ -679,21 +679,28 @@ export function TextToolbar({
         >
           <Minus className="size-3.5" />
         </Button>
-        <Select
-          value={String(Math.round(fontSize))}
-          onValueChange={(value) => updateFontSize(Number(value))}
-        >
-          <SelectTrigger className="h-7 w-[56px] gap-0.5 border-x border-y-0 px-1.5 text-xs shadow-none">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {fontSizeOptions.map((size) => (
-              <SelectItem key={size} value={String(size)} className="text-xs">
-                {size}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <input
+          type="number"
+          min={FONT_SIZE_MIN}
+          max={FONT_SIZE_MAX}
+          step={1}
+          value={Math.round(fontSize)}
+          onChange={(e) => {
+            const n = Number(e.target.value);
+            if (Number.isFinite(n)) updateFontSize(n);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+          }}
+          list="font-size-presets"
+          className="h-7 w-[56px] border-x border-y-0 bg-transparent px-1.5 text-center text-xs tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          aria-label="Cỡ chữ"
+        />
+        <datalist id="font-size-presets">
+          {fontSizeOptions.map((size) => (
+            <option key={size} value={size} />
+          ))}
+        </datalist>
         <Button
           size="icon"
           variant="ghost"
