@@ -6103,16 +6103,6 @@ function DesignStage({
                   gridSize={documentGridSize}
                 />
               </div>
-              {/* Center cross guides - luôn hiện */}
-              <LayoutGuides
-                width={page.width}
-                height={page.height}
-                scale={scale}
-                showBleed={false}
-                showTrim={false}
-                showSafeZone={false}
-                showCenter
-              />
               {showSafeZone ? (
                 <LayoutGuides
                   width={page.width}
@@ -6125,7 +6115,7 @@ function DesignStage({
                 />
               ) : null}
 
-              {showGuides ? activeSnapLines.map((line, index) => {
+              {(showGuides || activeTransformKind !== null) ? activeSnapLines.map((line, index) => {
                 const isCenterLine =
                   line.axis === "x"
                     ? Math.abs(line.value - page.width / 2) < 0.5
@@ -6157,7 +6147,7 @@ function DesignStage({
                 );
               }) : null}
 
-              {showGuides ? <SmartSpacing lines={spacingLines} scale={scale} /> : null}
+              {(showGuides || activeTransformKind !== null) ? <SmartSpacing lines={spacingLines} scale={scale} /> : null}
 
               {elements
                 .filter((element) => !element.hidden)
