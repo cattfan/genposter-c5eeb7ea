@@ -206,6 +206,20 @@ export function EditorPage() {
             }
           : undefined
       }
+      onRenamePackPage={
+        packId
+          ? async (pageTemplateId, newName) => {
+              const page = await db.pageTemplates.get(pageTemplateId);
+              if (!page) return;
+              await db.pageTemplates.put({
+                ...page,
+                name: newName,
+                updatedAt: Date.now(),
+              });
+              toast.success(`Đã đổi tên thành "${newName}"`);
+            }
+          : undefined
+      }
       onClose={backToTemplates}
       onSave={async (nextDocument) => {
         const nextTemplate = designDocumentToPageTemplate(nextDocument, template);
