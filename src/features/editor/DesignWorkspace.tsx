@@ -4069,13 +4069,48 @@ export function DesignWorkspace({
         <div
           className="grid min-h-0 min-w-0 flex-1 overflow-hidden"
           style={{
-            gridTemplateColumns: `${leftOpen ? 320 : 0}px minmax(0,1fr) ${rightOpen ? 340 : 0}px`,
+            gridTemplateColumns: `${leftOpen ? "72px 280px" : "72px"} minmax(0,1fr) ${rightOpen ? 340 : 0}px`,
           }}
         >
+          {/* Canva-style vertical rail */}
+          <aside className="flex min-h-0 shrink-0 flex-col items-stretch gap-1 border-r bg-card py-3">
+            {([
+              { id: "insert", label: "Thêm", Icon: Shapes },
+              { id: "assets", label: "Tài nguyên", Icon: ImageIcon },
+              { id: "pages", label: "Trang", Icon: Layers },
+            ] as const).map(({ id, label, Icon }) => {
+              const active = leftOpen && leftTab === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    if (active) {
+                      setLeftOpen(false);
+                    } else {
+                      setLeftTab(id);
+                      setLeftOpen(true);
+                    }
+                  }}
+                  className={cn(
+                    "group mx-2 flex flex-col items-center gap-1 rounded-lg px-1 py-2 text-[10px] font-medium transition-colors",
+                    active
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  )}
+                  title={label}
+                  aria-pressed={active}
+                >
+                  <Icon className="size-5" />
+                  <span>{label}</span>
+                </button>
+              );
+            })}
+          </aside>
           {leftOpen ? (
             <aside className="min-h-0 min-w-0 overflow-hidden border-r">
               <Tabs value={leftTab} onValueChange={setLeftTab} className="flex h-full flex-col">
-                <TabsList className="mx-4 mt-4 grid grid-cols-3">
+                <TabsList className="sr-only">
                   <TabsTrigger value="insert">Thêm</TabsTrigger>
                   <TabsTrigger value="assets">Tài nguyên</TabsTrigger>
                   <TabsTrigger value="pages">Trang</TabsTrigger>
@@ -4677,9 +4712,7 @@ export function DesignWorkspace({
                 </TabsContent>
               </Tabs>
             </aside>
-          ) : (
-            <div />
-          )}
+          ) : null}
 
           <div
             ref={stageWrapRef}
