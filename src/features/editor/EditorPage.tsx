@@ -187,6 +187,25 @@ export function EditorPage() {
             }
           : undefined
       }
+      onReorderPackPage={
+        packId
+          ? async (pageTemplateId, toIndex) => {
+              const pack = await db.packTemplates.get(packId);
+              if (!pack) return;
+              const fromIndex = pack.orderedPages.indexOf(pageTemplateId);
+              if (fromIndex < 0 || fromIndex === toIndex) return;
+              const next = [...pack.orderedPages];
+              next.splice(fromIndex, 1);
+              next.splice(toIndex, 0, pageTemplateId);
+              await db.packTemplates.put({
+                ...pack,
+                orderedPages: next,
+                updatedAt: Date.now(),
+              });
+              toast.success("Đã đổi vị trí trang");
+            }
+          : undefined
+      }
       onClose={backToTemplates}
       onSave={async (nextDocument) => {
         const nextTemplate = designDocumentToPageTemplate(nextDocument, template);

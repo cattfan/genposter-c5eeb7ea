@@ -1069,6 +1069,7 @@ export function DesignWorkspace({
   onCreatePackPage,
   onDuplicatePackPage,
   onDeletePackPage,
+  onReorderPackPage,
 }: {
   initialDocument: DesignDocument;
   mode?: WorkspaceMode;
@@ -1085,6 +1086,7 @@ export function DesignWorkspace({
   onCreatePackPage?: () => void | Promise<void>;
   onDuplicatePackPage?: (pageTemplateId: string) => void | Promise<void>;
   onDeletePackPage?: (pageTemplateId: string) => void | Promise<void>;
+  onReorderPackPage?: (pageTemplateId: string, toIndex: number) => void | Promise<void>;
 }) {
   const workspaceDocument = useMemo(
     () => ({
@@ -4559,7 +4561,7 @@ export function DesignWorkspace({
                         variant="outline"
                         onClick={() => void onCreatePackPage()}
                       >
-                        <Plus className="mr-2 size-4" /> Thêm trang vào bộ
+                        <Plus className="mr-2 size-4" /> Thêm trang mới
                       </Button>
                     ) : null}
                     {hasPackPages
@@ -4574,7 +4576,28 @@ export function DesignWorkspace({
                           return (
                             <div
                               key={pageTemplate.pageTemplateId}
-                              className={`rounded-xl border p-3 transition ${
+                              draggable={!!onReorderPackPage}
+                              onDragStart={(e) => {
+                                e.dataTransfer.setData("text/plain", pageTemplate.pageTemplateId);
+                                e.dataTransfer.effectAllowed = "move";
+                              }}
+                              onDragOver={(e) => {
+                                e.preventDefault();
+                                e.dataTransfer.dropEffect = "move";
+                                e.currentTarget.classList.add("ring-2", "ring-primary/50");
+                              }}
+                              onDragLeave={(e) => {
+                                e.currentTarget.classList.remove("ring-2", "ring-primary/50");
+                              }}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                e.currentTarget.classList.remove("ring-2", "ring-primary/50");
+                                const fromId = e.dataTransfer.getData("text/plain");
+                                if (fromId && fromId !== pageTemplate.pageTemplateId) {
+                                  onReorderPackPage?.(fromId, index);
+                                }
+                              }}
+                              className={`rounded-xl border p-3 transition cursor-grab active:cursor-grabbing ${
                                 selectedPage
                                   ? "border-primary bg-primary/5"
                                   : "bg-card hover:border-primary/60 hover:bg-muted/40"
@@ -6958,6 +6981,7 @@ function CompactColorControl({
           <ColorPicker
             value={value}
             onChange={onChange}
+            onPreview={onChange}
             onCommit={onCommit ?? onChange}
           />
         </PopoverContent>
