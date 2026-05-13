@@ -3078,6 +3078,14 @@ export function DesignWorkspace({
         <div className="flex min-h-[54px] flex-nowrap items-center gap-1.5 overflow-x-auto overflow-y-hidden whitespace-nowrap border-b bg-card/40 px-3 py-2">
           {headerLeading ? (
             renderViewToggleGroup()
+          ) : mode === "generated" ? (
+            <div className="flex shrink-0 items-center gap-2">
+              {contextTitle ? (
+                <div className="truncate rounded-md bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                  {contextTitle}
+                </div>
+              ) : null}
+            </div>
           ) : (
             <Input
               value={editor.document.name}
@@ -3087,7 +3095,7 @@ export function DesignWorkspace({
             />
           )}
 
-          {contextTitle ? (
+          {contextTitle && mode !== "generated" ? (
             <div
               className="max-w-[240px] shrink-0 truncate rounded-md bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground"
               title={contextTitle}
