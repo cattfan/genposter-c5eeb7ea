@@ -7,6 +7,7 @@ export function LayoutGuides({
   showBleed = true,
   showTrim = true,
   showSafeZone = true,
+  showCenter = true,
 }: {
   width: number;
   height: number;
@@ -14,6 +15,7 @@ export function LayoutGuides({
   showBleed?: boolean;
   showTrim?: boolean;
   showSafeZone?: boolean;
+  showCenter?: boolean;
 }) {
   const bleedInset = 2;
   const trimInset = 8;
@@ -32,6 +34,32 @@ export function LayoutGuides({
         zIndex: 10,
       }}
     >
+      {showCenter ? (
+        <>
+          {/* Vertical center line */}
+          <div
+            style={{
+              position: "absolute",
+              left: "50%",
+              top: 0,
+              bottom: 0,
+              width: 1,
+              background: "rgba(139, 92, 246, 0.35)",
+            }}
+          />
+          {/* Horizontal center line */}
+          <div
+            style={{
+              position: "absolute",
+              top: "50%",
+              left: 0,
+              right: 0,
+              height: 1,
+              background: "rgba(139, 92, 246, 0.35)",
+            }}
+          />
+        </>
+      ) : null}
       {showBleed ? (
         <div
           style={{
