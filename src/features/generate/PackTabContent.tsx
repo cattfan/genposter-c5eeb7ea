@@ -2956,7 +2956,10 @@ export function PackTabContent({
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => setEditingPreviewOpen(true)}
+                    onClick={() => {
+                      setSelectedSlotIds([]);
+                      setEditingPreviewOpen(true);
+                    }}
                     disabled={!effectiveActive}
                     className="h-7 shrink-0 px-2 text-xs"
                   >
