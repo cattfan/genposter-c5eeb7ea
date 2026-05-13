@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { Asset, Entity, PageTemplate, RenderedItem } from "@/models";
+import type { Asset, Entity, PageTemplate, RenderedItem, Slot } from "@/models";
 import { resolveImageBinding, resolveTextBinding } from "@/engines/binding/dataBinding";
 import { getAssetImageSource } from "@/engines/binding/assetImage";
 import { isDataGroupMarkerSlot } from "@/engines/binding/slotMarkers";
@@ -8,6 +8,16 @@ import {
   designDocumentToPageTemplate,
   pageTemplateToDesignDocument,
 } from "@/features/editor/designDocument";
+
+function isLikelyBackground(slot: Slot, template: PageTemplate): boolean {
+  if (slot.kind !== "image") return false;
+  const coversCanvas =
+    slot.x <= template.canvas.width * 0.05 &&
+    slot.y <= template.canvas.height * 0.05 &&
+    slot.width >= template.canvas.width * 0.84 &&
+    slot.height >= template.canvas.height * 0.84;
+  return coversCanvas;
+}
 
 export function GeneratePageEditor({
   open,
@@ -103,6 +113,11 @@ function materializeTemplateForEditor(
       const planned = itemBySlotId.get(slot.slotId);
       const slotEntity = planned?.entityId ? entityById.get(planned.entityId) : entity;
       const plannedAsset = planned?.assetId ? assetById.get(planned.assetId) : undefined;
+
+      // Lock background slots so they're not accidentally selected
+      if (slot.isUploadedBackground || isLikelyBackground(slot, template)) {
+        return { ...slot, locked: true };
+      }
 
       if (isDataGroupMarkerSlot(slot)) {
         return {
