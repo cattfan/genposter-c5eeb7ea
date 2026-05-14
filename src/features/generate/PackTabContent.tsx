@@ -1206,7 +1206,14 @@ export function PackTabContent({
   const applyTextBindingSelection = (slot: Slot, value: string) => {
     if (!activePage) return;
     if (value === "__list") return;
-    const bindingPath = value === "_static" ? undefined : buildTextBindingPathForSlot(slot, value);
+    let bindingPath: string | undefined;
+    if (value === "_static") {
+      bindingPath = undefined;
+    } else if (value === "ai.rewrite") {
+      bindingPath = "ai.rewrite";
+    } else {
+      bindingPath = buildTextBindingPathForSlot(slot, value);
+    }
     applyBindingToSlots([slot], activePage.pageTemplateId, bindingPath);
   };
   const applySlotSourcePatch = (
