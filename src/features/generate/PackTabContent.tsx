@@ -1187,7 +1187,11 @@ export function PackTabContent({
     writableSlots.forEach((slot) => setBinding(pageTemplateId, slot.slotId, bindingPath));
     const isAiRewrite = bindingPath === "ai.rewrite";
     commitPreviewPageDrafts((prev) => {
-      const current = prev[pageTemplateId];
+      // Nếu draft chưa tồn tại, tạo từ template gốc
+      const baseTpl = pageTemplatesForGenerate.find(
+        (t) => t.pageTemplateId === pageTemplateId,
+      );
+      const current = prev[pageTemplateId] ?? baseTpl;
       if (!current) return prev;
       const targetIds = new Set(writableSlots.map((slot) => slot.slotId));
       const next = createWorkingTemplate(current, undefined, current);
@@ -2237,8 +2241,22 @@ export function PackTabContent({
     const uniqueAiSlots = Array.from(
       new Map(aiRewriteSlots.map((s) => [`${s.slotId}:${s.text}`, s])).values(),
     );
+    if (import.meta.env.DEV) {
+      console.debug("[AI Rewrite] found slots:", aiRewriteSlots.length, "unique:", uniqueAiSlots.length);
+      if (uniqueAiSlots.length > 0) {
+        console.debug("[AI Rewrite] texts:", uniqueAiSlots.map((s) => s.text));
+      } else {
+        // Debug: check tất cả slots trong job pages
+        const allBindings = job.pages.flatMap((p) => {
+          const t = p.workingTemplate;
+          if (!t) return [];
+          return t.slots.map((s) => ({ slotId: s.slotId, bindingPath: s.bindingPath, staticText: s.staticText?.slice(0, 30) }));
+        });
+        console.debug("[AI Rewrite] all slot bindings:", allBindings.filter((s) => s.bindingPath));
+      }
+    }
     if (uniqueAiSlots.length > 0) {
-      toast.info("Đang gọi AI viết lại text...");
+      toast.info(`Đang gọi AI viết lại ${uniqueAiSlots.length} text...`);
       const bundleSize = Math.max(1, selectedPack.orderedPages.length);
       const bundleCount = Math.ceil(job.pages.length / bundleSize);
       // Group by unique text to avoid duplicate AI calls
@@ -2249,16 +2267,23 @@ export function PackTabContent({
           const { aiRewriteBatch } = await import("@/features/ai/aiRewriteBatch");
           const result = await Promise.race([
             aiRewriteBatch({ originalText: text, count: bundleCount }),
-            new Promise<{ ok: false; variations: string[] }>((_, reject) =>
-              setTimeout(() => reject(new Error("timeout")), 20000),
+            new Promise<{ ok: false; variations: string[]; error?: string }>((_, reject) =>
+              setTimeout(() => reject(new Error("timeout 20s")), 20000),
             ),
           ]);
           if (result.ok && result.variations.length > 0) {
             variationsMap.set(text, result.variations);
+          } else if (!result.ok) {
+            toast.error(`AI rewrite lỗi: ${(result as { error?: string }).error ?? "unknown"}`);
           }
-        } catch {
-          // AI fail → giữ text gốc
+        } catch (err) {
+          toast.error(`AI rewrite exception: ${err instanceof Error ? err.message : String(err)}`);
         }
+      }
+      if (variationsMap.size > 0) {
+        toast.success(`AI đã tạo ${variationsMap.size} nhóm variations`);
+      } else {
+        toast.warning("AI không tạo được variations - giữ text gốc");
       }
       // Gán variations vào workingTemplate của mỗi page
       if (variationsMap.size > 0) {
