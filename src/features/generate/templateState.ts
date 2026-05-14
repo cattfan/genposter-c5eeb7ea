@@ -3,6 +3,9 @@ import { isDataGroupMarkerSlot } from "@/engines/binding/slotMarkers";
 import { applyBindOverrides } from "./useBindOverrides";
 
 export type TemplateBindingOverrides = Record<string, string | undefined>;
+interface TemplateGroupOptions {
+  synthesizeMissingGroups?: boolean;
+}
 
 export function clonePageTemplate(template: PageTemplate): PageTemplate {
   return JSON.parse(JSON.stringify(template)) as PageTemplate;
@@ -150,8 +153,13 @@ function synthesizeMissingCardGroups(template: PageTemplate): PageTemplate {
   return changed ? { ...template, slots: nextSlots } : template;
 }
 
-function normalizeTemplateGroups(template: PageTemplate): PageTemplate {
-  const groupedTemplate = synthesizeMissingCardGroups(template);
+function normalizeTemplateGroups(
+  template: PageTemplate,
+  options?: TemplateGroupOptions,
+): PageTemplate {
+  const groupedTemplate = options?.synthesizeMissingGroups === false
+    ? template
+    : synthesizeMissingCardGroups(template);
   const groupSlots = groupedTemplate.slots.filter((slot) => slot.kind === "group");
   const groupIds = new Set(groupSlots.map((slot) => slot.slotId));
   const childGroups = new Map<string, typeof groupedTemplate.slots>();
@@ -207,8 +215,9 @@ function normalizeTemplateGroups(template: PageTemplate): PageTemplate {
 export function restoreTemplateGroups(
   baseTemplate: PageTemplate | undefined,
   workingTemplate: PageTemplate,
+  options?: TemplateGroupOptions,
 ): PageTemplate {
-  const normalizedWorkingTemplate = normalizeTemplateGroups(workingTemplate);
+  const normalizedWorkingTemplate = normalizeTemplateGroups(workingTemplate, options);
   if (!baseTemplate) return normalizedWorkingTemplate;
 
   const baseGroupSlots = baseTemplate.slots.filter((slot) => slot.kind === "group");
@@ -240,24 +249,30 @@ export function restoreTemplateGroups(
   }
 
   const restored = changed ? { ...normalizedWorkingTemplate, slots: nextSlots } : normalizedWorkingTemplate;
-  return normalizeTemplateGroups(restored);
+  return normalizeTemplateGroups(restored, options);
 }
 
 export function resolvePageWorkingTemplate(
   baseTemplate: PageTemplate | undefined,
   overrides?: TemplateBindingOverrides,
   workingTemplate?: PageTemplate,
+  options?: TemplateGroupOptions,
 ): PageTemplate | undefined {
-  if (workingTemplate) return restoreTemplateGroups(baseTemplate, workingTemplate);
+  if (workingTemplate) return restoreTemplateGroups(baseTemplate, workingTemplate, options);
   if (!baseTemplate) return undefined;
-  return restoreTemplateGroups(baseTemplate, applyBindOverrides(baseTemplate, overrides ?? {}));
+  return restoreTemplateGroups(
+    baseTemplate,
+    applyBindOverrides(baseTemplate, overrides ?? {}),
+    options,
+  );
 }
 
 export function createWorkingTemplate(
   baseTemplate: PageTemplate,
   overrides?: TemplateBindingOverrides,
   existingWorkingTemplate?: PageTemplate,
+  options?: TemplateGroupOptions,
 ): PageTemplate {
   const source = existingWorkingTemplate ?? applyBindOverrides(baseTemplate, overrides ?? {});
-  return clonePageTemplate(restoreTemplateGroups(baseTemplate, source));
+  return clonePageTemplate(restoreTemplateGroups(baseTemplate, source, options));
 }

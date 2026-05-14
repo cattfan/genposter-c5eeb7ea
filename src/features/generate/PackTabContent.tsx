@@ -113,6 +113,7 @@ import {
   readPortableBundleFile,
   safePortableFileName,
 } from "@/features/generate/generatePresetPortability";
+import { exportGenerateBundlesToDataServer } from "@/server/generateExport";
 import { formatTemplateDisplayName } from "@/lib/templateNames";
 import { usePageCommands, type CommandEntry } from "@/components/CommandPalette";
 import { EmptyState, createProgressToast } from "@/components/ux";
@@ -121,6 +122,7 @@ type Filter = "all" | "selected" | "errors" | "partner";
 type SurfaceSelectionRect = { left: number; top: number; width: number; height: number };
 type FormatSlotMode = "text" | "image";
 type PreviewPageDrafts = Record<string, PageTemplate>;
+const GENERATE_TEMPLATE_OPTIONS = { synthesizeMissingGroups: false } as const;
 
 interface BundleImageIssue {
   entityId: string;
@@ -177,10 +179,16 @@ function cloneTemplateDraftsWithSource(
 ): PreviewPageDrafts {
   const sourceById = new Map(sourceTemplates.map((template) => [template.pageTemplateId, template]));
   return Object.fromEntries(
-    Object.entries(drafts).map(([pageTemplateId, template]) => [
-      pageTemplateId,
-      clonePageTemplate(restoreTemplateGroups(sourceById.get(pageTemplateId), template)),
-    ]),
+      Object.entries(drafts).map(([pageTemplateId, template]) => [
+        pageTemplateId,
+        clonePageTemplate(
+          restoreTemplateGroups(
+            sourceById.get(pageTemplateId),
+            template,
+            GENERATE_TEMPLATE_OPTIONS,
+          ),
+        ),
+      ]),
   );
 }
 
@@ -196,6 +204,18 @@ function stringifyFormatValue(value: unknown) {
 
 function createDataGroupId() {
   return `dg_${nanoid(8)}`;
+}
+
+async function blobToBase64(blob: Blob): Promise<string> {
+  const buffer = await blob.arrayBuffer();
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    const chunk = bytes.subarray(offset, offset + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
 }
 
 interface Props {
@@ -488,6 +508,7 @@ export function PackTabContent({
             activePage,
             packOv[activePage.pageTemplateId],
             previewPageDrafts[activePage.pageTemplateId],
+            GENERATE_TEMPLATE_OPTIONS,
           )
         : undefined,
     [activePage, packOv, previewPageDrafts],
@@ -548,7 +569,11 @@ export function PackTabContent({
   const pageTemplatesForGenerate = useMemo(
     () =>
       tpls.map((tpl) =>
-        restoreTemplateGroups(tpl, previewPageDrafts[tpl.pageTemplateId] ?? tpl),
+        restoreTemplateGroups(
+          tpl,
+          previewPageDrafts[tpl.pageTemplateId] ?? tpl,
+          GENERATE_TEMPLATE_OPTIONS,
+        ),
       ),
     [tpls, previewPageDrafts],
   );
@@ -1229,7 +1254,12 @@ export function PackTabContent({
       const current = prev[pageTemplateId] ?? baseTpl;
       if (!current) return prev;
       const targetIds = new Set(writableSlots.map((slot) => slot.slotId));
-      const next = createWorkingTemplate(current, undefined, current);
+      const next = createWorkingTemplate(
+        current,
+        undefined,
+        current,
+        GENERATE_TEMPLATE_OPTIONS,
+      );
       next.slots = next.slots.map((slot) => {
         if (!targetIds.has(slot.slotId)) return slot;
         return {
@@ -1287,7 +1317,12 @@ export function PackTabContent({
     }
     let changed = false;
     commitPreviewPageDrafts((prev) => {
-      const current = createWorkingTemplate(effectiveActive, undefined, effectiveActive);
+      const current = createWorkingTemplate(
+        effectiveActive,
+        undefined,
+        effectiveActive,
+        GENERATE_TEMPLATE_OPTIONS,
+      );
       current.slots = current.slots.map((slot) => {
         if (!targetIds.has(slot.slotId)) return slot;
         const base = slot.dataSourceConfig ?? {};
@@ -1321,7 +1356,12 @@ export function PackTabContent({
     const targetIds = new Set(slots.map((slot) => slot.slotId));
     let changed = false;
     commitPreviewPageDrafts((prev) => {
-      const current = createWorkingTemplate(effectiveActive, undefined, effectiveActive);
+      const current = createWorkingTemplate(
+        effectiveActive,
+        undefined,
+        effectiveActive,
+        GENERATE_TEMPLATE_OPTIONS,
+      );
       current.slots = current.slots.map((slot) => {
         if (!targetIds.has(slot.slotId)) return slot;
         if (slot.dataGroupId === dataGroupId) return slot;
@@ -1568,7 +1608,12 @@ export function PackTabContent({
     let changed = false;
 
     commitPreviewPageDrafts((prev) => {
-      const current = createWorkingTemplate(effectiveActive, undefined, effectiveActive);
+      const current = createWorkingTemplate(
+        effectiveActive,
+        undefined,
+        effectiveActive,
+        GENERATE_TEMPLATE_OPTIONS,
+      );
       current.slots = current.slots.map((slot) => {
         const assignment = assignments.get(slot.slotId);
         if (!assignment) return slot;
@@ -1619,7 +1664,12 @@ export function PackTabContent({
     commitPreviewPageDrafts((prev) => {
       const current = prev[pageTemplateId];
       if (!current) return prev;
-      const next = createWorkingTemplate(current, undefined, current);
+      const next = createWorkingTemplate(
+        current,
+        undefined,
+        current,
+        GENERATE_TEMPLATE_OPTIONS,
+      );
       next.slots = next.slots.map((slot) => {
         if (!slots.some((target) => target.slotId === slot.slotId)) return slot;
         return { ...slot, bindingPath: undefined, dataSourceConfig: undefined };
@@ -1764,6 +1814,7 @@ export function PackTabContent({
               t,
               packOv[t.pageTemplateId],
               previewPageDrafts[t.pageTemplateId],
+              GENERATE_TEMPLATE_OPTIONS,
             )?.slots ?? []
           ).filter((s) => !!s.bindingPath).length,
         0,
@@ -1776,9 +1827,10 @@ export function PackTabContent({
         const template =
           resolvePageWorkingTemplate(
             page,
-          packOv[page.pageTemplateId],
-          previewPageDrafts[page.pageTemplateId],
-        ) ?? page;
+            packOv[page.pageTemplateId],
+            previewPageDrafts[page.pageTemplateId],
+            GENERATE_TEMPLATE_OPTIONS,
+          ) ?? page;
         const configuredEntities = buildConfiguredEntityPool(
           buildSourceFilteredEntities(entities, globalGenerateConfig),
           resolveGeneratePageConfig(globalGenerateConfig, sourceNeutralPageConfigs[page.pageTemplateId]),
@@ -2162,6 +2214,7 @@ export function PackTabContent({
           activePage,
           packOv[activePage.pageTemplateId],
           prev[activePage.pageTemplateId],
+          GENERATE_TEMPLATE_OPTIONS,
         );
         working.slots = working.slots.map((slot) =>
           slot.slotId === selectedSlot.slotId
@@ -2210,6 +2263,7 @@ export function PackTabContent({
           activePage,
           packOv[activePage.pageTemplateId],
           prev[activePage.pageTemplateId],
+          GENERATE_TEMPLATE_OPTIONS,
         );
         working.slots = working.slots.map((item) =>
           item.slotId === slot.slotId
@@ -2263,6 +2317,7 @@ export function PackTabContent({
               ) ?? previewPageDrafts[page.pageTemplateId],
               undefined,
               previewPageDrafts[page.pageTemplateId],
+              GENERATE_TEMPLATE_OPTIONS,
             )
           : page.workingTemplate,
       }));
@@ -2433,6 +2488,8 @@ export function PackTabContent({
               meta.pageTemplate,
               meta.page.bindOverrides ??
                 (meta.pageTemplate ? packOv[meta.pageTemplate.pageTemplateId] : undefined),
+              undefined,
+              GENERATE_TEMPLATE_OPTIONS,
             );
         if (!template) continue;
 
@@ -2480,6 +2537,27 @@ export function PackTabContent({
 
     return issuesByBundle;
   }, [assets, bundleGroups, entities, packOv]);
+
+  const writeBundlesToData = async (
+    exportName: string,
+    bundles: Array<{ folderName: string; files: Array<{ name: string; blob: Blob }> }>,
+  ) => {
+    const payload = {
+      exportName,
+      bundles: await Promise.all(
+        bundles.map(async (bundle) => ({
+          folderName: bundle.folderName,
+          files: await Promise.all(
+            bundle.files.map(async (file) => ({
+              name: file.name,
+              base64: await blobToBase64(file.blob),
+            })),
+          ),
+        })),
+      ),
+    };
+    return await exportGenerateBundlesToDataServer({ data: payload });
+  };
 
   const exportZip = async () => {
     if (!currentJob || !jobPack) return;
@@ -2586,17 +2664,20 @@ export function PackTabContent({
       }
 
       const templateName = formatTemplateDisplayName(currentJob.packTemplateName, "bo-anh");
-      const zipFileName = bundleArtifacts.length === 1
-        ? `${formatZipFileName(templateName, { version: bundleEntries[0][0] })}.zip`
-        : `${formatZipFileName(templateName)}.zip`;
-
-      await downloadMultiBundleZip(bundleArtifacts, zipFileName);
+      const exportName = formatZipFileName(templateName);
+      const saved = await writeBundlesToData(
+        exportName,
+        bundleEntries.map(([bundleIndex], index) => ({
+          folderName: bundleArtifacts.length === 1 ? exportName : `Bo${bundleIndex}`,
+          files: bundleArtifacts[index].files,
+        })),
+      );
       await db.jobs.put({ ...currentJob, status: "exported" });
       progress.success(
-        `Đã xuất ZIP · ${bundleArtifacts.length} bộ · ${renderedPages.length} ảnh`,
+        `Đã xuất vào ${saved.root} · ${bundleArtifacts.length} bộ · ${renderedPages.length} ảnh`,
       );
     } catch (error) {
-      progress.error("Không thể xuất ZIP: " + formatExportError(error));
+      progress.error("Không thể xuất vào data: " + formatExportError(error));
     }
   };
 
@@ -2674,12 +2755,16 @@ export function PackTabContent({
       files.push({ name: "doitac.xlsx", blob: xlsxBlob });
 
       const templateName = formatTemplateDisplayName(jobPack.name, "bo-anh");
-      const zipFileName = `${formatZipFileName(templateName, { version: bundle.bundleIndex })}.zip`;
-
-      await downloadMultiBundleZip([{ files }], zipFileName);
-      progress.success(`Đã tải ${bundle.bundleLabel}`);
+      const exportName = formatZipFileName(templateName);
+      const saved = await writeBundlesToData(exportName, [
+        {
+          folderName: `Bo${bundle.bundleIndex}`,
+          files,
+        },
+      ]);
+      progress.success(`Đã xuất ${bundle.bundleLabel} vào ${saved.root}`);
     } catch (error) {
-      progress.error("Không thể tải bộ: " + formatExportError(error));
+      progress.error("Không thể xuất bộ vào data: " + formatExportError(error));
     } finally {
       setBundleExportingIndex(null);
     }
@@ -2702,9 +2787,9 @@ export function PackTabContent({
           ? [
               {
                 id: "generate:export-zip",
-                label: "Xuất ZIP (ảnh + caption)",
+                label: "Xuất vào data",
                 group: "Tạo nội dung",
-                keywords: ["export", "zip", "publish"],
+                keywords: ["export", "data", "publish"],
                 icon: <Download className="size-4" />,
                 action: () => void exportZip(),
               },
@@ -2736,6 +2821,8 @@ export function PackTabContent({
       ? resolvePageWorkingTemplate(
           zoomedPageMeta.pageTemplate,
           zoomedPageMeta.page.bindOverrides ?? packOv[zoomedPageMeta.pageTemplate.pageTemplateId],
+          undefined,
+          GENERATE_TEMPLATE_OPTIONS,
         )
       : undefined);
   const zoomedEntity = zoomedPageMeta?.page.entityId
@@ -2751,6 +2838,8 @@ export function PackTabContent({
       ? resolvePageWorkingTemplate(
           tpls.find((tpl) => tpl.pageTemplateId === editingJobPage.pageTemplateId),
           editingJobPage.bindOverrides ?? packOv[editingJobPage.pageTemplateId],
+          undefined,
+          GENERATE_TEMPLATE_OPTIONS,
         )
       : undefined;
   const editingJobPageTemplate = editingJobPage?.workingTemplate ?? editingJobPageBaseTemplate;
@@ -2881,6 +2970,8 @@ export function PackTabContent({
                             const previewTemplate = resolvePageWorkingTemplate(
                               page,
                               preset.bindOverrides?.[page.pageTemplateId],
+                              undefined,
+                              GENERATE_TEMPLATE_OPTIONS,
                             );
                             if (!previewTemplate) return null;
                             const previewScale = Math.min(
@@ -3712,7 +3803,7 @@ export function PackTabContent({
                           ) : (
                             <Package className="size-3 mr-1" />
                           )}
-                          Tải bộ
+                          Xuất bộ vào data
                         </Button>
                       </div>
                       {bundleGroupIndex === 0 && (
@@ -3755,9 +3846,9 @@ export function PackTabContent({
                               event.preventDefault();
                               void exportZip();
                             }}
-                            title="Xuất toàn bộ bộ ảnh đã chọn thành file ZIP"
+                            title="Xuất toàn bộ bộ ảnh đã chọn vào thư mục data trong dự án"
                           >
-                            <Package className="size-4 mr-2" /> Xuất ZIP
+                            <Package className="size-4 mr-2" /> Xuất vào data
                           </Button>
                         </div>
                       )}
@@ -3826,12 +3917,14 @@ export function PackTabContent({
                         const page = meta.page;
                         const tpl = meta.pageTemplate;
                         if (!tpl) return null;
-                        const eff =
-                          page.workingTemplate ??
-                          resolvePageWorkingTemplate(
-                            tpl,
-                            page.bindOverrides ?? packOv[tpl.pageTemplateId],
-                          );
+                          const eff =
+                            page.workingTemplate ??
+                            resolvePageWorkingTemplate(
+                              tpl,
+                              page.bindOverrides ?? packOv[tpl.pageTemplateId],
+                              undefined,
+                              GENERATE_TEMPLATE_OPTIONS,
+                            );
                         if (!eff) return null;
                         const ent = page.entityId
                           ? entities.find((entity) => entity.entityId === page.entityId)
