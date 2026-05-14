@@ -34,17 +34,11 @@ export function buildPartnerWorkbookBlob(input: {
     sheet["!cols"] = [{ wch: 24 }];
     XLSX.utils.book_append_sheet(workbook, sheet, "doitac");
   } else {
-    const headers = ["Tên", "Danh mục", "Địa chỉ"];
-    const dataRows = [
-      headers,
-      ...partners.map((entity) => [
-        entity.name || "",
-        entity.categoryMain || entity.categorySub || "",
-        entity.address || "",
-      ]),
-    ];
+    const dataRows = [partners.map((entity) => entity.name || "")];
     const sheet = XLSX.utils.aoa_to_sheet(dataRows);
-    sheet["!cols"] = [{ wch: 30 }, { wch: 18 }, { wch: 40 }];
+    sheet["!cols"] = partners.map((entity) => ({
+      wch: Math.max(18, Math.min(36, (entity.name || "").length + 4)),
+    }));
     XLSX.utils.book_append_sheet(workbook, sheet, "doitac");
   }
 
@@ -75,12 +69,12 @@ export function buildFallbackCaptionBlob(input: {
   variantCount?: number;
 }): Blob {
   const usedEntities = collectUsedEntities(input.pages, input.entities);
-  const variantCount = Math.max(1, Math.min(6, input.variantCount ?? 4));
+  const variantCount = 1;
   const variants = buildFallbackCaptions(input.packName, input.bundleLabel, usedEntities, variantCount);
   const text = variants
     .slice(0, variantCount)
-    .map((variant, index) => formatCaptionVariant(variant, index + 1, input.bundleLabel))
-    .join("\n\n---\n\n");
+    .map((variant) => formatCaptionVariant(variant, 1, input.bundleLabel))
+    .join("\n");
   return new Blob([text], { type: "text/plain;charset=utf-8" });
 }
 
@@ -92,7 +86,7 @@ export async function buildTikTokCaptionText(input: {
   variantCount?: number;
 }): Promise<string> {
   const usedEntities = collectUsedEntities(input.pages, input.entities);
-  const variantCount = Math.max(1, Math.min(6, input.variantCount ?? 4));
+  const variantCount = 1;
   const aiVariants = await requestAiCaptions({
     packName: input.packName,
     bundleLabel: input.bundleLabel,
@@ -106,8 +100,8 @@ export async function buildTikTokCaptionText(input: {
 
   return variants
     .slice(0, variantCount)
-    .map((variant, index) => formatCaptionVariant(variant, index + 1, input.bundleLabel))
-    .join("\n\n---\n\n");
+    .map((variant) => formatCaptionVariant(variant, 1, input.bundleLabel))
+    .join("\n");
 }
 
 function collectUsedEntities(pages: ExportPageEntityData[], entities: Entity[]): Entity[] {
@@ -503,7 +497,7 @@ export interface PublishBundleArtifacts {
 export async function buildPublishBundle(
   input: PublishBundleInput,
 ): Promise<PublishBundleArtifacts> {
-  const variantCount = Math.max(1, Math.min(8, input.variantCount ?? 4));
+  const variantCount = 1;
 
   const bundleSlug = buildBundleSlug(input.bundleLabel);
   const imageFiles = input.images.map((entry, index) => ({

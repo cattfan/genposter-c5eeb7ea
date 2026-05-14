@@ -88,6 +88,6 @@ function parseVariationsJson(raw: string): string[] {
   // Fallback: split by newlines
   return trimmed
     .split("\n")
-    .map((line) => line.replace(/^\d+[\.\)]\s*/, "").replace(/^["']|["']$/g, "").trim())
+    .map((line) => line.replace(/^\d+[.)]\s*/, "").replace(/^["']|["']$/g, "").trim())
     .filter((line) => line.length > 5);
 }

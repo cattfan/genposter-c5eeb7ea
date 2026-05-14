@@ -40,14 +40,11 @@ export function buildBundlePageMeta(
     const bundleIndex = getBundleIndex(index, bundleSize, job.pages.length);
     const bundleLabel = `Bộ ${bundleIndex}`;
     const pageOrderInBundle = index % bundleSize;
-    const partnerEntityIds = Array.from(
-      new Set(
-        page.items
-          .filter((item) => item.partnerFlag && item.entityId)
-          .map((item) => item.entityId!)
-          .filter((entityId) => entityMap.get(entityId)?.partnerFlag),
-      ),
-    );
+    const ownerEntity = page.entityId ? entityMap.get(page.entityId) : undefined;
+    const partnerEntityIds =
+      ownerEntity?.partnerFlag && page.entityId
+        ? [page.entityId]
+        : [];
 
     return {
       page,

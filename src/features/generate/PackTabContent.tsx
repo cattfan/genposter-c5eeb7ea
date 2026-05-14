@@ -108,12 +108,11 @@ import {
 import { applyFontVariationToGeneratedJob } from "@/features/generate/fontVariation";
 import {
   buildGeneratePresetBundle,
-  downloadJson,
   importPortableBundle,
   readPortableBundleFile,
   safePortableFileName,
 } from "@/features/generate/generatePresetPortability";
-import { exportGenerateBundlesToDataServer } from "@/server/generateExport";
+import { exportPresetJsonToDataServer } from "@/server/presetExport";
 import { formatTemplateDisplayName } from "@/lib/templateNames";
 import { usePageCommands, type CommandEntry } from "@/components/CommandPalette";
 import { EmptyState, createProgressToast } from "@/components/ux";
@@ -206,17 +205,6 @@ function createDataGroupId() {
   return `dg_${nanoid(8)}`;
 }
 
-async function blobToBase64(blob: Blob): Promise<string> {
-  const buffer = await blob.arrayBuffer();
-  let binary = "";
-  const bytes = new Uint8Array(buffer);
-  const chunkSize = 0x8000;
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    const chunk = bytes.subarray(offset, offset + chunkSize);
-    binary += String.fromCharCode(...chunk);
-  }
-  return btoa(binary);
-}
 
 interface Props {
   packs: PackTemplate[];
@@ -1048,7 +1036,7 @@ export function PackTabContent({
       filterMoHinh: sharedValue("filterMoHinh") ?? ALL_VALUE,
       filterPhongCach: sharedValue("filterPhongCach") ?? ALL_VALUE,
     };
-  }, [activeGenerateConfig, sharedSourceSlots]);
+  }, [activeGenerateConfig, sharedSourceSlots, slotSourceConfig]);
   const shouldShowSharedSourceControls =
     sharedSourceSlots.length > 1 &&
     sharedSourceSlots.some((slot) => {
@@ -2007,13 +1995,16 @@ export function PackTabContent({
     };
   };
 
-  const exportPreset = (preset: GenerateBindingPreset) => {
+  const exportPreset = async (preset: GenerateBindingPreset) => {
     const { pack, pages } = getPresetPackPages(preset);
     const bundle = buildGeneratePresetBundle(preset, pack, pages);
-    downloadJson(
-      `${safePortableFileName(formatTemplateDisplayName(preset.name, "khuon"))}-generate-preset.json`,
-      bundle,
-    );
+    const saved = await exportPresetJsonToDataServer({
+      data: {
+        fileName: `${safePortableFileName(formatTemplateDisplayName(preset.name, "khuon"))}-generate-preset.json`,
+        payload: bundle,
+      },
+    });
+    toast.success(`Đã lưu bộ khuôn vào ${saved.relativePath}`);
   };
 
   const buildCurrentPresetPayload = (
@@ -2538,27 +2529,6 @@ export function PackTabContent({
     return issuesByBundle;
   }, [assets, bundleGroups, entities, packOv]);
 
-  const writeBundlesToData = async (
-    exportName: string,
-    bundles: Array<{ folderName: string; files: Array<{ name: string; blob: Blob }> }>,
-  ) => {
-    const payload = {
-      exportName,
-      bundles: await Promise.all(
-        bundles.map(async (bundle) => ({
-          folderName: bundle.folderName,
-          files: await Promise.all(
-            bundle.files.map(async (file) => ({
-              name: file.name,
-              base64: await blobToBase64(file.blob),
-            })),
-          ),
-        })),
-      ),
-    };
-    return await exportGenerateBundlesToDataServer({ data: payload });
-  };
-
   const exportZip = async () => {
     if (!currentJob || !jobPack) return;
     const sel = currentJob.pages.filter((p) => p.selected);
@@ -2664,20 +2634,16 @@ export function PackTabContent({
       }
 
       const templateName = formatTemplateDisplayName(currentJob.packTemplateName, "bo-anh");
-      const exportName = formatZipFileName(templateName);
-      const saved = await writeBundlesToData(
-        exportName,
-        bundleEntries.map(([bundleIndex], index) => ({
-          folderName: bundleArtifacts.length === 1 ? exportName : `Bo${bundleIndex}`,
-          files: bundleArtifacts[index].files,
-        })),
-      );
+      const zipFileName = bundleArtifacts.length === 1
+        ? `${formatZipFileName(templateName, { version: bundleEntries[0][0] })}.zip`
+        : `${formatZipFileName(templateName)}.zip`;
+      await downloadMultiBundleZip(bundleArtifacts, zipFileName);
       await db.jobs.put({ ...currentJob, status: "exported" });
       progress.success(
-        `Đã xuất vào ${saved.root} · ${bundleArtifacts.length} bộ · ${renderedPages.length} ảnh`,
+        `Đã tải ZIP · ${bundleArtifacts.length} bộ · ${renderedPages.length} ảnh`,
       );
     } catch (error) {
-      progress.error("Không thể xuất vào data: " + formatExportError(error));
+      progress.error("Không thể tải ZIP: " + formatExportError(error));
     }
   };
 
@@ -2755,16 +2721,11 @@ export function PackTabContent({
       files.push({ name: "doitac.xlsx", blob: xlsxBlob });
 
       const templateName = formatTemplateDisplayName(jobPack.name, "bo-anh");
-      const exportName = formatZipFileName(templateName);
-      const saved = await writeBundlesToData(exportName, [
-        {
-          folderName: `Bo${bundle.bundleIndex}`,
-          files,
-        },
-      ]);
-      progress.success(`Đã xuất ${bundle.bundleLabel} vào ${saved.root}`);
+      const zipFileName = `${formatZipFileName(templateName, { version: bundle.bundleIndex })}.zip`;
+      await downloadMultiBundleZip([{ files }], zipFileName);
+      progress.success(`Đã tải ${bundle.bundleLabel}`);
     } catch (error) {
-      progress.error("Không thể xuất bộ vào data: " + formatExportError(error));
+      progress.error("Không thể tải bộ: " + formatExportError(error));
     } finally {
       setBundleExportingIndex(null);
     }
@@ -2787,9 +2748,9 @@ export function PackTabContent({
           ? [
               {
                 id: "generate:export-zip",
-                label: "Xuất vào data",
+                label: "Xuất ZIP",
                 group: "Tạo nội dung",
-                keywords: ["export", "data", "publish"],
+                keywords: ["export", "zip", "publish"],
                 icon: <Download className="size-4" />,
                 action: () => void exportZip(),
               },
@@ -2937,7 +2898,9 @@ export function PackTabContent({
                           size="icon"
                           aria-label="Xuất khuôn"
                           title="Xuất khuôn"
-                          onClick={() => exportPreset(preset)}
+                          onClick={() => {
+                            void exportPreset(preset);
+                          }}
                         >
                           <FileDown className="size-4" />
                         </Button>
@@ -3803,7 +3766,7 @@ export function PackTabContent({
                           ) : (
                             <Package className="size-3 mr-1" />
                           )}
-                          Xuất bộ vào data
+                          Tải bộ
                         </Button>
                       </div>
                       {bundleGroupIndex === 0 && (
@@ -3846,9 +3809,9 @@ export function PackTabContent({
                               event.preventDefault();
                               void exportZip();
                             }}
-                            title="Xuất toàn bộ bộ ảnh đã chọn vào thư mục data trong dự án"
+                            title="Xuất toàn bộ bộ ảnh đã chọn thành file ZIP"
                           >
-                            <Package className="size-4 mr-2" /> Xuất vào data
+                            <Package className="size-4 mr-2" /> Xuất ZIP
                           </Button>
                         </div>
                       )}
