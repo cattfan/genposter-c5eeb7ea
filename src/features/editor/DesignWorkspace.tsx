@@ -2639,6 +2639,15 @@ export function DesignWorkspace({
     const contextActionIds = getSelectionActionIds(contextIds);
     const canGroup = contextElements.length > 1;
     const canUngroup = contextElements.some((item) => item.kind === "group");
+    if (import.meta.env.DEV) {
+      console.debug("[ContextMenu]", {
+        elementId: element.elementId,
+        contextIds,
+        contextActionIds,
+        hasContextSelection,
+        activeElementsCount: editor.activeElements.length,
+      });
+    }
     const showContextInfo = () => {
       const bounds = getSelectionBounds(contextElements.length ? contextElements : [element]);
       const label =
@@ -2688,7 +2697,10 @@ export function DesignWorkspace({
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
-          onSelect={() => editor.orderSelection("front", contextIds)}
+          onSelect={() => {
+            if (import.meta.env.DEV) console.debug("[ContextMenu] orderSelection front", contextIds);
+            editor.orderSelection("front", contextIds);
+          }}
           disabled={!hasContextSelection}
         >
           Lên trên cùng
@@ -2752,54 +2764,54 @@ export function DesignWorkspace({
           <ContextMenuShortcut>Ctrl+Shift+G</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem
-          onSelect={() =>
+          onSelect={() => {
+            if (import.meta.env.DEV) console.debug("[ContextMenu] lock", contextActionIds, !element.locked);
             editor.updateElements(
               contextActionIds,
               { locked: !element.locked },
-              { history: false },
-            )
-          }
+            );
+          }}
         >
           {element.locked ? <LockOpen className="mr-2 size-4" /> : <Lock className="mr-2 size-4" />}
           {element.locked ? "Mở khóa" : "Khóa"}
         </ContextMenuItem>
         <ContextMenuItem
-          onSelect={() =>
+          onSelect={() => {
+            if (import.meta.env.DEV) console.debug("[ContextMenu] hidden", contextActionIds, !element.hidden);
             editor.updateElements(
               contextActionIds,
               { hidden: !element.hidden },
-              { history: false },
-            )
-          }
+            );
+          }}
         >
           {element.hidden ? <Eye className="mr-2 size-4" /> : <EyeOff className="mr-2 size-4" />}
           {element.hidden ? "Hiện thành phần" : "Ẩn thành phần"}
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
-          onSelect={() =>
+          onSelect={() => {
+            if (import.meta.env.DEV) console.debug("[ContextMenu] flipH", contextActionIds);
             editor.updateElements(
               contextActionIds,
               {
                 style: { ...(element.style ?? {}), flipH: !element.style?.flipH },
               } as Partial<DesignElement>,
-              { history: false },
-            )
-          }
+            );
+          }}
         >
           <FlipHorizontal className="mr-2 size-4" />
           Lật ngang
         </ContextMenuItem>
         <ContextMenuItem
-          onSelect={() =>
+          onSelect={() => {
+            if (import.meta.env.DEV) console.debug("[ContextMenu] flipV", contextActionIds);
             editor.updateElements(
               contextActionIds,
               {
                 style: { ...(element.style ?? {}), flipV: !element.style?.flipV },
               } as Partial<DesignElement>,
-              { history: false },
-            )
-          }
+            );
+          }}
         >
           <FlipVertical className="mr-2 size-4" />
           Lật dọc
