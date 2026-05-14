@@ -1221,7 +1221,19 @@ export function PackTabContent({
     patch: Partial<NonNullable<Slot["dataSourceConfig"]>>,
   ) => {
     if (!activePage || !effectiveActive) return;
-    const targetIds = new Set(slots.map((slot) => slot.slotId));
+    // Mở rộng target: nếu slot thuộc dataGroup, apply cho tất cả slots cùng group
+    const baseIds = new Set(slots.map((slot) => slot.slotId));
+    const dataGroupIds = new Set(
+      slots.map((slot) => slot.dataGroupId).filter((id): id is string => !!id),
+    );
+    const targetIds = new Set(baseIds);
+    if (dataGroupIds.size > 0) {
+      for (const s of effectiveActive.slots) {
+        if (s.dataGroupId && dataGroupIds.has(s.dataGroupId)) {
+          targetIds.add(s.slotId);
+        }
+      }
+    }
     let changed = false;
     commitPreviewPageDrafts((prev) => {
       const current = createWorkingTemplate(effectiveActive, undefined, effectiveActive);
@@ -2196,17 +2208,29 @@ export function PackTabContent({
     }
 
     // AI rewrite: tìm slots có binding "ai.rewrite" và tạo variations
-    const aiRewriteSlots = pageTemplatesForGenerate.flatMap((tpl) =>
-      tpl.slots
-        .filter((slot) => slot.bindingPath === "ai.rewrite" && slot.staticText?.trim())
-        .map((slot) => ({ pageTemplateId: tpl.pageTemplateId, slotId: slot.slotId, text: slot.staticText! })),
+    // Scan từ workingTemplate (đã merge drafts) thay vì pageTemplatesForGenerate gốc
+    const isAiRewriteSlot = (slot: { bindingPath?: string; staticText?: string }) =>
+      (slot.bindingPath === "ai.rewrite" || slot.bindingPath === "entity.metadata.ai.rewrite") &&
+      slot.staticText?.trim();
+    const aiRewriteSlots = job.pages.flatMap((page) => {
+      const tpl = page.workingTemplate ?? pageTemplatesForGenerate.find(
+        (t) => t.pageTemplateId === page.pageTemplateId,
+      );
+      if (!tpl) return [];
+      return tpl.slots
+        .filter((slot) => isAiRewriteSlot(slot))
+        .map((slot) => ({ pageTemplateId: tpl.pageTemplateId, slotId: slot.slotId, text: slot.staticText! }));
+    });
+    // Deduplicate by slotId+text
+    const uniqueAiSlots = Array.from(
+      new Map(aiRewriteSlots.map((s) => [`${s.slotId}:${s.text}`, s])).values(),
     );
-    if (aiRewriteSlots.length > 0) {
+    if (uniqueAiSlots.length > 0) {
       toast.info("Đang gọi AI viết lại text...");
       const bundleSize = Math.max(1, selectedPack.orderedPages.length);
       const bundleCount = Math.ceil(job.pages.length / bundleSize);
       // Group by unique text to avoid duplicate AI calls
-      const uniqueTexts = Array.from(new Set(aiRewriteSlots.map((s) => s.text)));
+      const uniqueTexts = Array.from(new Set(uniqueAiSlots.map((s) => s.text)));
       const variationsMap = new Map<string, string[]>();
       for (const text of uniqueTexts) {
         try {
@@ -2232,12 +2256,12 @@ export function PackTabContent({
             (t) => t.pageTemplateId === page.pageTemplateId,
           );
           if (!tpl) return page;
-          const hasAiSlot = tpl.slots.some((s) => s.bindingPath === "ai.rewrite" && s.staticText?.trim());
+          const hasAiSlot = tpl.slots.some((s) => isAiRewriteSlot(s));
           if (!hasAiSlot) return page;
           const nextTemplate = JSON.parse(JSON.stringify(tpl)) as typeof tpl;
           nextTemplate.slots = nextTemplate.slots.map((slot) => {
-            if (slot.bindingPath !== "ai.rewrite" || !slot.staticText?.trim()) return slot;
-            const variations = variationsMap.get(slot.staticText);
+            if (!isAiRewriteSlot(slot)) return slot;
+            const variations = variationsMap.get(slot.staticText!);
             if (!variations || variations.length === 0) return slot;
             return {
               ...slot,
@@ -3375,6 +3399,7 @@ export function PackTabContent({
                               </SelectContent>
                             </Select>
                             {textSlotFieldBindingValue(slot) !== "_static" &&
+                              slot.bindingPath !== "ai.rewrite" &&
                               renderSlotSourceControls(slot)}
                           </div>
                         ))}
