@@ -55,6 +55,8 @@ interface Props {
   seedKey?: string;
   showSlotBounds?: boolean;
   hideImagePlaceholderText?: boolean;
+  /** Ẩn hoàn toàn image placeholder (stripes) - dùng cho thumbnail preview */
+  hideEmptyImages?: boolean;
 }
 
 function isGeneratedCoverBackgroundSlot(slot: Slot, template: PageTemplate) {
@@ -86,6 +88,7 @@ export function PageRenderer({
   seedKey,
   showSlotBounds = false,
   hideImagePlaceholderText = false,
+  hideEmptyImages = false,
 }: Props) {
   const entityMap = useMemo(
     () => new Map(entities.map((item) => [item.entityId, item])),
@@ -231,6 +234,7 @@ export function PageRenderer({
             debug={debug}
             showSlotBounds={showSlotBounds}
             hideImagePlaceholderText={hideImagePlaceholderText}
+            hideEmptyImages={hideEmptyImages}
             renderGeneratedOverlay={
               assets.length > 0 || !!entity || !!entityPool?.length || effectiveSlotItems.length > 0
             }
@@ -287,6 +291,7 @@ function SlotRenderer({
   debug,
   showSlotBounds,
   hideImagePlaceholderText,
+  hideEmptyImages,
   renderGeneratedOverlay,
 }: {
   slot: ExpandedSlot;
@@ -305,6 +310,7 @@ function SlotRenderer({
   debug?: boolean;
   showSlotBounds?: boolean;
   hideImagePlaceholderText?: boolean;
+  hideEmptyImages?: boolean;
   renderGeneratedOverlay?: boolean;
 }) {
   const flip = buildFlipTransform(slot.style);
@@ -500,6 +506,11 @@ function SlotRenderer({
     const crop = slot.crop;
 
     if (isGeneratedCoverBackground && !usableSrc && !renderGeneratedOverlay) {
+      return null;
+    }
+
+    // Ẩn hoàn toàn image slot không có src khi dùng cho thumbnail preview
+    if (hideEmptyImages && !usableSrc) {
       return null;
     }
 
