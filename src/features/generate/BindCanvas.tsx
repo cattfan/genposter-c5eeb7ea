@@ -779,11 +779,6 @@ function getReplaceSlotIds(
   const dataGroupIds = getDataGroupSlotIds(slot, slots, template);
   if (dataGroupIds.length > 1) return dataGroupIds;
 
-  if (isDataBindableSlot(slot, template)) {
-    const spatialIds = getSpatialRelatedSlotIds(slot, slots, template);
-    if (spatialIds.length > 1) return spatialIds;
-  }
-
   const relatedIds = getRelatedSlotIds(slot, slots, template, slotItems);
   if (relatedIds.some((slotId) => slotId !== slot.slotId)) return relatedIds;
 
@@ -839,12 +834,6 @@ function getRelatedSlotIds(
   }
   const containedIds = getContainedDataSlotIds(slot, slots, template);
   if (containedIds.length > 0) return containedIds;
-
-  const spatialIds = getSpatialRelatedSlotIds(slot, slots, template);
-  if (spatialIds.length > 1) return spatialIds;
-
-  const renderedTargetIds = getRenderedTargetSlotIds(slot, slots, template, slotItems);
-  if (renderedTargetIds.length > 1) return renderedTargetIds;
 
   return [slot.slotId];
 }

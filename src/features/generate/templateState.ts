@@ -7,6 +7,10 @@ interface TemplateGroupOptions {
   synthesizeMissingGroups?: boolean;
 }
 
+function isSyntheticAutoGroupId(value: string | undefined) {
+  return typeof value === "string" && value.startsWith("auto-group-");
+}
+
 export function clonePageTemplate(template: PageTemplate): PageTemplate {
   return JSON.parse(JSON.stringify(template)) as PageTemplate;
 }
@@ -158,7 +162,14 @@ function normalizeTemplateGroups(
   options?: TemplateGroupOptions,
 ): PageTemplate {
   const groupedTemplate = options?.synthesizeMissingGroups === false
-    ? template
+    ? {
+        ...template,
+        slots: template.slots
+          .filter((slot) => !(slot.kind === "group" && isSyntheticAutoGroupId(slot.slotId)))
+          .map((slot) =>
+            isSyntheticAutoGroupId(slot.groupId) ? { ...slot, groupId: undefined } : slot,
+          ),
+      }
     : synthesizeMissingCardGroups(template);
   const groupSlots = groupedTemplate.slots.filter((slot) => slot.kind === "group");
   const groupIds = new Set(groupSlots.map((slot) => slot.slotId));
