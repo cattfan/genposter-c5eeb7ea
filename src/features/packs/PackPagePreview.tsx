@@ -82,16 +82,16 @@ export function PackPagePreview({ tpl }: { tpl: PageTemplate }) {
 
   const { width: cw, height: ch } = effectiveTemplate.canvas;
 
-  // Render ở scale lớn hơn (min 0.18) rồi CSS transform scale-down
-  // Giúp text/shape vẫn nhìn thấy ở thumbnail nhỏ
+  // Render ở scale lớn hơn rồi CSS scale-down để text đủ lớn nhìn rõ
   const fitScale =
     viewport.width && viewport.height ? Math.min(viewport.width / cw, viewport.height / ch) : 0;
-  const renderScale = Math.max(fitScale, 0.18);
+  // Render tối thiểu ở 0.25 để font ~40px → 10px (đọc được)
+  const renderScale = Math.max(fitScale, 0.25);
   const cssScale = fitScale > 0 ? fitScale / renderScale : 0;
   const renderedWidth = cw * renderScale;
   const renderedHeight = ch * renderScale;
-  const displayWidth = renderedWidth * cssScale;
-  const displayHeight = renderedHeight * cssScale;
+  const displayWidth = cw * fitScale;
+  const displayHeight = ch * fitScale;
   const left = (viewport.width - displayWidth) / 2;
   const top = (viewport.height - displayHeight) / 2;
 
@@ -121,6 +121,7 @@ export function PackPagePreview({ tpl }: { tpl: PageTemplate }) {
               height: renderedHeight,
               transform: cssScale < 1 ? `scale(${cssScale})` : undefined,
               transformOrigin: "top left",
+              willChange: "transform",
             }}
           >
             <PageRenderer

@@ -509,8 +509,10 @@ function SlotRenderer({
       return null;
     }
 
-    // Ẩn hoàn toàn image slot không có src khi dùng cho thumbnail preview
-    if (hideEmptyImages && !usableSrc) {
+    // Ẩn placeholder stripes cho thumbnail preview:
+    // Chỉ ẩn khi slot thật sự không có nguồn ảnh nào (không staticImage, không binding resolve)
+    // Nếu có imageRawSrc (kể cả idb://) → slot CÓ ảnh, chỉ đang chờ resolve → không ẩn
+    if (hideEmptyImages && !usableSrc && !imageRawSrc) {
       return null;
     }
 
