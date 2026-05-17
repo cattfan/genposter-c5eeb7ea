@@ -39,6 +39,7 @@ import {
 import { matchFilesToEntities, type MatchResult } from "@/features/data/imageMatcher";
 import type { Asset, DriveDownloadCheckpoint, Entity } from "@/models";
 import { db, saveBlob } from "@/storage/db";
+import { remoteClient } from "@/storage/remoteClient";
 import { makeIdbSrc } from "@/storage/imageSrc";
 import { resizeImageBlob } from "@/storage/imageResize";
 import { getSettings, saveSettings } from "@/storage/settings";
@@ -415,37 +416,61 @@ export function BulkImageUpload() {
     let failed = 0;
     const newAssets: Asset[] = [];
 
-    // Concurrency 10 cho local backend (network không phải bottleneck).
-    // Tăng tiếp lên 12-16 sẽ saturate Multer/disk write trên Windows.
-    const CONCURRENCY = 10;
-    const worker = async (item: PendingFile) => {
+    /**
+     * Batch multipart upload: 20 file/request -> giảm 95% network overhead so
+     * với upload từng cái. Đồng thời chạy 4 request song song.
+     */
+    const BATCH_SIZE = 20;
+    const BATCH_CONCURRENCY = 4;
+
+    const processBatch = async (batchItems: PendingFile[]) => {
       try {
-        const resized = await resizeImageBlob(item.file);
-        const blobKey = await saveBlob(resized);
-        newAssets.push({
-          assetId: nanoid(),
-          entityId: item.manualEntityId!,
-          sourceType: "local",
-          sourceValue: makeIdbSrc(blobKey),
-          blobKey,
-          role: item.role === "cover" ? "generic" : item.role,
-          isCover: false,
-          qualityScore: 80,
-          status: "ok",
-        });
+        // Resize từng file song song (Canvas API trong main thread, nhưng
+        // skip nhanh cho ảnh <2MB nhờ fast path trong resizeImageBlob).
+        const resized = await Promise.all(
+          batchItems.map((item) => resizeImageBlob(item.file)),
+        );
+        const uploaded = await remoteClient.uploadBlobsBatch(resized);
+        // uploaded.length === resized.length theo backend contract.
+        for (let i = 0; i < uploaded.length; i += 1) {
+          const item = batchItems[i];
+          newAssets.push({
+            assetId: nanoid(),
+            entityId: item.manualEntityId!,
+            sourceType: "local",
+            sourceValue: makeIdbSrc(uploaded[i].blobKey),
+            blobKey: uploaded[i].blobKey,
+            role: item.role === "cover" ? "generic" : item.role,
+            isCover: false,
+            qualityScore: 80,
+            status: "ok",
+          });
+        }
       } catch (err) {
-        failed += 1;
-        console.warn("[directUpload] Failed:", item.file.name, err);
+        failed += batchItems.length;
+        console.warn(
+          "[directUpload] Batch failed:",
+          batchItems.map((item) => item.file.name),
+          err,
+        );
       } finally {
-        completed += 1;
-        progress.update(completed, "Đang tải ảnh lên server...");
+        completed += batchItems.length;
+        progress.update(
+          Math.min(completed, total),
+          "Đang tải ảnh lên server...",
+        );
       }
     };
 
     try {
-      for (let i = 0; i < matchedItems.length; i += CONCURRENCY) {
-        const batch = matchedItems.slice(i, i + CONCURRENCY);
-        await Promise.all(batch.map(worker));
+      // Tạo các batch 20 file, chạy 4 batch song song.
+      const batches: PendingFile[][] = [];
+      for (let i = 0; i < matchedItems.length; i += BATCH_SIZE) {
+        batches.push(matchedItems.slice(i, i + BATCH_SIZE));
+      }
+      for (let i = 0; i < batches.length; i += BATCH_CONCURRENCY) {
+        const concurrentBatches = batches.slice(i, i + BATCH_CONCURRENCY);
+        await Promise.all(concurrentBatches.map(processBatch));
       }
 
       if (newAssets.length > 0) {
