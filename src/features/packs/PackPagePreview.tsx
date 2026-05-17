@@ -130,7 +130,6 @@ export function PackPagePreview({ tpl }: { tpl: PageTemplate }) {
               assets={[]}
               scale={renderScale}
               hideImagePlaceholderText
-              hideEmptyImages
             />
           </div>
         </div>
