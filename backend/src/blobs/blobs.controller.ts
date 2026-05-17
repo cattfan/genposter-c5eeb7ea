@@ -38,7 +38,7 @@ interface BlobRow {
 @Controller("blobs")
 export class BlobsController {
   @Post()
-  @UseInterceptors(FileInterceptor("file", { limits: { fileSize: 30 * 1024 * 1024 } }))
+  @UseInterceptors(FileInterceptor("file", { limits: { fileSize: 100 * 1024 * 1024 } }))
   async upload(
     @UploadedFile() file: Express.Multer.File | undefined,
     @Headers("x-blob-key") providedKey?: string,
@@ -68,7 +68,7 @@ export class BlobsController {
    */
   @Post("batch")
   @UseInterceptors(
-    FilesInterceptor("files", 50, { limits: { fileSize: 30 * 1024 * 1024 } }),
+    FilesInterceptor("files", 50, { limits: { fileSize: 100 * 1024 * 1024 } }),
   )
   async batchUpload(
     @UploadedFiles() files: Express.Multer.File[] | undefined,

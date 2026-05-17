@@ -417,10 +417,12 @@ export function BulkImageUpload() {
     const newAssets: Asset[] = [];
 
     /**
-     * Batch multipart upload: 20 file/request -> giảm 95% network overhead so
-     * với upload từng cái. Đồng thời chạy 4 request song song.
+     * Batch multipart upload: 10 file/request -> giảm 90% network overhead so
+     * với upload từng cái, nhưng vẫn an toàn cho memory khi user upload ảnh
+     * raw lớn (DSLR 20-50MB/ảnh × 10 = 200-500MB/batch). Đồng thời chạy 4
+     * batch song song.
      */
-    const BATCH_SIZE = 20;
+    const BATCH_SIZE = 10;
     const BATCH_CONCURRENCY = 4;
 
     const processBatch = async (batchItems: PendingFile[]) => {
