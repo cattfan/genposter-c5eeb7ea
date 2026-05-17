@@ -1,7 +1,7 @@
 // Mini thumbnail render 1 page template (scale-fit container)
 // Đọc designDocument nếu có (chứa content mới nhất), fallback về pageTemplate.
 import { useEffect, useRef, useState, useMemo } from "react";
-import { useLiveQuery } from "dexie-react-hooks";
+import { useLiveQuery } from "@/storage/useLiveQuery";
 import type { DesignDocument, PageTemplate } from "@/models";
 import { PageRenderer } from "@/features/render/PageRenderer";
 import { db } from "@/storage/db";

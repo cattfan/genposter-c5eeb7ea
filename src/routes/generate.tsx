@@ -7,7 +7,7 @@
 // và buildPublishBundle (các symbol đó chỉ còn dùng ở đây).
 
 import { createFileRoute } from "@tanstack/react-router";
-import { useLiveQuery } from "dexie-react-hooks";
+import { useLiveQuery } from "@/storage/useLiveQuery";
 import { useMemo, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 

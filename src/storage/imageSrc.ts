@@ -1,10 +1,16 @@
 // Resolver chung cho src ảnh trong toàn app.
-// Hỗ trợ:
-//   - "idb://<blobKey>" → load từ IndexedDB và tạo object URL (persistent qua reload)
-//   - "blob:..."         → trả thẳng (chỉ sống trong session hiện tại)
-//   - URL thường         → trả thẳng
-import { useEffect, useState } from "react";
-import { db } from "@/storage/db";
+//
+// Sau migration sang backend SQLite + filesystem blobs:
+//   - "idb://<blobKey>"  → resolve thành "/api/v1/blobs/<key>" (Vite proxy về NestJS)
+//   - "blob:..."          → trả thẳng (object URL trong session, ví dụ preview upload)
+//   - URL thường (http..) → trả thẳng
+//
+// Trước đây phải fetch binary từ IndexedDB rồi tạo `URL.createObjectURL` →
+// 1 round trip async. Sau migration: URL backend stable, browser tự cache theo
+// header `Cache-Control: immutable` → đồng bộ, không cần state.
+
+import { useMemo } from "react";
+import { blobPublicUrl } from "@/storage/remoteClient";
 
 const IDB_PREFIX = "idb://";
 
@@ -21,52 +27,30 @@ export function getBlobKeyFromSrc(src: string): string | null {
   return src.slice(IDB_PREFIX.length);
 }
 
-/** True nếu src là idb:// (cần chờ resolver), dùng để render placeholder thay vì <img src="idb://..."> hỏng. */
+/** True nếu src là idb:// chưa resolve. Sau migration luôn resolve được, giữ
+ *  hàm để code cũ không phải đổi. */
 export function isPendingIdb(src: string | undefined | null, resolved: string | undefined): boolean {
   if (!src) return false;
   return src.startsWith(IDB_PREFIX) && !resolved;
 }
 
-// Cache để tránh tạo nhiều object URL cho cùng 1 blobKey trong session.
-const urlCache = new Map<string, Promise<string | null>>();
-
-export async function resolveImageSrcAsync(src: string | undefined | null): Promise<string | null> {
+/** Sync version: convert idb:// → URL backend ngay (không cần await). */
+export function resolveImageSrc(src: string | undefined | null): string | null {
   if (!src) return null;
   if (!src.startsWith(IDB_PREFIX)) return src;
   const key = src.slice(IDB_PREFIX.length);
-  let p = urlCache.get(key);
-  if (!p) {
-    p = (async () => {
-      const rec = await db.blobs.get(key);
-      if (!rec) return null;
-      return URL.createObjectURL(rec.blob);
-    })();
-    urlCache.set(key, p);
-  }
-  return p;
+  return blobPublicUrl(key);
 }
 
-/** Hook React: trả ra src đã resolve (object URL) cho idb:// , giữ nguyên cho URL thường. */
+/** Async version giữ signature cũ cho code cũ chưa migrate. */
+export async function resolveImageSrcAsync(src: string | undefined | null): Promise<string | null> {
+  return resolveImageSrc(src);
+}
+
+/** Hook React: trả ra src đã resolve. Sync vì giờ chỉ là URL transformation. */
 export function useResolvedImageSrc(src: string | undefined | null): string | undefined {
-  const [resolved, setResolved] = useState<string | undefined>(() => (src && !src.startsWith(IDB_PREFIX) ? src : undefined));
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!src) {
-      setResolved(undefined);
-      return;
-    }
-    if (!src.startsWith(IDB_PREFIX)) {
-      setResolved(src);
-      return;
-    }
-    resolveImageSrcAsync(src).then((url) => {
-      if (!cancelled) setResolved(url ?? undefined);
-    });
-    return () => {
-      cancelled = true;
-    };
+  return useMemo(() => {
+    const resolved = resolveImageSrc(src ?? null);
+    return resolved ?? undefined;
   }, [src]);
-
-  return resolved;
 }

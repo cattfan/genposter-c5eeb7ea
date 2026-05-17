@@ -1,95 +1,38 @@
-import Dexie, { type Table } from "dexie";
+// Bridge giữa code cũ (gọi `db.<table>.<method>` kiểu Dexie) và backend NestJS.
+//
+// Trước đây file này định nghĩa Dexie database lưu IndexedDB. Sau migration
+// sang backend SQLite, mọi storage chuyển ra server. File này chỉ re-export
+// `remoteDb` (HTTP-backed) cùng tên `db` để 50+ callsite không phải đổi import.
+//
+// `saveBlob`/`getBlobURL`/`clearAll`/`clearAllExceptSymbols` được port sang
+// gọi backend tương đương.
+
 import { nanoid } from "nanoid";
-import type {
-  Project,
-  Entity,
-  Asset,
-  AssetItem,
-  BrandKit,
-  DesignDocument,
-  FontAsset,
-  PageTemplate,
-  PackTemplate,
-  GenerationJob,
-  ManualOverride,
-  BlobRecord,
-  GenerateBindingPreset,
-  AppSettings,
-  AnalysisRecord,
-  SymbolDefinition,
-} from "@/models";
+import { remoteClient, blobPublicUrl } from "./remoteClient";
+import { remoteDb } from "./remoteDb";
 
-class CPGDatabase extends Dexie {
-  projects!: Table<Project, string>;
-  entities!: Table<Entity, string>;
-  assets!: Table<Asset, string>;
-  assetLibrary!: Table<AssetItem, string>;
-  brandKits!: Table<BrandKit, string>;
-  designDocuments!: Table<DesignDocument, string>;
-  fontAssets!: Table<FontAsset, string>;
-  pageTemplates!: Table<PageTemplate, string>;
-  packTemplates!: Table<PackTemplate, string>;
-  jobs!: Table<GenerationJob, string>;
-  overrides!: Table<ManualOverride, string>;
-  blobs!: Table<BlobRecord, string>;
-  generatePresets!: Table<GenerateBindingPreset, string>;
-  settings!: Table<AppSettings & { id: string }, string>;
-  analyses!: Table<AnalysisRecord, string>;
-  symbols!: Table<SymbolDefinition, string>;
+export const db = remoteDb;
 
-  constructor() {
-    super("ContentPackGenerator");
-    this.version(1).stores({
-      projects: "projectId, name, updatedAt",
-      entities: "entityId, name, categoryMain, partnerFlag, status",
-      assets: "assetId, entityId, role, isCover, status",
-      pageTemplates: "pageTemplateId, name, type, updatedAt",
-      packTemplates: "packTemplateId, name, updatedAt",
-      jobs: "jobId, packTemplateId, createdAt, status",
-      overrides: "overrideId, packTemplateId, pageTemplateId, sectionId",
-      blobs: "blobKey, createdAt",
-      settings: "id",
-    });
-    this.version(2).stores({
-      entities: "entityId, name, categoryMain, partnerFlag, status, sheetName",
-    });
-    this.version(3).stores({
-      analyses: "analysisId, createdAt, updatedAt, title, mode",
-    });
-    this.version(4).stores({
-      assetLibrary: "assetId, name, kind, updatedAt",
-      brandKits: "brandKitId, name, updatedAt",
-      designDocuments: "designDocumentId, name, updatedAt, mode, sourcePageTemplateId",
-      fontAssets: "fontAssetId, family, updatedAt",
-    });
-    this.version(5).stores({
-      generatePresets: "presetId, name, mode, packTemplateId, updatedAt",
-    });
-    this.version(6).stores({
-      symbols: "symbolId, name, updatedAt",
-    });
-  }
-}
-
-export const db = new CPGDatabase();
-
+/** Upload Blob lên backend. Trả về blobKey để store vào field `idb://<key>`. */
 export async function saveBlob(blob: Blob, key?: string): Promise<string> {
   const blobKey = key ?? nanoid();
-  await db.blobs.put({
-    blobKey,
-    blob,
-    mime: blob.type,
-    createdAt: Date.now(),
-  });
-  return blobKey;
+  const result = await remoteClient.uploadBlob(blob, blobKey);
+  return result.blobKey;
 }
 
+/**
+ * Trả về URL công khai để render `<img>`. Vì blob nằm trên server, chỉ cần
+ * trỏ đến endpoint `/api/v1/blobs/<key>` — browser tự cache theo header
+ * `Cache-Control: immutable` mà server set.
+ */
 export async function getBlobURL(blobKey: string): Promise<string | null> {
-  const rec = await db.blobs.get(blobKey);
-  if (!rec) return null;
-  return URL.createObjectURL(rec.blob);
+  return blobPublicUrl(blobKey);
 }
 
+/**
+ * Xoá toàn bộ data khỏi server (15 bảng JSON). Blob orphan không xoá tự động
+ * — server có thể GC sau.
+ */
 export async function clearAll(): Promise<void> {
   await Promise.all([
     db.projects.clear(),
@@ -103,7 +46,6 @@ export async function clearAll(): Promise<void> {
     db.packTemplates.clear(),
     db.jobs.clear(),
     db.overrides.clear(),
-    db.blobs.clear(),
     db.generatePresets.clear(),
     db.analyses.clear(),
     db.settings.clear(),
@@ -112,9 +54,8 @@ export async function clearAll(): Promise<void> {
 }
 
 /**
- * Như clearAll nhưng KHÔNG đụng db.symbols. Dùng cho luồng import dạng JSON cũ
- * (legacy V1/V2) — các format đó không bao gồm symbols, nên nếu replace bằng
- * clearAll() sẽ vô tình xoá thư viện symbol mà người dùng đã build sẵn.
+ * Như `clearAll` nhưng giữ lại `symbols` — dùng cho luồng import legacy JSON
+ * không bao gồm symbols, tránh xoá thư viện symbol user đã build.
  */
 export async function clearAllExceptSymbols(): Promise<void> {
   await Promise.all([
@@ -129,7 +70,6 @@ export async function clearAllExceptSymbols(): Promise<void> {
     db.packTemplates.clear(),
     db.jobs.clear(),
     db.overrides.clear(),
-    db.blobs.clear(),
     db.generatePresets.clear(),
     db.analyses.clear(),
     db.settings.clear(),

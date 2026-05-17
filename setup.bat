@@ -100,6 +100,20 @@ if errorlevel 1 (
 )
 
 echo.
+echo Dang cai thu vien backend (NestJS)...
+pushd backend
+call npm install
+if errorlevel 1 (
+  echo Cai backend bi loi, thu lai voi --legacy-peer-deps...
+  call npm install --legacy-peer-deps
+)
+popd
+if errorlevel 1 (
+  set "ERROR_MSG=Cai backend loi. Kiem tra log npm phia tren."
+  goto fail
+)
+
+echo.
 echo Setup xong. Chay khoidong.bat de mo he thong.
 if not defined NO_PAUSE pause
 exit /b 0

@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate, useParams } from "@tanstack/react-router";
-import { useLiveQuery } from "dexie-react-hooks";
+import { useLiveQuery } from "@/storage/useLiveQuery";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DesignWorkspace } from "@/features/editor/DesignWorkspace";

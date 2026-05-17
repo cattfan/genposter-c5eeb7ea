@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useLiveQuery } from "dexie-react-hooks";
+import { useLiveQuery } from "@/storage/useLiveQuery";
 import {
   AlignCenterHorizontal,
   AlignCenterVertical,

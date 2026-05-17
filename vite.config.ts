@@ -31,6 +31,20 @@ export default defineConfig({
       host: "0.0.0.0",
       port: 9090,
       strictPort: true,
+      proxy: {
+        // Mọi request /api/* được forward tới backend NestJS port 3001 (dev).
+        // Frontend không cần biết URL backend, gọi relative /api/v1/...
+        "/api": {
+          target: "http://localhost:3001",
+          changeOrigin: true,
+        },
+        // WebSocket /ws cho realtime sync giữa các tab/browser. Vite tự forward
+        // upgrade request khi `ws: true`.
+        "/ws": {
+          target: "ws://localhost:3001",
+          ws: true,
+        },
+      },
     },
     preview: {
       host: "0.0.0.0",

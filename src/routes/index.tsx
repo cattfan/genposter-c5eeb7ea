@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useLiveQuery } from "dexie-react-hooks";
+import { useLiveQuery } from "@/storage/useLiveQuery";
 import { db } from "@/storage/db";
 import { getSettings } from "@/storage/settings";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";

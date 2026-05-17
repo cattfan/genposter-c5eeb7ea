@@ -1,6 +1,6 @@
 // Tab "Pack template (nâng cao)" — bind dữ liệu vào từng page của pack giống tab entity.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLiveQuery } from "dexie-react-hooks";
+import { useLiveQuery } from "@/storage/useLiveQuery";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import {
