@@ -409,7 +409,7 @@ export function BulkImageUpload() {
     setBusy(true);
     const total = matchedItems.length;
     const progress = createProgressToast({
-      initialLabel: `Đang tải ${total} ảnh lên server...`,
+      initialLabel: `Đang tải ${total} ảnh lên...`,
       total,
     });
     let completed = 0;
@@ -505,7 +505,7 @@ export function BulkImageUpload() {
         completed += batchItems.length;
         progress.update(
           Math.min(completed, total),
-          "Đang tải ảnh lên server...",
+          "Đang tải ảnh lên...",
         );
       }
     };
@@ -647,7 +647,7 @@ export function BulkImageUpload() {
     setBusy(true);
     const total = ready.length;
     const progress = createProgressToast({
-      initialLabel: `Đang tải ${total} ảnh lên server...`,
+      initialLabel: `Đang tải ${total} ảnh lên...`,
       total,
     });
     let completed = 0;
@@ -685,7 +685,7 @@ export function BulkImageUpload() {
         });
       } finally {
         completed += 1;
-        progress.update(completed, `Đang tải ảnh lên server...`);
+        progress.update(completed, `Đang tải ảnh lên...`);
       }
     };
 

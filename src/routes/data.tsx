@@ -1370,7 +1370,7 @@ function DataPage() {
         console.warn("[addAssetFilesToEntity] Failed:", file.name, err);
       } finally {
         completed += 1;
-        progress.update(completed, "Đang tải ảnh lên server...");
+        progress.update(completed, "Đang tải ảnh lên...");
       }
     };
 
