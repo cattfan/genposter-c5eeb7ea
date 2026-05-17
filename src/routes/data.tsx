@@ -1311,10 +1311,17 @@ function DataPage() {
     if (!entityId || files.length === 0) return;
 
     setAssetActionBusy(true);
-    try {
-      const newAssets: Asset[] = [];
+    const total = files.length;
+    const progressId = toast.loading(`Đang tải ${total} ảnh... (0/${total})`);
+    let completed = 0;
+    let failed = 0;
+    const newAssets: Asset[] = [];
 
-      for (const file of files) {
+    // Upload song song với concurrency 4 để không treo UI khi user chọn nhiều
+    // ảnh cùng lúc (vòng for tuần tự cũ chậm + UI đơ với folder lớn).
+    const CONCURRENCY = 4;
+    const worker = async (file: File) => {
+      try {
         const resized = await resizeImageBlob(file);
         const blobKey = await saveBlob(resized);
         newAssets.push({
@@ -1328,13 +1335,41 @@ function DataPage() {
           qualityScore: 80,
           status: "ok",
         });
+      } catch (err) {
+        failed += 1;
+        console.warn("[addAssetFilesToEntity] Failed:", file.name, err);
+      } finally {
+        completed += 1;
+        toast.loading(`Đang tải ${total} ảnh... (${completed}/${total})`, { id: progressId });
+      }
+    };
+
+    try {
+      for (let i = 0; i < files.length; i += CONCURRENCY) {
+        const batch = files.slice(i, i + CONCURRENCY);
+        await Promise.all(batch.map(worker));
       }
 
-      await db.assets.bulkPut(newAssets);
+      if (newAssets.length > 0) {
+        await db.assets.bulkPut(newAssets);
+      }
       const entityName = entityMap.get(entityId)?.name ?? "quán";
-      toast.success(`Đã thêm ${newAssets.length} ảnh vào ${entityName}`);
+      if (failed === 0) {
+        toast.success(`Đã thêm ${newAssets.length} ảnh vào ${entityName}`, { id: progressId });
+      } else if (newAssets.length > 0) {
+        toast.warning(
+          `Đã thêm ${newAssets.length}/${total} ảnh vào ${entityName}. ${failed} ảnh lỗi.`,
+          { id: progressId },
+        );
+      } else {
+        toast.error(`Không thêm được ảnh nào (${failed} lỗi). Xem console để biết chi tiết.`, {
+          id: progressId,
+        });
+      }
     } catch (error) {
-      toast.error("Lỗi thêm ảnh: " + (error instanceof Error ? error.message : String(error)));
+      toast.error("Lỗi thêm ảnh: " + (error instanceof Error ? error.message : String(error)), {
+        id: progressId,
+      });
     } finally {
       setAssetActionBusy(false);
     }

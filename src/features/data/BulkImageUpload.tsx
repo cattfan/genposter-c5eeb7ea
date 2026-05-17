@@ -39,6 +39,7 @@ import { matchFilesToEntities, type MatchResult } from "@/features/data/imageMat
 import type { Asset, DriveDownloadCheckpoint, Entity } from "@/models";
 import { db, saveBlob } from "@/storage/db";
 import { makeIdbSrc } from "@/storage/imageSrc";
+import { resizeImageBlob } from "@/storage/imageResize";
 import { getSettings, saveSettings } from "@/storage/settings";
 import { cn } from "@/lib/utils";
 
@@ -472,15 +473,29 @@ export function BulkImageUpload() {
     }
 
     setBusy(true);
-    try {
-      const newAssets: Asset[] = [];
+    const total = ready.length;
+    const progressId = toast.loading(`Đang tải ${total} ảnh... (0/${total})`);
+    let completed = 0;
+    let failed = 0;
+    const newAssets: Asset[] = [];
+    const failedItems: Array<{ name: string; reason: string }> = [];
 
-      for (const item of ready) {
-        const entityId = item.manualEntityId!;
-        const blobKey = await saveBlob(item.file);
+    /**
+     * Upload song song nhưng giới hạn concurrency. Vòng `for` tuần tự cũ
+     * khiến UI đơ vì 100 ảnh = 100 HTTP request lần lượt + memory cộng dồn.
+     * 4 concurrent là sweet spot: nhanh nhưng không bão hoà network/CPU.
+     */
+    const CONCURRENCY = 4;
+
+    const worker = async (item: (typeof ready)[number]) => {
+      try {
+        // Resize trước khi upload: ảnh từ Downloads thường 5-10MB, resize
+        // về 2400px longest edge cap ~500KB-1MB, server không phải lưu blob to.
+        const resized = await resizeImageBlob(item.file);
+        const blobKey = await saveBlob(resized);
         newAssets.push({
           assetId: nanoid(),
-          entityId,
+          entityId: item.manualEntityId!,
           sourceType: "local",
           sourceValue: makeIdbSrc(blobKey),
           blobKey,
@@ -489,15 +504,51 @@ export function BulkImageUpload() {
           qualityScore: 80,
           status: "ok",
         });
+      } catch (err) {
+        failed += 1;
+        failedItems.push({
+          name: item.file.name,
+          reason: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        completed += 1;
+        toast.loading(`Đang tải ${total} ảnh... (${completed}/${total})`, { id: progressId });
+      }
+    };
+
+    try {
+      // Pool pattern: chia ready thành batches CONCURRENCY, await Promise.all
+      // mỗi batch để giới hạn concurrent.
+      for (let i = 0; i < ready.length; i += CONCURRENCY) {
+        const batch = ready.slice(i, i + CONCURRENCY);
+        await Promise.all(batch.map(worker));
       }
 
-      await db.assets.bulkPut(newAssets);
-      toast.success(
-        `Đã nhập ${newAssets.length} ảnh vào ${new Set(newAssets.map((asset) => asset.entityId)).size} quán`,
-      );
+      if (newAssets.length > 0) {
+        await db.assets.bulkPut(newAssets);
+      }
+
+      const entityCount = new Set(newAssets.map((asset) => asset.entityId)).size;
+      if (failed === 0) {
+        toast.success(`Đã nhập ${newAssets.length} ảnh vào ${entityCount} quán`, {
+          id: progressId,
+        });
+      } else if (newAssets.length > 0) {
+        toast.warning(
+          `Đã nhập ${newAssets.length}/${total} ảnh vào ${entityCount} quán. ${failed} ảnh lỗi.`,
+          { id: progressId },
+        );
+        if (failedItems.length > 0) {
+          console.warn("[BulkImageUpload] Failed files:", failedItems);
+        }
+      } else {
+        toast.error(`Không nhập được ảnh nào (${failed} lỗi). Xem console để biết chi tiết.`, {
+          id: progressId,
+        });
+      }
       setPending([]);
     } catch (error) {
-      toast.error("Lỗi khi nhập ảnh: " + (error as Error).message);
+      toast.error("Lỗi khi nhập ảnh: " + (error as Error).message, { id: progressId });
     } finally {
       setBusy(false);
     }
