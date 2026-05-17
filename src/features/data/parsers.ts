@@ -103,6 +103,17 @@ export function parseCsvText(text: string): ParsedTable {
     skipEmptyLines: true,
   });
 
+  // Trước đây errors của PapaParse bị nuốt -> dòng quote sai / mixed delimiter
+  // im lặng biến mất. Ghi console.warn để debug; kèm tóm tắt số dòng hỏng.
+  if (res.errors.length > 0) {
+    const summary = res.errors
+      .slice(0, 3)
+      .map((err) => `[row ${err.row ?? "?"}] ${err.code}: ${err.message}`)
+      .join("; ");
+    const more = res.errors.length > 3 ? ` (+${res.errors.length - 3} more)` : "";
+    console.warn(`[parseCsvText] ${res.errors.length} parse error(s): ${summary}${more}`);
+  }
+
   return {
     headers: res.meta.fields ?? [],
     rows: res.data,
@@ -232,8 +243,12 @@ export async function fetchSheetWorkbook(input: string): Promise<ParsedTable> {
       const buffer = await res.arrayBuffer();
       if (!startsWithHtml(buffer)) return parseXlsxArrayBuffer(buffer);
     }
-  } catch {
-    // CORS or network issue, fall back to the server function below.
+  } catch (err) {
+    // CORS hoặc network issue: log để debug, fallback xuống server function.
+    console.warn(
+      "[fetchSheetWorkbook] direct fetch thất bại, dùng server function:",
+      err instanceof Error ? err.message : err,
+    );
   }
 
   const { fetchSheetXlsxServer } = await import("@/server/sheetFetch");
@@ -254,8 +269,12 @@ export async function fetchSheetCsv(input: string): Promise<ParsedTable> {
       const text = await res.text();
       if (!text.trim().startsWith("<")) return parseCsvText(text);
     }
-  } catch {
-    // CORS or network issue, fall back to the server function below.
+  } catch (err) {
+    // CORS hoặc network issue: log để debug, fallback xuống server function.
+    console.warn(
+      "[fetchSheetCsv] direct fetch thất bại, dùng server function:",
+      err instanceof Error ? err.message : err,
+    );
   }
 
   const { fetchSheetCsvServer } = await import("@/server/sheetFetch");

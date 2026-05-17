@@ -7,6 +7,7 @@ import {
   type BindingSourceContext,
   type BindingSourceDescriptor,
 } from "./sourceContext";
+import { ENTITY_FIELDS, normalizeFieldToken } from "@/engines/normalize/fieldRegistry";
 
 export interface BindingFieldOption {
   value: string;
@@ -215,64 +216,26 @@ function pickStableRandomAsset(pool: Asset[], seed: string): Asset | undefined {
   return ordered[stableHash(seed) % ordered.length];
 }
 
-const ENTITY_FIELD_ALIASES: Record<string, string> = {
-  name: "entity.name",
-  ten: "entity.name",
-  ten_quan: "entity.name",
-  title: "entity.name",
-  tieu_de: "entity.name",
-  hoat_dong: "entity.name",
-  dia_diem: "entity.name",
-  ten_dia_diem: "entity.name",
-  address: "entity.address",
-  dia_chi: "entity.address",
-  phone: "entity.phone",
-  sdt: "entity.phone",
-  so_dien_thoai: "entity.phone",
-  hotline: "entity.phone",
-  price: "entity.priceRange",
-  pricerange: "entity.priceRange",
-  price_range: "entity.priceRange",
-  gia: "entity.priceRange",
-  gia_ve_tham_khao_vnd_ve: "entity.priceRange",
-  hours: "entity.openingHours",
-  openinghours: "entity.openingHours",
-  opening_hours: "entity.openingHours",
-  gio_mo_cua: "entity.openingHours",
-  khung_gio: "entity.openingHours",
-  category: "entity.categoryMain",
-  categorymain: "entity.categoryMain",
-  category_main: "entity.categoryMain",
-  mo_hinh: "entity.categoryMain",
-  loai_dich_vu: "entity.categoryMain",
-  danh_muc: "entity.categoryMain",
-  categorysub: "entity.categorySub",
-  category_sub: "entity.categorySub",
-  subcategory: "entity.categorySub",
-  phong_cach: "entity.categorySub",
-  style: "entity.style",
-  signaturedish: "entity.metadata.signatureDish",
-  signature_dish: "entity.metadata.signatureDish",
-  mon_an_noi_bat: "entity.metadata.signatureDish",
-  mon_noi_bat: "entity.metadata.signatureDish",
-  noi_bat: "entity.metadata.signatureDish",
-  highlight: "entity.metadata.signatureDish",
-  description: "entity.metadata.description",
-  desc: "entity.metadata.description",
-  mo_ta: "entity.metadata.description",
-  ghi_chu: "entity.metadata.description",
-  giai_thich: "entity.metadata.description",
-};
+const ENTITY_FIELD_ALIASES: Record<string, string> = (() => {
+  // Derive map alias -> bindingPath từ ENTITY_FIELDS (fieldRegistry) để tránh
+  // duplicate. Nếu thêm field mới, sửa fieldRegistry, không sửa file này.
+  const out: Record<string, string> = {};
+  for (const field of ENTITY_FIELDS) {
+    const tokens = new Set<string>([
+      ...field.aliases,
+      ...field.placeholderTokens,
+      field.id,
+    ]);
+    for (const token of tokens) {
+      const key = normalizeFieldToken(token);
+      if (key && !out[key]) out[key] = field.bindingPath;
+    }
+  }
+  return out;
+})();
 
 function normalizeLookupToken(value: string): string {
-  return value
-    .trim()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/gi, "d")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
+  return normalizeFieldToken(value);
 }
 
 function stripEntityPrefix(path: string): string {
@@ -377,30 +340,9 @@ export function buildEntityListBindingPath(config: EntityListBindingConfig): str
 }
 
 function normalizeEntityListField(field: string): string {
-  const trimmed = field.trim();
-  const normalized = stripEntityPrefix(trimmed);
-  const aliases: Record<string, string> = {
-    name: "entity.name",
-    ten: "entity.name",
-    title: "entity.name",
-    address: "entity.address",
-    dia_chi: "entity.address",
-    phone: "entity.phone",
-    sdt: "entity.phone",
-    price: "entity.priceRange",
-    priceRange: "entity.priceRange",
-    hours: "entity.openingHours",
-    openingHours: "entity.openingHours",
-    category: "entity.categoryMain",
-    categoryMain: "entity.categoryMain",
-    categorySub: "entity.categorySub",
-    signatureDish: "entity.metadata.signatureDish",
-    "metadata.signatureDish": "entity.metadata.signatureDish",
-    description: "entity.metadata.description",
-    "metadata.description": "entity.metadata.description",
-  };
-  const alias = aliases[normalized] ?? aliasEntityTextPath(trimmed);
-  return alias ?? normalizeEntityTextPath(trimmed);
+  // Trước đây có 1 map alias riêng ở đây — giờ deferred hoàn toàn về
+  // ENTITY_FIELD_ALIASES (build từ fieldRegistry) qua aliasEntityTextPath.
+  return aliasEntityTextPath(field) ?? normalizeEntityTextPath(field);
 }
 
 function parseBooleanOption(value: string | undefined, fallback: boolean): boolean {

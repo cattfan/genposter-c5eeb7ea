@@ -110,3 +110,28 @@ export async function clearAll(): Promise<void> {
     db.symbols.clear(),
   ]);
 }
+
+/**
+ * Như clearAll nhưng KHÔNG đụng db.symbols. Dùng cho luồng import dạng JSON cũ
+ * (legacy V1/V2) — các format đó không bao gồm symbols, nên nếu replace bằng
+ * clearAll() sẽ vô tình xoá thư viện symbol mà người dùng đã build sẵn.
+ */
+export async function clearAllExceptSymbols(): Promise<void> {
+  await Promise.all([
+    db.projects.clear(),
+    db.entities.clear(),
+    db.assets.clear(),
+    db.assetLibrary.clear(),
+    db.brandKits.clear(),
+    db.designDocuments.clear(),
+    db.fontAssets.clear(),
+    db.pageTemplates.clear(),
+    db.packTemplates.clear(),
+    db.jobs.clear(),
+    db.overrides.clear(),
+    db.blobs.clear(),
+    db.generatePresets.clear(),
+    db.analyses.clear(),
+    db.settings.clear(),
+  ]);
+}

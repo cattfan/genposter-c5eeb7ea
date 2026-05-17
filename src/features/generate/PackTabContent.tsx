@@ -77,6 +77,15 @@ import {
 import { TextRewritePanel } from "@/features/generate/TextRewritePanel";
 import { GeneratePageEditor } from "@/features/generate/GeneratePageEditor";
 import { isLikelyGeneratePageBackgroundSlot } from "@/features/generate/backgroundGuards";
+import { autoBindPlaceholdersForDrafts } from "@/features/generate/autoBindPlaceholders";
+import { entityFieldOptionsForUi } from "@/engines/normalize/fieldRegistry";
+import { MappingOverview } from "@/features/generate/MappingOverview";
+import {
+  clonePreviewPageDrafts,
+  cloneTemplateDraftsWithSource,
+  DRAFT_HISTORY_LIMIT,
+  type PreviewPageDrafts,
+} from "@/features/generate/usePreviewPageDrafts";
 import { aiCaptionFromEntity, aiRewriteTextPreserveMeaning } from "@/features/ai/aiFeatures";
 import { generatePackJob } from "@/engines/selection/generate";
 import { allocateEntityBindingsForTemplate } from "@/engines/selection/entityBindAllocator";
@@ -86,7 +95,6 @@ import { isDataGroupMarkerSlot } from "@/engines/binding/slotMarkers";
 import { getImageReferenceEntityIds } from "@/features/data/imageReferences";
 import { usePackBindOverrides } from "@/features/generate/usePackBindOverrides";
 import {
-  nodeToPngBlob,
   downloadPng,
   downloadMultiBundleZip,
   formatZipFileName,
@@ -99,12 +107,12 @@ import {
   clonePageTemplate,
   resolvePageWorkingTemplate,
   restoreTemplateGroups,
+  GENERATE_TEMPLATE_OPTIONS,
 } from "@/features/generate/templateState";
 import {
-  buildPartnerWorkbookBlob,
-  buildFallbackCaptionBlob,
-  buildTikTokCaptionBlob,
-} from "@/features/generate/exportArtifacts";
+  assembleBundleArtifacts,
+  toExportPageData,
+} from "@/features/generate/buildExportArtifacts";
 import { applyFontVariationToGeneratedJob } from "@/features/generate/fontVariation";
 import {
   buildGeneratePresetBundle,
@@ -118,10 +126,7 @@ import { usePageCommands, type CommandEntry } from "@/components/CommandPalette"
 import { EmptyState, createProgressToast } from "@/components/ux";
 
 type Filter = "all" | "selected" | "errors" | "partner";
-type SurfaceSelectionRect = { left: number; top: number; width: number; height: number };
 type FormatSlotMode = "text" | "image";
-type PreviewPageDrafts = Record<string, PageTemplate>;
-const GENERATE_TEMPLATE_OPTIONS = { synthesizeMissingGroups: false } as const;
 
 interface BundleImageIssue {
   entityId: string;
@@ -161,35 +166,8 @@ interface GenerateReadiness {
 const cloneJsonValue = <T,>(value: T | undefined): T | undefined =>
   value == null ? undefined : (JSON.parse(JSON.stringify(value)) as T);
 
-const DRAFT_HISTORY_LIMIT = 30;
-
-function clonePreviewPageDrafts(drafts: PreviewPageDrafts): PreviewPageDrafts {
-  return Object.fromEntries(
-    Object.entries(drafts).map(([pageTemplateId, template]) => [
-      pageTemplateId,
-      clonePageTemplate(template),
-    ]),
-  );
-}
-
-function cloneTemplateDraftsWithSource(
-  drafts: PreviewPageDrafts,
-  sourceTemplates: PageTemplate[],
-): PreviewPageDrafts {
-  const sourceById = new Map(sourceTemplates.map((template) => [template.pageTemplateId, template]));
-  return Object.fromEntries(
-      Object.entries(drafts).map(([pageTemplateId, template]) => [
-        pageTemplateId,
-        clonePageTemplate(
-          restoreTemplateGroups(
-            sourceById.get(pageTemplateId),
-            template,
-            GENERATE_TEMPLATE_OPTIONS,
-          ),
-        ),
-      ]),
-  );
-}
+// DRAFT_HISTORY_LIMIT, clonePreviewPageDrafts, cloneTemplateDraftsWithSource:
+// đã chuyển sang [src/features/generate/usePreviewPageDrafts.ts] và import ở đầu file.
 
 function sortSlotsForFormat(slots: Slot[]) {
   return slots
@@ -355,18 +333,12 @@ export function PackTabContent({
   const [previewEntityId, setPreviewEntityId] = useState<string | undefined>(undefined);
   const [editingPreviewOpen, setEditingPreviewOpen] = useState(false);
   const [showSafeFrame, setShowSafeFrame] = useState(false);
-  const [surfaceMarqueeRect, setSurfaceMarqueeRect] = useState<SurfaceSelectionRect | null>(null);
   const [formatClipboard, setFormatClipboard] = useState<SlotFormatClipboard | null>(null);
   const [captionBusy, setCaptionBusy] = useState(false);
   const [rewriteBusy, setRewriteBusy] = useState(false);
   const [bundleExportingIndex, setBundleExportingIndex] = useState<number | null>(null);
   const [zoomedPageIndex, setZoomedPageIndex] = useState<number | null>(null);
   const packRefs = useRef<Map<number, HTMLDivElement>>(new Map());
-  const surfaceSelectionRef = useRef<{
-    start: { x: number; y: number };
-    active: boolean;
-    lastSignature: string;
-  } | null>(null);
   const presetImportRef = useRef<HTMLInputElement>(null);
   const presetAutosaveTimer = useRef<number | null>(null);
   const buildCurrentPresetPayloadRef = useRef<
@@ -1126,99 +1098,6 @@ export function PackTabContent({
       return [slotId];
     });
   };
-  const updateSurfaceMarqueeSelection = (surface: HTMLDivElement, rect: SurfaceSelectionRect) => {
-    const ids = Array.from(surface.querySelectorAll<HTMLElement>("[data-bind-hit-target]"))
-      .filter((node) => {
-        const nodeRect = node.getBoundingClientRect();
-        const surfaceRect = surface.getBoundingClientRect();
-        const localRect: SurfaceSelectionRect = {
-          left: nodeRect.left - surfaceRect.left + surface.scrollLeft,
-          top: nodeRect.top - surfaceRect.top + surface.scrollTop,
-          width: nodeRect.width,
-          height: nodeRect.height,
-        };
-        return surfaceRectsIntersect(rect, localRect);
-      })
-      .map((node) => node.dataset.bindHitTarget)
-      .filter((slotId): slotId is string => !!slotId);
-    const signature = ids.join("|");
-    if (signature === surfaceSelectionRef.current?.lastSignature) return;
-    if (surfaceSelectionRef.current) surfaceSelectionRef.current.lastSignature = signature;
-    setSelectedSlotIds(Array.from(new Set(ids)));
-  };
-  const startSurfaceMarqueeSelection = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
-    const target = event.target as HTMLElement;
-    if (target.closest("[data-bind-hit-target]") || target.closest("[data-bind-canvas-root]")) {
-      return;
-    }
-
-    event.preventDefault();
-    const surface = event.currentTarget;
-    const pointerId = event.pointerId;
-    const start = getSurfacePoint(surface, event.clientX, event.clientY);
-    surfaceSelectionRef.current = { start, active: false, lastSignature: "" };
-    try {
-      surface.setPointerCapture(pointerId);
-    } catch {
-      // Pointer capture is best-effort; the fallback listeners still stop the session.
-    }
-
-    const cleanup = () => {
-      surface.removeEventListener("pointermove", onPointerMove);
-      surface.removeEventListener("pointerup", onPointerUp);
-      surface.removeEventListener("pointercancel", onCancel);
-      surface.removeEventListener("lostpointercapture", onCancel);
-      window.removeEventListener("blur", onCancel);
-      window.removeEventListener("keydown", onKeyDown);
-      try {
-        if (surface.hasPointerCapture(pointerId)) surface.releasePointerCapture(pointerId);
-      } catch {
-        // Ignore release errors from browsers that already ended the capture.
-      }
-      surfaceSelectionRef.current = null;
-      setSurfaceMarqueeRect(null);
-    };
-
-    const onPointerMove = (moveEvent: PointerEvent) => {
-      if (moveEvent.pointerId !== pointerId) return;
-      const state = surfaceSelectionRef.current;
-      if (!state) return;
-      const current = getSurfacePoint(surface, moveEvent.clientX, moveEvent.clientY);
-      const moved = Math.hypot(current.x - state.start.x, current.y - state.start.y);
-      if (!state.active && moved < 4) return;
-      state.active = true;
-      const rect = normalizeSurfaceSelectionRect(state.start, current);
-      setSurfaceMarqueeRect(rect);
-      updateSurfaceMarqueeSelection(surface, rect);
-      moveEvent.preventDefault();
-    };
-
-    const onPointerUp = (upEvent: PointerEvent) => {
-      if (upEvent.pointerId !== pointerId) return;
-      const state = surfaceSelectionRef.current;
-      if (state?.active) {
-        const current = getSurfacePoint(surface, upEvent.clientX, upEvent.clientY);
-        updateSurfaceMarqueeSelection(surface, normalizeSurfaceSelectionRect(state.start, current));
-        upEvent.preventDefault();
-      } else {
-        setSelectedSlotIds([]);
-      }
-      cleanup();
-    };
-
-    const onCancel = () => cleanup();
-    const onKeyDown = (keyEvent: KeyboardEvent) => {
-      if (keyEvent.key === "Escape") cleanup();
-    };
-
-    surface.addEventListener("pointermove", onPointerMove);
-    surface.addEventListener("pointerup", onPointerUp);
-    surface.addEventListener("pointercancel", onCancel);
-    surface.addEventListener("lostpointercapture", onCancel);
-    window.addEventListener("blur", onCancel);
-    window.addEventListener("keydown", onKeyDown);
-  };
   const applyBindingToSlots = (
     slots: Slot[],
     pageTemplateId: string,
@@ -1274,6 +1153,37 @@ export function PackTabContent({
       bindingPath = buildTextBindingPathForSlot(slot, value);
     }
     applyBindingToSlots([slot], activePage.pageTemplateId, bindingPath);
+  };
+
+  /**
+   * Chạy autoBindPlaceholders cho riêng page hiện tại — fix trường hợp user
+   * đã clear binding nhưng giờ muốn bind lại theo placeholder. Khác với
+   * applyPreset (chạy cho mọi page khi load preset), hàm này chỉ touch 1 page.
+   */
+  const runAutoBindForActivePage = () => {
+    if (!activePage || !effectiveActive) return;
+    const result = autoBindPlaceholdersForDrafts({
+      [activePage.pageTemplateId]: effectiveActive,
+    });
+    if (result.totalChanged === 0) {
+      toast.info("Không tìm thấy khối nào có placeholder phù hợp");
+      return;
+    }
+    commitPreviewPageDrafts(
+      (prev) => ({ ...prev, [activePage.pageTemplateId]: result.drafts[activePage.pageTemplateId] }),
+      { history: true },
+    );
+    // Đồng bộ packOv để binding có hiệu lực ngay (không phải chờ render kế).
+    const newTemplate = result.drafts[activePage.pageTemplateId];
+    for (const slot of newTemplate.slots) {
+      if (slot.bindingPath) {
+        const previous = effectiveActive.slots.find((s) => s.slotId === slot.slotId);
+        if (!previous?.bindingPath) {
+          setBinding(activePage.pageTemplateId, slot.slotId, slot.bindingPath);
+        }
+      }
+    }
+    toast.success(`Đã tự liên kết ${result.totalChanged} khối từ mẫu placeholder`);
   };
   const applySlotSourcePatch = (
     slots: Slot[],
@@ -1904,60 +1814,28 @@ export function PackTabContent({
     return "Tĩnh";
   };
 
-  const dataColumns = useMemo(() => {
-    const set = new Set<string>();
-    entities.slice(0, 50).forEach((e) => {
-      [
-        "name",
-        "address",
-        "phone",
-        "priceRange",
-        "style",
-        "openingHours",
-        "categoryMain",
-        "categorySub",
-      ].forEach((k) => {
-        const v = (e as unknown as Record<string, unknown>)[k];
-        if (v != null && v !== "") set.add(k);
-      });
-      if (e.metadata) Object.keys(e.metadata).forEach((k) => set.add("metadata." + k));
-    });
-    return Array.from(set);
-  }, [entities]);
-
   const textListFieldOptions = useMemo<TextListFieldOption[]>(() => {
     const truncate = (value: unknown, max = 28) => {
       if (value == null) return "";
       const text = String(value).trim();
       return text.length > max ? `${text.slice(0, max - 1)}…` : text;
     };
-    const standardFields: Array<{ key: keyof Entity; path: string; label: string }> = [
-      { key: "name", path: "entity.name", label: "Tên quán" },
-      { key: "address", path: "entity.address", label: "Địa chỉ" },
-      { key: "phone", path: "entity.phone", label: "SĐT" },
-      { key: "priceRange", path: "entity.priceRange", label: "Giá" },
-      { key: "openingHours", path: "entity.openingHours", label: "Giờ mở cửa" },
-      { key: "style", path: "entity.style", label: "Phong cách" },
-      { key: "categoryMain", path: "entity.categoryMain", label: "Mô hình / loại" },
-      { key: "categorySub", path: "entity.categorySub", label: "Phong cách phụ" },
-    ];
-    const options: TextListFieldOption[] = [];
-    const seen = new Set<string>();
 
-    for (const field of standardFields) {
-      const sampleEntity =
-        previewEntity && (previewEntity[field.key] as unknown)
-          ? previewEntity
-          : filteredEntities.find((entity) => entity[field.key]);
-      if (!sampleEntity) continue;
-      options.push({
-        path: field.path,
-        label: field.label,
-        sample: truncate(sampleEntity[field.key]),
-      });
-      seen.add(field.path);
-    }
+    // Nguồn chính: fieldRegistry. Lọc theo trường có data thực trong sheet
+    // (preview + filteredEntities) và đính kèm sample từ entity đầu có data.
+    const sampleSource = previewEntity ? [previewEntity, ...filteredEntities] : filteredEntities;
+    const baseOptions = entityFieldOptionsForUi(sampleSource).map<TextListFieldOption>(
+      (option) => ({
+        path: option.path,
+        label: option.label,
+        sample: option.sample,
+      }),
+    );
+    const seen = new Set(baseOptions.map((option) => option.path));
+    const options = [...baseOptions];
 
+    // Append các metadata key tự do (day, timeSlot, direction... mà không có
+    // trong fieldRegistry).
     const metadataKeys = new Set<string>();
     filteredEntities.forEach((entity) => {
       Object.entries(entity.metadata ?? {}).forEach(([key, value]) => {
@@ -2102,10 +1980,23 @@ export function PackTabContent({
     });
 
     replaceAll(nextOverrides);
-    replacePreviewPageDrafts(preset.pageTemplateDrafts ?? {}, { history: false });
+    // Auto-bind các slot có placeholder "{{name_0}}", "{{address_0}}", v.v.
+    // Quan trọng cho template AI dựng (templateFromImage) — slot text có
+    // staticText là token nhưng không có bindingPath, nếu không auto-bind
+    // thì mọi page sẽ render giống nhau, chỉ slot user click chọn mới đổi
+    // theo entity (bug "trùng dữ liệu, chỉ tên đối tác đổi").
+    const seedDrafts = preset.pageTemplateDrafts ?? {};
+    const { drafts: hydratedDrafts, totalChanged } =
+      autoBindPlaceholdersForDrafts(seedDrafts);
+    replacePreviewPageDrafts(hydratedDrafts, { history: false });
     setSelectedSlotIds([]);
     setActivePageIdx(0);
-    toast.success("Đã áp khuôn" + (missing ? `, bỏ qua ${missing} khối thiếu` : ""));
+    const baseMessage = "Đã áp khuôn" + (missing ? `, bỏ qua ${missing} khối thiếu` : "");
+    if (totalChanged > 0) {
+      toast.success(`${baseMessage} · tự liên kết ${totalChanged} khối từ mẫu`);
+    } else {
+      toast.success(baseMessage);
+    }
   };
 
   const openPresetWorkspace = (preset: GenerateBindingPreset) => {
@@ -2120,7 +2011,24 @@ export function PackTabContent({
     await db.generatePresets.put(preset);
     setSelectedPresetId(preset.presetId);
     setWorkspaceOpen(true);
-    toast.success("Đã tạo khuôn");
+    // Tạo preset từ pack chưa có draft -> chạy auto-bind trên page của pack ngay
+    // để slot có placeholder "{{name_0}}" được set bindingPath. Không có bước này
+    // thì user mở workspace lần đầu, mọi page render giống nhau (bug "trùng dữ liệu").
+    const seedDrafts: Record<string, PageTemplate> = {};
+    for (const tpl of packPages) {
+      seedDrafts[tpl.pageTemplateId] = tpl;
+    }
+    const { drafts: hydratedDrafts, totalChanged } =
+      autoBindPlaceholdersForDrafts(seedDrafts);
+    if (totalChanged > 0) {
+      // Chỉ commit các page thực sự thay đổi (autoBindPlaceholdersForDrafts giữ
+      // reference cũ với page không đổi; PreviewPageDrafts chứa cả ID không đổi
+      // cũng không sao vì restoreTemplateGroups sẽ no-op).
+      replacePreviewPageDrafts(hydratedDrafts, { history: false });
+      toast.success(`Đã tạo khuôn · tự liên kết ${totalChanged} khối từ mẫu`);
+    } else {
+      toast.success("Đã tạo khuôn");
+    }
   };
 
   const handlePresetImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -2367,13 +2275,17 @@ export function PackTabContent({
       const uniqueTexts = Array.from(new Set(uniqueAiSlots.map((s) => s.text)));
       const variationsMap = new Map<string, string[]>();
       for (const text of uniqueTexts) {
+        let timerId: ReturnType<typeof setTimeout> | undefined;
         try {
           const { aiRewriteBatch } = await import("@/features/ai/aiRewriteBatch");
+          const timeoutPromise = new Promise<{ ok: false; variations: string[]; error?: string }>(
+            (_, reject) => {
+              timerId = setTimeout(() => reject(new Error("timeout 20s")), 20000);
+            },
+          );
           const result = await Promise.race([
             aiRewriteBatch({ originalText: text, count: bundleCount }),
-            new Promise<{ ok: false; variations: string[]; error?: string }>((_, reject) =>
-              setTimeout(() => reject(new Error("timeout 20s")), 20000),
-            ),
+            timeoutPromise,
           ]);
           if (result.ok && result.variations.length > 0) {
             variationsMap.set(text, result.variations);
@@ -2382,12 +2294,24 @@ export function PackTabContent({
           }
         } catch (err) {
           toast.error(`AI rewrite exception: ${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+          // Luôn clear timer để Promise.race không leak setTimeout dangling
+          if (timerId !== undefined) clearTimeout(timerId);
         }
       }
       if (variationsMap.size > 0) {
         toast.success(`AI đã tạo ${variationsMap.size} nhóm variations`);
       } else {
         toast.warning("AI không tạo được variations - giữ text gốc");
+      }
+      // Cảnh báo nếu AI trả ít variations hơn số bundles -> sẽ phải lặp lại
+      const insufficient = Array.from(variationsMap.entries()).filter(
+        ([, variations]) => variations.length < bundleCount,
+      );
+      if (insufficient.length > 0) {
+        toast.warning(
+          `${insufficient.length} text AI trả ít hơn ${bundleCount} bundles -> lặp variation cuối`,
+        );
       }
       // Gán variations vào workingTemplate của mỗi page
       if (variationsMap.size > 0) {
@@ -2412,14 +2336,74 @@ export function PackTabContent({
             if (!originalText) return slot;
             const variations = variationsMap.get(originalText);
             if (!variations || variations.length === 0) return slot;
+            // Khi bundleCount > variations.length, lặp variation cuối thay vì
+            // wrap modulo (giảm trùng lặp giữa các bundle giáp ranh).
+            const variationIdx = Math.min(bundleIdx, variations.length - 1);
             return {
               ...slot,
-              staticText: variations[bundleIdx % variations.length],
+              staticText: variations[variationIdx],
               bindingPath: undefined, // Clear binding sau khi đã rewrite
             };
           });
           return { ...page, workingTemplate: nextTemplate };
         });
+
+        // Sync lại previewPageDrafts: clear "ai.rewrite" binding và đặt
+        // staticText là variation đầu (bundle 0). Trước đây drafts không sync,
+        // nên (a) lần Generate kế lại trigger AI lần nữa, (b) re-open workspace
+        // hiển thị placeholder cũ thay vì kết quả rewrite. Chỉ giữ binding khi
+        // không có variations để user vẫn rewrite được lần sau.
+        const draftPatches = new Map<string, Map<string, string>>();
+        for (const page of job.pages) {
+          if (!page.workingTemplate) continue;
+          const baseTpl = pageTemplatesForGenerate.find(
+            (t) => t.pageTemplateId === page.pageTemplateId,
+          );
+          for (const slot of page.workingTemplate.slots) {
+            const originalSlot = baseTpl?.slots.find((s) => s.slotId === slot.slotId);
+            if (!isAiRewriteSlot(originalSlot ?? { bindingPath: undefined })) continue;
+            // workingTemplate đã clear binding -> dùng staticText đó làm variation đầu
+            if (!slot.staticText) continue;
+            let pageMap = draftPatches.get(page.pageTemplateId);
+            if (!pageMap) {
+              pageMap = new Map();
+              draftPatches.set(page.pageTemplateId, pageMap);
+            }
+            // Chỉ set lần đầu (bundle 0) để tránh ghi đè bằng variation khác
+            if (!pageMap.has(slot.slotId)) {
+              pageMap.set(slot.slotId, slot.staticText);
+            }
+          }
+        }
+        if (draftPatches.size > 0) {
+          commitPreviewPageDrafts(
+            (prev) => {
+              const next = { ...prev };
+              for (const [pageTemplateId, slotPatches] of draftPatches.entries()) {
+                const baseTpl = pageTemplatesForGenerate.find(
+                  (t) => t.pageTemplateId === pageTemplateId,
+                );
+                const current = next[pageTemplateId] ?? baseTpl;
+                if (!current) continue;
+                const updated = createWorkingTemplate(
+                  baseTpl ?? current,
+                  undefined,
+                  current,
+                  GENERATE_TEMPLATE_OPTIONS,
+                );
+                updated.slots = updated.slots.map((slot) => {
+                  const newText = slotPatches.get(slot.slotId);
+                  if (newText == null) return slot;
+                  return { ...slot, bindingPath: undefined, staticText: newText };
+                });
+                updated.updatedAt = Date.now();
+                next[pageTemplateId] = updated;
+              }
+              return next;
+            },
+            { history: false },
+          );
+        }
       }
     }
 
@@ -2540,107 +2524,55 @@ export function PackTabContent({
     });
 
     try {
-      // Step 1: Render all selected pages to PNG (same as old code)
-      const renderedPages: Array<{ pageIndex: number; blob: Blob }> = [];
-      let renderFailed = 0;
-      for (let i = 0; i < sel.length; i++) {
-        const p = sel[i];
-        progress.update(i, `Đang render ảnh ${i + 1}/${sel.length}...`);
-        const node = packRefs.current.get(p.pageIndex);
-        if (!node) { renderFailed++; continue; }
-        try {
-          // Timeout each page render to 5 seconds to avoid hanging
-          const blob = await Promise.race([
-            nodeToPngBlob(node, 2),
-            new Promise<never>((_, reject) => setTimeout(() => reject(new Error("render-timeout")), 5000)),
-          ]);
-          renderedPages.push({ pageIndex: p.pageIndex, blob });
-        } catch {
-          renderFailed++;
-        }
+      // Group selected pages theo bundle index — bundle map xác định bằng vị
+      // trí trong currentJob.pages (giữ nguyên logic cũ).
+      const bundleSize = Math.max(1, jobPack.orderedPages.length);
+      const totalPages = currentJob.pages.length;
+      const groupedByBundle = new Map<number, typeof sel>();
+      for (const p of sel) {
+        const originalIdx = currentJob.pages.findIndex((page) => page.pageIndex === p.pageIndex);
+        const bundleIdx = totalPages <= bundleSize ? 1 : Math.floor(originalIdx / bundleSize) + 1;
+        const bucket = groupedByBundle.get(bundleIdx) ?? [];
+        bucket.push(p);
+        groupedByBundle.set(bundleIdx, bucket);
       }
+      const bundleEntries = Array.from(groupedByBundle.entries()).sort((a, b) => a[0] - b[0]);
 
-      if (renderedPages.length === 0) {
-        progress.error(`Không render được ảnh nào (${renderFailed} trang lỗi)`);
+      const result = await assembleBundleArtifacts({
+        packName: jobPack.name,
+        entities,
+        renderTimeoutMs: 5_000,
+        bundles: bundleEntries.map(([bundleIdx, pages]) => ({
+          bundleLabel: `Bộ ${bundleIdx}`,
+          pages: pages.map((p) => ({
+            pageIndex: p.pageIndex,
+            node: packRefs.current.get(p.pageIndex) ?? null,
+            pageData: toExportPageData(p),
+          })),
+        })),
+        onProgress: (step) =>
+          progress.update(step, `Đang render ảnh ${step + 1}/${sel.length}...`),
+      });
+
+      const successfulBundles = result.bundles.filter((bundle) => bundle.succeeded > 0);
+      if (successfulBundles.length === 0) {
+        progress.error(`Không render được ảnh nào (${result.totalFailed} trang lỗi)`);
         return;
       }
 
-      progress.update(renderedPages.length, "Đang tạo caption và đóng gói ZIP...");
-
-      // Step 2: Group rendered pages by bundle index
-      const bundleSize = Math.max(1, jobPack.orderedPages.length);
-      const totalPages = currentJob.pages.length;
-      const bundleMap = new Map<number, Array<{ pageIndex: number; blob: Blob }>>();
-
-      for (const rp of renderedPages) {
-        const originalIdx = currentJob.pages.findIndex((p) => p.pageIndex === rp.pageIndex);
-        const bundleIdx = totalPages <= bundleSize ? 1 : Math.floor(originalIdx / bundleSize) + 1;
-        if (!bundleMap.has(bundleIdx)) bundleMap.set(bundleIdx, []);
-        bundleMap.get(bundleIdx)!.push(rp);
-      }
-
-      // Step 3: Build ZIP structure
-      const bundleEntries = Array.from(bundleMap.entries()).sort((a, b) => a[0] - b[0]);
-      const bundleArtifacts: Array<{ files: Array<{ name: string; blob: Blob }> }> = [];
-
-      for (const [bundleIdx, pages] of bundleEntries) {
-        const files: Array<{ name: string; blob: Blob }> = pages.map((rp, idx) => ({
-          name: `${idx + 1}.png`,
-          blob: rp.blob,
-        }));
-
-        // Get entity/page data for this bundle's pages
-        const bundlePages = pages.map((rp) => {
-          const p = currentJob.pages.find((pg) => pg.pageIndex === rp.pageIndex)!;
-          return {
-            pageFile: p.pageFile,
-            pageIndex: p.pageIndex,
-            pageName: p.workingTemplate?.name,
-            entityId: p.entityId,
-            entityName: p.entityName,
-            items: p.items,
-          };
-        });
-
-        // Caption - try AI with timeout, fallback to local
-        let captionBlob: Blob;
-        try {
-          captionBlob = await Promise.race([
-            buildTikTokCaptionBlob({
-              packName: jobPack.name,
-              bundleLabel: `Bộ ${bundleIdx}`,
-              pages: bundlePages,
-              entities,
-              variantCount: 3,
-            }),
-            new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 15000)),
-          ]);
-        } catch {
-          captionBlob = buildFallbackCaptionBlob({
-            packName: jobPack.name,
-            bundleLabel: `Bộ ${bundleIdx}`,
-            pages: bundlePages,
-            entities,
-            variantCount: 3,
-          });
-        }
-        files.push({ name: "caption.txt", blob: captionBlob });
-
-        // doitac.xlsx
-        const xlsxBlob = buildPartnerWorkbookBlob({ pages: bundlePages, entities });
-        files.push({ name: "doitac.xlsx", blob: xlsxBlob });
-
-        bundleArtifacts.push({ files });
-      }
+      progress.update(result.totalRendered, "Đang tạo caption và đóng gói ZIP...");
 
       const templateName = formatTemplateDisplayName(currentJob.packTemplateName, "bo-anh");
-      const zipFileName = bundleArtifacts.length === 1
+      const zipFileName = successfulBundles.length === 1
         ? `${formatZipFileName(templateName, { version: bundleEntries[0][0] })}.zip`
         : `${formatZipFileName(templateName)}.zip`;
-      await downloadMultiBundleZip(bundleArtifacts, zipFileName);
+      await downloadMultiBundleZip(
+        successfulBundles.map((bundle) => ({ files: bundle.files })),
+        zipFileName,
+      );
       await db.jobs.put({ ...currentJob, status: "exported" });
       progress.success(
-        `Đã tải ZIP · ${bundleArtifacts.length} bộ · ${renderedPages.length} ảnh`,
+        `Đã tải ZIP · ${successfulBundles.length} bộ · ${result.totalRendered} ảnh`,
       );
     } catch (error) {
       progress.error("Không thể tải ZIP: " + formatExportError(error));
@@ -2655,74 +2587,41 @@ export function PackTabContent({
       total: bundle.pages.length,
     });
     try {
-      const imageBlobs: Array<{ blob: Blob; ext: string }> = [];
-      for (let i = 0; i < bundle.pages.length; i++) {
-        const meta = bundle.pages[i];
-        progress.update(i, `Đang render ${i + 1}/${bundle.pages.length}...`);
-        const node = packRefs.current.get(meta.page.pageIndex);
-        if (!node) continue;
-        try {
-          const blob = await Promise.race([
-            nodeToPngBlob(node, 2),
-            new Promise<never>((_, reject) => setTimeout(() => reject(new Error("render-timeout")), 8000)),
-          ]);
-          imageBlobs.push({ blob, ext: "png" });
-        } catch {
-          // Skip pages that fail to render or timeout
-        }
-      }
-      if (imageBlobs.length === 0) {
+      const result = await assembleBundleArtifacts({
+        packName: jobPack.name,
+        entities,
+        renderTimeoutMs: 8_000,
+        bundles: [
+          {
+            bundleLabel: bundle.bundleLabel,
+            pages: bundle.pages.map((meta) => ({
+              pageIndex: meta.page.pageIndex,
+              node: packRefs.current.get(meta.page.pageIndex) ?? null,
+              pageData: {
+                pageFile: meta.displayPageName,
+                pageName: meta.pageTemplate?.name ?? meta.page.workingTemplate?.name,
+                entityId: meta.page.entityId,
+                entityName: meta.page.entityName,
+                items: meta.page.items,
+              },
+            })),
+          },
+        ],
+        onProgress: (step) =>
+          progress.update(step, `Đang render ${step + 1}/${bundle.pages.length}...`),
+      });
+
+      const built = result.bundles[0];
+      if (!built || built.succeeded === 0) {
         progress.error("Không tìm thấy ảnh trong bộ này để tải");
         return;
       }
 
-      progress.update(imageBlobs.length, "Đang tạo caption và đóng gói...");
-
-      const bundlePages = bundle.pages.map((meta) => ({
-        pageFile: meta.displayPageName,
-        pageIndex: meta.page.pageIndex,
-        pageName: meta.pageTemplate?.name ?? meta.page.workingTemplate?.name,
-        entityId: meta.page.entityId,
-        entityName: meta.page.entityName,
-        items: meta.page.items,
-      }));
-
-      // Build files: 1.png, 2.png, ..., caption.txt, doitac.xlsx
-      const files: Array<{ name: string; blob: Blob }> = imageBlobs.map((img, idx) => ({
-        name: `${idx + 1}.${img.ext}`,
-        blob: img.blob,
-      }));
-
-      // Caption - try AI with timeout, fallback to local
-      let captionBlob: Blob;
-      try {
-        captionBlob = await Promise.race([
-          buildTikTokCaptionBlob({
-            packName: jobPack.name,
-            bundleLabel: bundle.bundleLabel,
-            pages: bundlePages,
-            entities,
-            variantCount: 3,
-          }),
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 15000)),
-        ]);
-      } catch {
-        captionBlob = buildFallbackCaptionBlob({
-          packName: jobPack.name,
-          bundleLabel: bundle.bundleLabel,
-          pages: bundlePages,
-          entities,
-          variantCount: 3,
-        });
-      }
-      files.push({ name: "caption.txt", blob: captionBlob });
-
-      const xlsxBlob = buildPartnerWorkbookBlob({ pages: bundlePages, entities });
-      files.push({ name: "doitac.xlsx", blob: xlsxBlob });
+      progress.update(built.succeeded, "Đang tạo caption và đóng gói...");
 
       const templateName = formatTemplateDisplayName(jobPack.name, "bo-anh");
       const zipFileName = `${formatZipFileName(templateName, { version: bundle.bundleIndex })}.zip`;
-      await downloadMultiBundleZip([{ files }], zipFileName);
+      await downloadMultiBundleZip([{ files: built.files }], zipFileName);
       progress.success(`Đã tải ${bundle.bundleLabel}`);
     } catch (error) {
       progress.error("Không thể tải bộ: " + formatExportError(error));
@@ -3275,7 +3174,15 @@ export function PackTabContent({
 
                     {effectiveActive && (
                       <div
-                        onPointerDownCapture={startSurfaceMarqueeSelection}
+                        // Click vào vùng padding xung quanh canvas → clear
+                        // selection (giữ behavior cũ của surface marquee mà
+                        // không cần re-implement pointer capture). Marquee
+                        // selection thật do BindCanvas tự xử lý ở canvas root.
+                        onClick={(event) => {
+                          if (event.target === event.currentTarget) {
+                            setSelectedSlotIds([]);
+                          }
+                        }}
                         className="relative grid select-none place-items-center overflow-auto rounded-lg border bg-background p-4"
                         style={{ minHeight: 480 }}
                       >
@@ -3293,18 +3200,6 @@ export function PackTabContent({
                           showSafeFrame={showSafeFrame}
                           flatPreview
                         />
-                        {surfaceMarqueeRect && (
-                          <div
-                            data-bind-surface-marquee="true"
-                            className="pointer-events-none absolute z-[2147483647] border border-primary bg-primary/10"
-                            style={{
-                              left: surfaceMarqueeRect.left,
-                              top: surfaceMarqueeRect.top,
-                              width: surfaceMarqueeRect.width,
-                              height: surfaceMarqueeRect.height,
-                            }}
-                          />
-                        )}
                       </div>
                     )}
 
@@ -3369,6 +3264,12 @@ export function PackTabContent({
                 </div>
               </CardHeader>
               <CardContent className="space-y-3 pt-3 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:pr-3">
+                <MappingOverview
+                  template={effectiveActive}
+                  entitiesInSheet={filteredEntities}
+                  onSelectSlot={(slotId) => handleSelectSlot(slotId, "replace")}
+                  onAutoBind={runAutoBindForActivePage}
+                />
                 {selectedSlots.length === 0 && (
                   <EmptyState
                     icon={<MousePointerClick />}
@@ -4072,36 +3973,3 @@ export function PackTabContent({
   );
 }
 
-function getSurfacePoint(
-  surface: HTMLDivElement,
-  clientX: number,
-  clientY: number,
-): { x: number; y: number } {
-  const rect = surface.getBoundingClientRect();
-  return {
-    x: clientX - rect.left + surface.scrollLeft,
-    y: clientY - rect.top + surface.scrollTop,
-  };
-}
-
-function normalizeSurfaceSelectionRect(
-  start: { x: number; y: number },
-  current: { x: number; y: number },
-): SurfaceSelectionRect {
-  const left = Math.min(start.x, current.x);
-  const top = Math.min(start.y, current.y);
-  return {
-    left,
-    top,
-    width: Math.abs(current.x - start.x),
-    height: Math.abs(current.y - start.y),
-  };
-}
-
-function surfaceRectsIntersect(a: SurfaceSelectionRect, b: SurfaceSelectionRect): boolean {
-  const aRight = a.left + a.width;
-  const aBottom = a.top + a.height;
-  const bRight = b.left + b.width;
-  const bBottom = b.top + b.height;
-  return a.left <= bRight && aRight >= b.left && a.top <= bBottom && aBottom >= b.top;
-}

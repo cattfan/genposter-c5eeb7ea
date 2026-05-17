@@ -7,6 +7,14 @@ interface TemplateGroupOptions {
   synthesizeMissingGroups?: boolean;
 }
 
+/**
+ * Default options dùng ở khâu generate. `synthesizeMissingGroups: false` quan
+ * trọng — nếu để true, các page có nhiều slot binding sẽ tự sinh thêm
+ * `auto-group-...` slot (hành vi cũ gây ra binding ngoài ý muốn). Cố định ở
+ * đây để không phải truyền lặp lại 14+ lần ở PackTabContent.
+ */
+export const GENERATE_TEMPLATE_OPTIONS = { synthesizeMissingGroups: false } as const;
+
 function isSyntheticAutoGroupId(value: string | undefined) {
   return typeof value === "string" && value.startsWith("auto-group-");
 }

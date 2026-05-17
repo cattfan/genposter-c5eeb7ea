@@ -101,7 +101,13 @@ export async function resizeImageBlob(input: File | Blob, options: ResizeOptions
     // Only keep the downscaled blob if it is actually smaller than the source.
     if (encoded.size >= input.size && scale === 1) return input;
     return encoded;
-  } catch {
+  } catch (err) {
+    // Trước đây catch{} im lặng -> resize fail là blob gốc đi thẳng vào Dexie,
+    // ảnh nhiều MB sẽ bùng size DB. Log để debug nhưng vẫn trả ảnh gốc (fail-soft).
+    console.warn(
+      "[resizeImageBlob] fallback to original blob:",
+      err instanceof Error ? err.message : err,
+    );
     return input;
   }
 }

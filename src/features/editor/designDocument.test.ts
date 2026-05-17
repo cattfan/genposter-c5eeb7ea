@@ -70,4 +70,45 @@ describe("designDocumentToPageTemplate", () => {
     expect(image?.groupId).toBe("new-group");
     expect(text?.groupId).toBe("new-group");
   });
+
+  it("preserves bindingPath for non legacy_template binding sources", () => {
+    const template = baseTemplate();
+    const document = pageTemplateToDesignDocument(template, "template");
+    const documentWithEntityBinding: DesignDocument = {
+      ...document,
+      elements: document.elements.map((element) =>
+        element.elementId === "name-1"
+          ? {
+              ...element,
+              binding: {
+                source: "entity",
+                path: "entity.name",
+                fallbackText: "Tên quán",
+              },
+            }
+          : element,
+      ),
+    };
+
+    const nextTemplate = designDocumentToPageTemplate(documentWithEntityBinding, template);
+    const text = nextTemplate.slots.find((slot) => slot.slotId === "name-1");
+    expect(text?.bindingPath).toBe("entity.name");
+  });
+
+  it("preserves dataSources from base template across save", () => {
+    const template: PageTemplate = {
+      ...baseTemplate(),
+      dataSources: {
+        primary: {
+          id: "primary",
+          kind: "sheet",
+          label: "Quán ăn",
+          sheetName: "Quán ăn Đà Lạt",
+        },
+      },
+    };
+    const document = pageTemplateToDesignDocument(template, "template");
+    const nextTemplate = designDocumentToPageTemplate(document, template);
+    expect(nextTemplate.dataSources?.primary?.sheetName).toBe("Quán ăn Đà Lạt");
+  });
 });

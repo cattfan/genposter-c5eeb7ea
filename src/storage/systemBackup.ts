@@ -1,5 +1,5 @@
 import JSZip from "jszip";
-import { db, clearAll } from "./db";
+import { db, clearAllExceptSymbols } from "./db";
 import { getSettings } from "./settings";
 import { importProjectJSON, type ProjectExport } from "./projectIO";
 import type {
@@ -18,6 +18,7 @@ import type {
   PackTemplate,
   PageTemplate,
   Project,
+  SymbolDefinition,
 } from "@/models";
 
 export type SystemBackupImportMode = "replace" | "merge";
@@ -67,6 +68,11 @@ interface SystemBackupManifestV1 {
   analyses: AnalysisRecord[];
   settings: Array<AppSettings & { id: string }>;
   blobs: BackupBlobMeta[];
+  /**
+   * Optional vì backup tạo trước fix này không có. Khi đọc, mặc định là [].
+   * Vẫn giữ version: 1 — symbols là field tuỳ chọn, không phá compatibility.
+   */
+  symbols?: SymbolDefinition[];
 }
 
 export interface SystemBackupImportResult {
@@ -196,6 +202,7 @@ async function readCurrentManifest(
     analyses,
     blobRecords,
     settingsRecords,
+    symbols,
   ] = await Promise.all([
     db.projects.toArray(),
     db.entities.toArray(),
@@ -212,6 +219,7 @@ async function readCurrentManifest(
     db.analyses.toArray(),
     db.blobs.toArray(),
     db.settings.toArray(),
+    db.symbols.toArray(),
   ]);
 
   const settings =
@@ -256,6 +264,8 @@ async function readCurrentManifest(
   const selectedOverrides = includeSystemData ? overrides : [];
   const selectedAnalyses = includeSystemData ? analyses : [];
   const selectedSettings = includeSystemData ? settings : [];
+  // Symbols là tài nguyên app-global, đi kèm systemData scope.
+  const selectedSymbols = includeSystemData ? symbols : [];
 
   const manifest: SystemBackupManifestV1 = {
     app: "genposter",
@@ -279,6 +289,7 @@ async function readCurrentManifest(
     generatePresets: selectedGeneratePresets,
     analyses: selectedAnalyses,
     settings: selectedSettings,
+    symbols: selectedSymbols,
     blobs: [],
   };
 
@@ -387,6 +398,7 @@ async function restoreSystemBackup(
       db.generatePresets,
       db.analyses,
       db.settings,
+      db.symbols,
     ],
     async () => {
       if (mode === "replace") {
@@ -406,6 +418,7 @@ async function restoreSystemBackup(
           db.generatePresets.clear(),
           db.analyses.clear(),
           db.settings.clear(),
+          db.symbols.clear(),
         ]);
       }
 
@@ -424,6 +437,7 @@ async function restoreSystemBackup(
       await putIfAny(db.generatePresets, manifest.generatePresets);
       await putIfAny(db.analyses, manifest.analyses);
       await putIfAny(db.settings, manifest.settings);
+      await putIfAny(db.symbols, manifest.symbols ?? []);
     },
   );
 }
@@ -431,7 +445,10 @@ async function restoreSystemBackup(
 async function importLegacyJson(file: File, mode: SystemBackupImportMode): Promise<SystemBackupImportResult> {
   const data = JSON.parse(await file.text()) as ProjectExport;
   if (mode === "replace") {
-    await clearAll();
+    // Trước đây gọi clearAll() bao luôn db.symbols -> import legacy JSON (vốn
+    // không chứa symbols) sẽ xoá sạch thư viện symbol đã build. Dùng
+    // clearAllExceptSymbols để giữ nguyên symbols qua legacy import.
+    await clearAllExceptSymbols();
   }
   await importProjectJSON(data);
   return {

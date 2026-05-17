@@ -258,7 +258,11 @@ function bindingRefToSlot(
   Slot,
   "bindingPath" | "allowedAssetRoles" | "overflowRule" | "visibilityRule" | "dataSourceConfig"
 > {
-  if (!binding || binding.source !== "legacy_template") {
+  // Trước đây chỉ giữ binding khi source === "legacy_template", các binding tạo
+  // bởi panel "Tạo nội dung" (source: "entity"|"asset"|"section"|"manual") bị
+  // drop khi save -> editor mở lại không còn liên kết. Giờ giữ binding cho mọi
+  // source miễn là có path.
+  if (!binding || !binding.path) {
     return {
       bindingPath: undefined,
       allowedAssetRoles: undefined,
@@ -467,5 +471,9 @@ export function designDocumentToPageTemplate(
     createdAt: baseTemplate?.createdAt ?? document.createdAt,
     thumbnail: baseTemplate?.thumbnail,
     cardGroups: baseTemplate?.cardGroups ? clone(baseTemplate.cardGroups) : undefined,
+    // Giữ dataSources cấu hình ở cấp page (selectedSheet, primary/secondary
+    // binding sources). Trước đây bị drop -> mỗi lần save editor là user lại
+    // mất nguồn dữ liệu mặc định cho page.
+    dataSources: baseTemplate?.dataSources ? clone(baseTemplate.dataSources) : undefined,
   };
 }

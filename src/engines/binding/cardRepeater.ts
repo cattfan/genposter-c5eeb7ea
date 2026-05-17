@@ -2,6 +2,23 @@
 // thành N "card" — mỗi card là 1 bản clone offset, gán cho 1 entity trong pool.
 
 import type { CardGroupConfig, Entity, PageTemplate, Slot } from "@/models";
+import { buildSemanticIndexAlternation, normalizeFieldToken } from "@/engines/normalize/fieldRegistry";
+
+/**
+ * Pattern bắt suffix `_<số>` ở các token semantic — build động từ fieldRegistry
+ * để khi thêm field mới (ví dụ "menu_link_2") không phải sửa lại regex hardcode.
+ * Bao gồm cả token "image", "hero_image" vốn không phải entity field nhưng quan
+ * trọng để cluster slot ảnh.
+ */
+const SEMANTIC_INDEX_PATTERN = (() => {
+  // Thêm "image" và "hero_image" vào bộ token vì cardRepeater dùng cho cả ảnh.
+  const extras = ["image", "hero_image"];
+  const base = buildSemanticIndexAlternation();
+  // base đã sort dài-trước; chèn extras vào cuối, ưu tiên match "hero_image" trước
+  // "image" để khỏi cắt nhầm.
+  const all = `${extras.sort((a, b) => b.length - a.length).join("|")}|${base}`;
+  return new RegExp(`(?:^|_)(?:${all})_(\\d+)(?:_|$)`);
+})();
 
 export interface ExpandedSlot extends Slot {
   /** Slot gốc trong template (id không đổi cho card index 0). */
@@ -120,13 +137,7 @@ function bboxOfGroup(
 }
 
 function normalizeSlotToken(value: string | undefined): string {
-  return String(value ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\u0111/gi, "d")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
+  return normalizeFieldToken(String(value ?? ""));
 }
 
 function semanticItemIndexFromSlot(slot: Slot): number | undefined {
@@ -140,9 +151,7 @@ function semanticItemIndexFromSlot(slot: Slot): number | undefined {
     const index = Number(structuralMatch[1]);
     if (Number.isFinite(index) && index > 0) return index;
   }
-  const match = source.match(
-    /(?:^|_)(?:name|ten|ten_quan|title|address|dia_chi|phone|sdt|hotline|price|gia|openinghours|opening_hours|hours|gio_mo_cua|category|categorymain|category_main|mo_hinh|categorysub|category_sub|subcategory|phong_cach|style|signaturedish|signature_dish|mon_an_noi_bat|mon_noi_bat|description|desc|mo_ta|image|hero_image)_(\d+)(?:_|$)/,
-  );
+  const match = source.match(SEMANTIC_INDEX_PATTERN);
   if (!match) return undefined;
   const index = Number(match[1]);
   return Number.isFinite(index) && index > 0 ? index : undefined;
