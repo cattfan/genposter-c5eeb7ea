@@ -16,7 +16,9 @@ function start(label, cwd, args, color) {
   const child = spawn(npmCmd, args, {
     cwd,
     stdio: ["ignore", "pipe", "pipe"],
-    shell: false,
+    // Node 22+ requires shell:true on Windows when spawning .cmd shims
+    // (e.g. npm.cmd). Without it: 'spawn EINVAL' on Windows.
+    shell: isWindows,
   });
 
   const prefix = `\x1b[${color}m[${label}]\x1b[0m`;
