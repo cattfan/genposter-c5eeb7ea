@@ -5,7 +5,7 @@
   "scripts": {
     "build": "nest build",
     "start": "node dist/main",
-    "dev": "nest start --watch",
+    "dev": "nest start --watch --preserveWatchOutput",
     "lint": "eslint src --ext .ts"
   },
   "dependencies": {

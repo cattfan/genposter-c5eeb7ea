@@ -893,7 +893,12 @@ function isImageFile(file: File) {
 
 function getDirectAssetImageSrc(sourceValue: string | undefined, sourceType: Asset["sourceType"]) {
   if (!sourceValue) return undefined;
-  if (sourceValue.startsWith("idb://")) return undefined;
+  // idb://<key> -> URL backend (sau migration). Trước đây phải qua DB binary;
+  // giờ chỉ là URL ổn định, browser tự cache theo Cache-Control immutable.
+  if (sourceValue.startsWith("idb://")) {
+    const key = getBlobKeyFromSrc(sourceValue);
+    return key ? `/api/v1/blobs/${encodeURIComponent(key)}` : undefined;
+  }
   if (sourceType === "local" && !looksLikeDirectImageSrc(sourceValue)) return undefined;
   return sourceValue;
 }
