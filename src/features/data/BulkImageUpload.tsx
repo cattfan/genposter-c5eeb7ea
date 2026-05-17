@@ -414,7 +414,8 @@ export function BulkImageUpload() {
     });
     let completed = 0;
     let failed = 0;
-    const newAssets: Asset[] = [];
+    let savedAssetCount = 0;
+    const savedEntityIds = new Set<string>();
 
     /**
      * Batch multipart upload: 10 file/request -> giảm 90% network overhead so
@@ -424,29 +425,74 @@ export function BulkImageUpload() {
      */
     const BATCH_SIZE = 10;
     const BATCH_CONCURRENCY = 4;
+    /** Retry 1 batch tối đa 3 lần (backoff 500ms, 1500ms). */
+    const MAX_RETRIES = 3;
+
+    const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+    const uploadWithRetry = async (
+      blobs: Blob[],
+    ): Promise<Array<{ blobKey: string; mime: string; size: number }>> => {
+      let lastErr: unknown;
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt += 1) {
+        try {
+          return await remoteClient.uploadBlobsBatch(blobs);
+        } catch (err) {
+          lastErr = err;
+          if (attempt < MAX_RETRIES) await sleep(500 * attempt);
+        }
+      }
+      throw lastErr;
+    };
+
+    const saveAssetsWithRetry = async (assets: Asset[]): Promise<boolean> => {
+      let lastErr: unknown;
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt += 1) {
+        try {
+          await db.assets.bulkPut(assets);
+          return true;
+        } catch (err) {
+          lastErr = err;
+          if (attempt < MAX_RETRIES) await sleep(500 * attempt);
+        }
+      }
+      console.warn("[directUpload] saveAssets failed after retries:", lastErr);
+      return false;
+    };
 
     const processBatch = async (batchItems: PendingFile[]) => {
       try {
-        // Resize từng file song song (Canvas API trong main thread, nhưng
-        // skip nhanh cho ảnh <2MB nhờ fast path trong resizeImageBlob).
+        // Resize từng file song song. Hàm resizeImageBlob đã có fast path
+        // skip cho ảnh nhỏ; KHÔNG re-encode -> giữ nguyên chất lượng.
         const resized = await Promise.all(
           batchItems.map((item) => resizeImageBlob(item.file)),
         );
-        const uploaded = await remoteClient.uploadBlobsBatch(resized);
-        // uploaded.length === resized.length theo backend contract.
-        for (let i = 0; i < uploaded.length; i += 1) {
+        const uploaded = await uploadWithRetry(resized);
+
+        // Build asset rows + lưu NGAY vào DB sau khi upload thành công.
+        // Trước đây dồn 5000 asset rồi bulkPut cuối -> nếu fail (network/
+        // backend restart) là mất tất cả. Giờ flush từng 10 asset.
+        const batchAssets: Asset[] = uploaded.map((blob, i) => {
           const item = batchItems[i];
-          newAssets.push({
+          return {
             assetId: nanoid(),
             entityId: item.manualEntityId!,
             sourceType: "local",
-            sourceValue: makeIdbSrc(uploaded[i].blobKey),
-            blobKey: uploaded[i].blobKey,
+            sourceValue: makeIdbSrc(blob.blobKey),
+            blobKey: blob.blobKey,
             role: item.role === "cover" ? "generic" : item.role,
             isCover: false,
             qualityScore: 80,
             status: "ok",
-          });
+          };
+        });
+
+        const ok = await saveAssetsWithRetry(batchAssets);
+        if (ok) {
+          savedAssetCount += batchAssets.length;
+          for (const asset of batchAssets) savedEntityIds.add(asset.entityId);
+        } else {
+          failed += batchItems.length;
         }
       } catch (err) {
         failed += batchItems.length;
@@ -465,7 +511,9 @@ export function BulkImageUpload() {
     };
 
     try {
-      // Tạo các batch 20 file, chạy 4 batch song song.
+      // Tạo các batch BATCH_SIZE file, chạy BATCH_CONCURRENCY batch song song.
+      // Mỗi batch tự lưu asset rows ngay sau khi upload thành công -> không
+      // mất tiến độ nếu network/backend fail giữa chừng.
       const batches: PendingFile[][] = [];
       for (let i = 0; i < matchedItems.length; i += BATCH_SIZE) {
         batches.push(matchedItems.slice(i, i + BATCH_SIZE));
@@ -475,27 +523,16 @@ export function BulkImageUpload() {
         await Promise.all(concurrentBatches.map(processBatch));
       }
 
-      if (newAssets.length > 0) {
-        progress.update(total, "Đang lưu vào database...");
-        // Chunk bulkPut thành batches 200 để JSON payload không vượt body
-        // limit khi user upload >2000 ảnh (mỗi asset row ~500 bytes).
-        const CHUNK_SIZE = 200;
-        for (let i = 0; i < newAssets.length; i += CHUNK_SIZE) {
-          await db.assets.bulkPut(newAssets.slice(i, i + CHUNK_SIZE));
-        }
-      }
-
-      const entityCount = new Set(newAssets.map((asset) => asset.entityId)).size;
+      const entityCount = savedEntityIds.size;
       const skipMsg = skipped > 0 ? ` · bỏ qua ${skipped} ảnh không khớp quán` : "";
       const failMsg = failed > 0 ? ` · ${failed} ảnh lỗi` : "";
-      if (newAssets.length > 0) {
+      if (savedAssetCount > 0) {
         progress.success(
-          `Đã nhập ${newAssets.length}/${total} ảnh vào ${entityCount} quán${failMsg}${skipMsg}`,
+          `Đã nhập ${savedAssetCount}/${total} ảnh vào ${entityCount} quán${failMsg}${skipMsg}`,
         );
       } else {
         progress.error(`Không nhập được ảnh nào (${failed} lỗi)${skipMsg}`);
       }
-      // Reset pending state cũ phòng trường hợp user mix flow.
       setPending([]);
     } catch (error) {
       progress.error("Lỗi khi tải ảnh: " + (error instanceof Error ? error.message : String(error)));
