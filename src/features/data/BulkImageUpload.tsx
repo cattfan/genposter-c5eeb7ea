@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { createProgressToast } from "@/components/ux";
 import {
   Select,
   SelectContent,
@@ -474,23 +475,24 @@ export function BulkImageUpload() {
 
     setBusy(true);
     const total = ready.length;
-    const progressId = toast.loading(`Đang tải ${total} ảnh... (0/${total})`);
+    const progress = createProgressToast({
+      initialLabel: `Đang tải ${total} ảnh lên server...`,
+      total,
+    });
     let completed = 0;
     let failed = 0;
     const newAssets: Asset[] = [];
     const failedItems: Array<{ name: string; reason: string }> = [];
 
     /**
-     * Upload song song nhưng giới hạn concurrency. Vòng `for` tuần tự cũ
-     * khiến UI đơ vì 100 ảnh = 100 HTTP request lần lượt + memory cộng dồn.
-     * 4 concurrent là sweet spot: nhanh nhưng không bão hoà network/CPU.
+     * Pool pattern với concurrency 6: balance giữa nhanh và không bão hoà
+     * mạng/CPU. Trước đây vòng `for` tuần tự khiến UI đơ với 50+ ảnh.
+     * Resize song song trước khi upload để giảm payload (5-10MB -> ~500KB).
      */
-    const CONCURRENCY = 4;
+    const CONCURRENCY = 6;
 
     const worker = async (item: (typeof ready)[number]) => {
       try {
-        // Resize trước khi upload: ảnh từ Downloads thường 5-10MB, resize
-        // về 2400px longest edge cap ~500KB-1MB, server không phải lưu blob to.
         const resized = await resizeImageBlob(item.file);
         const blobKey = await saveBlob(resized);
         newAssets.push({
@@ -512,43 +514,37 @@ export function BulkImageUpload() {
         });
       } finally {
         completed += 1;
-        toast.loading(`Đang tải ${total} ảnh... (${completed}/${total})`, { id: progressId });
+        progress.update(completed, `Đang tải ảnh lên server...`);
       }
     };
 
     try {
-      // Pool pattern: chia ready thành batches CONCURRENCY, await Promise.all
-      // mỗi batch để giới hạn concurrent.
       for (let i = 0; i < ready.length; i += CONCURRENCY) {
         const batch = ready.slice(i, i + CONCURRENCY);
         await Promise.all(batch.map(worker));
       }
 
       if (newAssets.length > 0) {
+        progress.update(total, "Đang lưu vào database...");
         await db.assets.bulkPut(newAssets);
       }
 
       const entityCount = new Set(newAssets.map((asset) => asset.entityId)).size;
       if (failed === 0) {
-        toast.success(`Đã nhập ${newAssets.length} ảnh vào ${entityCount} quán`, {
-          id: progressId,
-        });
+        progress.success(`Đã nhập ${newAssets.length} ảnh vào ${entityCount} quán`);
       } else if (newAssets.length > 0) {
-        toast.warning(
-          `Đã nhập ${newAssets.length}/${total} ảnh vào ${entityCount} quán. ${failed} ảnh lỗi.`,
-          { id: progressId },
+        progress.success(
+          `Đã nhập ${newAssets.length}/${total} ảnh vào ${entityCount} quán · ${failed} ảnh lỗi`,
         );
         if (failedItems.length > 0) {
           console.warn("[BulkImageUpload] Failed files:", failedItems);
         }
       } else {
-        toast.error(`Không nhập được ảnh nào (${failed} lỗi). Xem console để biết chi tiết.`, {
-          id: progressId,
-        });
+        progress.error(`Không nhập được ảnh nào (${failed} lỗi). Xem console để biết chi tiết.`);
       }
       setPending([]);
     } catch (error) {
-      toast.error("Lỗi khi nhập ảnh: " + (error as Error).message, { id: progressId });
+      progress.error("Lỗi khi nhập ảnh: " + (error as Error).message);
     } finally {
       setBusy(false);
     }

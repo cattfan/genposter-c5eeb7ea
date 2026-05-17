@@ -47,7 +47,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { PageContainer, PageHeader } from "@/components/PageHeader";
-import { EmptyState } from "@/components/ux";
+import { EmptyState, createProgressToast } from "@/components/ux";
 import { BulkImageUpload } from "@/features/data/BulkImageUpload";
 import {
   cleanImageReferenceValue,
@@ -1310,16 +1310,19 @@ function DataPage() {
 
     if (!entityId || files.length === 0) return;
 
+    const entityName = entityMap.get(entityId)?.name ?? "quán";
     setAssetActionBusy(true);
     const total = files.length;
-    const progressId = toast.loading(`Đang tải ${total} ảnh... (0/${total})`);
+    const progress = createProgressToast({
+      initialLabel: `Đang tải ${total} ảnh vào ${entityName}...`,
+      total,
+    });
     let completed = 0;
     let failed = 0;
     const newAssets: Asset[] = [];
 
-    // Upload song song với concurrency 4 để không treo UI khi user chọn nhiều
-    // ảnh cùng lúc (vòng for tuần tự cũ chậm + UI đơ với folder lớn).
-    const CONCURRENCY = 4;
+    // Pool concurrency 6 + resize trước upload để mượt với folder nhiều ảnh.
+    const CONCURRENCY = 6;
     const worker = async (file: File) => {
       try {
         const resized = await resizeImageBlob(file);
@@ -1340,7 +1343,7 @@ function DataPage() {
         console.warn("[addAssetFilesToEntity] Failed:", file.name, err);
       } finally {
         completed += 1;
-        toast.loading(`Đang tải ${total} ảnh... (${completed}/${total})`, { id: progressId });
+        progress.update(completed, "Đang tải ảnh lên server...");
       }
     };
 
@@ -1351,25 +1354,21 @@ function DataPage() {
       }
 
       if (newAssets.length > 0) {
+        progress.update(total, "Đang lưu vào database...");
         await db.assets.bulkPut(newAssets);
       }
-      const entityName = entityMap.get(entityId)?.name ?? "quán";
+
       if (failed === 0) {
-        toast.success(`Đã thêm ${newAssets.length} ảnh vào ${entityName}`, { id: progressId });
+        progress.success(`Đã thêm ${newAssets.length} ảnh vào ${entityName}`);
       } else if (newAssets.length > 0) {
-        toast.warning(
-          `Đã thêm ${newAssets.length}/${total} ảnh vào ${entityName}. ${failed} ảnh lỗi.`,
-          { id: progressId },
+        progress.success(
+          `Đã thêm ${newAssets.length}/${total} ảnh vào ${entityName} · ${failed} ảnh lỗi`,
         );
       } else {
-        toast.error(`Không thêm được ảnh nào (${failed} lỗi). Xem console để biết chi tiết.`, {
-          id: progressId,
-        });
+        progress.error(`Không thêm được ảnh nào (${failed} lỗi). Xem console để biết chi tiết.`);
       }
     } catch (error) {
-      toast.error("Lỗi thêm ảnh: " + (error instanceof Error ? error.message : String(error)), {
-        id: progressId,
-      });
+      progress.error("Lỗi thêm ảnh: " + (error instanceof Error ? error.message : String(error)));
     } finally {
       setAssetActionBusy(false);
     }
