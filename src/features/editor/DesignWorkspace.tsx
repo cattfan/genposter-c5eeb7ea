@@ -155,6 +155,7 @@ import { CanvasRuler } from "./CanvasRuler";
 import { SmartSpacing, computeSpacingLines } from "./SmartSpacing";
 import { ColorPicker } from "./ColorPicker";
 import { ElementBindingControls } from "./ElementBindingControls";
+import { LayersPanel } from "./LayersPanel";
 
 type WorkspaceMode = EditorMode;
 type AssetPanelItem = AssetItem | HeroiconAsset;
@@ -1157,8 +1158,9 @@ export function DesignWorkspace({
   >([]);
 
   useEffect(() => {
-    if (rightTab !== "properties") setRightTab("properties");
-  }, [rightTab]);
+    // rightTab giờ cho phép "properties" + "layers". Bỏ force-pin cũ.
+  }, []);
+
   const assetLibraryQuery = useLiveQuery(
     () => db.assetLibrary.orderBy("updatedAt").reverse().toArray(),
     [],
@@ -4980,8 +4982,9 @@ export function DesignWorkspace({
           {rightOpen ? (
             <aside className="min-h-0 min-w-0 overflow-hidden border-l">
               <Tabs value={rightTab} onValueChange={setRightTab} className="flex h-full flex-col">
-                <TabsList className="mx-4 mt-4 grid grid-cols-1">
+                <TabsList className="mx-4 mt-4 grid grid-cols-2">
                   <TabsTrigger value="properties">Thuộc tính</TabsTrigger>
+                  <TabsTrigger value="layers">Layers</TabsTrigger>
                 </TabsList>
                 <TabsContent
                   value="properties"
@@ -5874,6 +5877,52 @@ export function DesignWorkspace({
                       />
                     )}
                   </div>
+                </TabsContent>
+                <TabsContent
+                  value="layers"
+                  className="min-h-0 flex-1 overflow-y-auto"
+                >
+                  <LayersPanel
+                    elements={editor.activeElements}
+                    selectedIds={editor.state.selection.ids}
+                    onSelect={(ids, primaryId) => editor.setSelection(ids, primaryId)}
+                    onReorder={(activeId, overId) => {
+                      // Reorder: đặt activeId trước/sau overId dựa trên vị trí trong list.
+                      // Layers panel hiển thị reversed (top element ở trên), nên drag
+                      // "lên" = tăng zIndex = orderSelection("forward").
+                      const order = (editor.state.elementOrderByPage[editor.state.activePageId] ?? []);
+                      const activeIdx = order.indexOf(activeId);
+                      const overIdx = order.indexOf(overId);
+                      if (activeIdx < 0 || overIdx < 0) return;
+                      // Di chuyển element trong order array
+                      editor.setSelection([activeId], activeId);
+                      if (activeIdx < overIdx) {
+                        // Kéo xuống trong layers = kéo lên trong render order
+                        for (let i = 0; i < overIdx - activeIdx; i++) {
+                          editor.orderSelection("backward", [activeId]);
+                        }
+                      } else {
+                        // Kéo lên trong layers = kéo xuống trong render order
+                        for (let i = 0; i < activeIdx - overIdx; i++) {
+                          editor.orderSelection("forward", [activeId]);
+                        }
+                      }
+                    }}
+                    onToggleHidden={(id) => {
+                      const el = editor.state.elementsById[id];
+                      if (!el) return;
+                      const hidden = !(el.hidden || el.style?.hidden);
+                      editor.updateElements([id], { hidden, style: { ...el.style, hidden } });
+                    }}
+                    onToggleLocked={(id) => {
+                      const el = editor.state.elementsById[id];
+                      if (!el) return;
+                      editor.updateElements([id], { locked: !el.locked });
+                    }}
+                    onRename={(id, name) => {
+                      editor.updateElements([id], { name });
+                    }}
+                  />
                 </TabsContent>
               </Tabs>
             </aside>
