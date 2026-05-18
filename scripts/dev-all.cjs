@@ -69,6 +69,41 @@ process.on("SIGINT", () => {
 });
 process.on("SIGTERM", () => shutdown(0));
 
+// Auto-rebuild native modules nếu Node version thay đổi (tránh ERR_DLOPEN_FAILED)
+const fs = require("fs");
+const { execSync } = require("child_process");
+
+function ensureNativeModules() {
+  const dataDir = path.join(__dirname, "..", "backend", "data");
+  const versionFile = path.join(dataDir, ".node-version");
+  const currentVersion = process.version; // e.g. "v24.15.0"
+
+  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+
+  let lastVersion = "";
+  try {
+    lastVersion = fs.readFileSync(versionFile, "utf8").trim();
+  } catch {}
+
+  if (lastVersion !== currentVersion) {
+    console.log(`[dev] Node version thay đổi (${lastVersion || "chưa có"} → ${currentVersion}). Rebuild native modules...`);
+    try {
+      execSync("npm rebuild better-sqlite3", {
+        cwd: path.join(__dirname, "..", "backend"),
+        stdio: "inherit",
+      });
+    } catch (err) {
+      console.error("[dev] Rebuild failed:", err.message);
+      console.error("[dev] Thử chạy: cd backend && npm rebuild better-sqlite3");
+      process.exit(1);
+    }
+    fs.writeFileSync(versionFile, currentVersion, "utf8");
+    console.log("[dev] Rebuild xong.");
+  }
+}
+
+ensureNativeModules();
+
 console.log("[dev] Khoi dong backend (port 3001) + frontend (port 9090)...");
 
 start("backend", path.join(__dirname, "..", "backend"), ["run", "dev"], "36"); // cyan
