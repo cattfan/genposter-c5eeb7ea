@@ -107,6 +107,8 @@ if errorlevel 1 (
   echo Cai backend bi loi, thu lai voi --legacy-peer-deps...
   call npm install --legacy-peer-deps
 )
+echo Rebuild native modules cho Node hien tai...
+call npm rebuild better-sqlite3 2>nul
 popd
 if errorlevel 1 (
   set "ERROR_MSG=Cai backend loi. Kiem tra log npm phia tren."
