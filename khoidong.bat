@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 
 cd /d "%~dp0"
 
@@ -68,6 +68,23 @@ if not exist backend\node_modules (
 
 if not exist backend\data mkdir backend\data
 if not exist backend\data\blobs mkdir backend\data\blobs
+
+REM Auto-rebuild native modules khi Node version thay doi (tranh ERR_DLOPEN_FAILED)
+for /f "tokens=*" %%v in ('node -v') do set "CURRENT_NODE_VER=%%v"
+set "NODE_VER_FILE=backend\data\.node-version"
+set "NEED_REBUILD=0"
+if not exist "%NODE_VER_FILE%" set "NEED_REBUILD=1"
+if exist "%NODE_VER_FILE%" (
+  set /p LAST_NODE_VER=<"%NODE_VER_FILE%"
+  if not "!LAST_NODE_VER!"=="%CURRENT_NODE_VER%" set "NEED_REBUILD=1"
+)
+if "%NEED_REBUILD%"=="1" (
+  echo Node version thay doi (%CURRENT_NODE_VER%). Rebuild native modules...
+  pushd backend
+  call npm rebuild better-sqlite3 2>nul
+  popd
+  echo %CURRENT_NODE_VER%>"%NODE_VER_FILE%"
+)
 
 if defined CHECK_ONLY (
   echo Kiem tra khoi dong OK. Server se chay tai %APP_URL%.

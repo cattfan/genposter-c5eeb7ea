@@ -44,6 +44,8 @@ echo.
 echo Dang cap nhat thu vien backend...
 pushd backend
 call npm install
+echo Rebuild native modules cho Node hien tai...
+call npm rebuild better-sqlite3 2>nul
 popd
 if errorlevel 1 (
   echo Loi npm install backend. Kiem tra log phia tren.
