@@ -3,7 +3,7 @@
 // a glance which slots won't resolve with the currently selected data source.
 
 import { useMemo } from "react";
-import { AlertTriangle, CheckCircle2, Info, TriangleAlert } from "lucide-react";
+import { AlertTriangle, Info, TriangleAlert } from "lucide-react";
 import type { Asset, Entity, PageTemplate } from "@/models";
 import {
   validateTemplateBindings,
@@ -72,14 +72,8 @@ export function BindingIssuesPanel({
     });
   }, [template, entity, entityPool, assets, globalAssets, activeSheetName]);
 
-  const boundSlotCount = useMemo(
-    () => template?.slots.filter((slot) => !!slot.bindingPath).length ?? 0,
-    [template],
-  );
-
   if (!template) return null;
-
-  const ok = issues.length === 0;
+  if (issues.length === 0) return null;
 
   return (
     <div
@@ -91,66 +85,53 @@ export function BindingIssuesPanel({
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          {ok ? (
-            <CheckCircle2 className="size-4 text-emerald-500" />
-          ) : (
-            <TriangleAlert className="size-4 text-amber-500" />
-          )}
+          <TriangleAlert className="size-4 text-amber-500" />
           <span className={cn("text-sm font-medium", compact && "text-xs")}>
-            {ok
-              ? entity
-                ? "Mọi binding hợp lệ với dữ liệu hiện tại"
-                : "Chọn entity mẫu để kiểm tra binding"
-              : `${issues.length} binding có thể lỗi`}
+            {`${issues.length} binding có thể lỗi`}
           </span>
         </div>
-        <span className="text-[11px] text-muted-foreground">
-          {boundSlotCount} binding
-        </span>
       </div>
 
-      {issues.length > 0 ? (
-        <ul className="mt-2 space-y-1">
-          {issues.map((issue) => {
-            const levelCopy = LEVEL_COPY[issue.level];
-            const Icon = levelCopy.icon;
-            return (
-              <li key={issue.slotId}>
-                <button
-                  type="button"
-                  onClick={() => onSelectSlot?.(issue.slotId)}
-                  className={cn(
-                    "flex w-full items-start gap-2 rounded px-2 py-1.5 text-left transition-colors",
-                    onSelectSlot
-                      ? "hover:bg-muted cursor-pointer"
-                      : "cursor-default",
-                  )}
-                >
-                  <Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5 text-xs">
-                      <span
-                        className={cn(
-                          "rounded px-1.5 py-0.5 text-[10px] font-medium leading-none",
-                          levelCopy.badge,
-                        )}
-                      >
-                        {levelCopy.label}
-                      </span>
-                      <span className="truncate font-medium">
-                        {issue.slotName || issue.slotId.slice(0, 6)}
-                      </span>
-                    </div>
-                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                      {issue.message}
-                    </div>
+      <ul className="mt-2 space-y-1">
+        {issues.map((issue) => {
+          const levelCopy = LEVEL_COPY[issue.level];
+          const Icon = levelCopy.icon;
+          return (
+            <li key={issue.slotId}>
+              <button
+                type="button"
+                onClick={() => onSelectSlot?.(issue.slotId)}
+                className={cn(
+                  "flex w-full items-start gap-2 rounded px-2 py-1.5 text-left transition-colors",
+                  onSelectSlot
+                    ? "hover:bg-muted cursor-pointer"
+                    : "cursor-default",
+                )}
+              >
+                <Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 text-xs">
+                    <span
+                      className={cn(
+                        "rounded px-1.5 py-0.5 text-[10px] font-medium leading-none",
+                        levelCopy.badge,
+                      )}
+                    >
+                      {levelCopy.label}
+                    </span>
+                    <span className="truncate font-medium">
+                      {issue.slotName || issue.slotId.slice(0, 6)}
+                    </span>
                   </div>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      ) : null}
+                  <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                    {issue.message}
+                  </div>
+                </div>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
