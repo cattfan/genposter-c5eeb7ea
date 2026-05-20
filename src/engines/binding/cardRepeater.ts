@@ -393,13 +393,11 @@ function autoClusterSlots(
     explicitDataGroups.set(slot.dataGroupId, groupSlots);
     explicitDataGroupSlotIds.add(slot.slotId);
   }
-  const explicitClusters = Array.from(explicitDataGroups.entries()).flatMap(
-    ([groupId, groupSlots]) =>
-      splitSpatially(groupSlots, `dataGroup:${groupId}`).flatMap((cluster) =>
-        splitClusterByRepeatedEntityRows(cluster.key, cluster.slots).flatMap((rowCluster) =>
-          splitClusterByRepeatedAnchors(rowCluster.key, rowCluster.slots),
-        ),
-      ),
+  const explicitClusters = Array.from(explicitDataGroups.entries()).map(
+    ([groupId, groupSlots]) => ({
+      key: `dataGroup:${groupId}`,
+      slots: groupSlots,
+    }),
   );
   const autoBindable = bindable.filter((slot) => !explicitDataGroupSlotIds.has(slot.slotId));
 
@@ -414,25 +412,6 @@ function autoClusterSlots(
     } else {
       noGroup.push(s);
     }
-  }
-
-  const groupedClusters = new Map<string, Slot[]>();
-  for (const [groupId, groupSlots] of byGroup.entries()) {
-    const splits = splitSpatially(groupSlots, groupId);
-    for (const split of splits) {
-      for (const rowCluster of splitClusterByRepeatedEntityRows(split.key, split.slots)) {
-        for (const anchorCluster of splitClusterByRepeatedAnchors(
-          rowCluster.key,
-          rowCluster.slots,
-        )) {
-          groupedClusters.set(anchorCluster.key, anchorCluster.slots);
-        }
-      }
-    }
-  }
-  byGroup.clear();
-  for (const [key, value] of groupedClusters.entries()) {
-    byGroup.set(key, value);
   }
 
   // Bước 2: với slot không group, tự cluster theo gap dọc (Y)
@@ -454,6 +433,10 @@ function autoClusterSlots(
   // Bước 3: sort cluster theo Y trên→dưới rồi X trái→phải
   const entityRowClusters = new Map<string, Slot[]>();
   for (const [key, value] of byGroup.entries()) {
+    if (value.some((slot) => slot.groupId)) {
+      entityRowClusters.set(key, value);
+      continue;
+    }
     for (const split of splitClusterByRepeatedEntityRows(key, value)) {
       entityRowClusters.set(split.key, split.slots);
     }
@@ -467,6 +450,10 @@ function autoClusterSlots(
   // cùng cluster (ví dụ 2 "entity.name" đứng gần nhau), force-split bằng anchor.
   const finalClusters = new Map<string, Slot[]>();
   for (const [key, value] of byGroup.entries()) {
+    if (value.some((slot) => slot.groupId)) {
+      finalClusters.set(key, value);
+      continue;
+    }
     const anchorSplits = splitClusterByRepeatedAnchors(key, value);
     if (anchorSplits.length > 1) {
       for (const split of anchorSplits) finalClusters.set(split.key, split.slots);
