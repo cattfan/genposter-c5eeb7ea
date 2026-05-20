@@ -15,6 +15,42 @@ import { realtimeBus } from "./realtimeBus";
 
 type Querier<T> = () => Promise<T> | T;
 
+interface LiveQueryRunnerOptions {
+  maxAttempts?: number;
+  retryDelayMs?: (attempt: number) => number;
+  sleep?: (delayMs: number) => Promise<void>;
+}
+
+function defaultRetryDelayMs(attempt: number): number {
+  return Math.min(2_000, 250 * 2 ** Math.max(0, attempt - 1));
+}
+
+function sleep(delayMs: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, delayMs));
+}
+
+export async function runLiveQueryQuerier<T>(
+  querier: Querier<T>,
+  options: LiveQueryRunnerOptions = {},
+): Promise<T> {
+  const maxAttempts = options.maxAttempts ?? 4;
+  const retryDelayMs = options.retryDelayMs ?? defaultRetryDelayMs;
+  const wait = options.sleep ?? sleep;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await querier();
+    } catch (err) {
+      lastError = err;
+      if (attempt >= maxAttempts) break;
+      await wait(retryDelayMs(attempt));
+    }
+  }
+
+  throw lastError;
+}
+
 /**
  * @param querier — async function trả về data (giống Dexie useLiveQuery)
  * @param deps — dependency array cho querier (giống useEffect deps)
@@ -56,8 +92,7 @@ export function useLiveQuery<T>(
 
   useEffect(() => {
     let cancelled = false;
-    Promise.resolve()
-      .then(() => querier())
+    runLiveQueryQuerier(querier)
       .then((next) => {
         if (!cancelled) setValue(next);
       })

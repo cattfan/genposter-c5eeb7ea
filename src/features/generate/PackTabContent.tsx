@@ -95,6 +95,7 @@ import { filterRenderableAssets } from "@/engines/binding/assetImage";
 import { isDataGroupMarkerSlot } from "@/engines/binding/slotMarkers";
 import { getImageReferenceEntityIds } from "@/features/data/imageReferences";
 import { usePackBindOverrides } from "@/features/generate/usePackBindOverrides";
+import { isSlotInsideSelectionContainer } from "@/features/generate/selectionGeometry";
 import {
   downloadPng,
   downloadMultiBundleZip,
@@ -880,16 +881,6 @@ export function PackTabContent({
     const addBindable = (slot: Slot | undefined, target: Map<string, Slot>) => {
       if (slot && getSlotBindMode(slot) !== null) target.set(slot.slotId, slot);
     };
-    const slotCenterInside = (container: Slot, item: Slot) => {
-      const centerX = item.x + item.width / 2;
-      const centerY = item.y + item.height / 2;
-      return (
-        centerX >= container.x &&
-        centerX <= container.x + container.width &&
-        centerY >= container.y &&
-        centerY <= container.y + container.height
-      );
-    };
     const resolved = new Map<string, Slot>();
 
     for (const slot of selectedSlots) {
@@ -913,7 +904,7 @@ export function PackTabContent({
           !item.isUploadedBackground &&
           !isLikelyGeneratePageBackgroundSlot(item, effectiveActive) &&
           !isDataGroupMarkerSlot(item) &&
-          slotCenterInside(slot, item);
+          isSlotInsideSelectionContainer(slot, item);
         if (sameDataGroup || sameGroup || sameSection || insideSelectedContainer) {
           addBindable(item, resolved);
         }
