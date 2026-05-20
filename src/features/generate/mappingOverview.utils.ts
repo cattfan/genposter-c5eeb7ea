@@ -18,7 +18,7 @@ export interface MappingRow {
   /** Có entity nào trong sheet đang chứa giá trị cho trường này không? */
   hasDataInSheet: boolean;
   /** Slot đã bind vào field này (kèm tên slot). Có thể nhiều hơn 1. */
-  boundSlots: Array<{ slotId: string; slotName: string; dataGroupId?: string }>;
+  boundSlots: Array<{ slotId: string; slotName: string; dataGroupId?: string; groupId?: string }>;
   /** Slot có placeholder khớp ({{name_0}}) nhưng chưa bind. */
   placeholderSlots: Array<{ slotId: string; slotName: string }>;
   /**
@@ -82,14 +82,14 @@ function slotDisplayName(slot: Slot, fallback: string): string {
  * entity ngẫu nhiên cho mỗi slot → content lệch giữa các khối.
  */
 function hasDuplicateUngrouped(
-  boundSlots: ReadonlyArray<{ slotId: string; dataGroupId?: string }>,
+  boundSlots: ReadonlyArray<{ slotId: string; dataGroupId?: string; groupId?: string }>,
 ): boolean {
   if (boundSlots.length < 2) return false;
-  const groupIds = boundSlots.map((slot) => slot.dataGroupId);
+  const groupIds = boundSlots.map((slot) => slot.dataGroupId ?? slot.groupId);
   const grouped = groupIds.filter((id): id is string => !!id);
   // Nếu mọi slot có dataGroupId chung -> đã nhóm hợp lệ.
   if (grouped.length === boundSlots.length) {
-    return new Set(grouped).size > 1;
+    return false;
   }
   // Có ít nhất 1 slot chưa nhóm.
   return true;
@@ -110,7 +110,7 @@ export function buildMappingOverview(
 
   const boundByFieldId = new Map<
     string,
-    Array<{ slotId: string; slotName: string; dataGroupId?: string }>
+    Array<{ slotId: string; slotName: string; dataGroupId?: string; groupId?: string }>
   >();
   const placeholderByFieldId = new Map<string, Array<{ slotId: string; slotName: string }>>();
 
@@ -122,6 +122,7 @@ export function buildMappingOverview(
       slotId: slot.slotId,
       slotName: slotDisplayName(slot, fallbackName),
       dataGroupId: slot.dataGroupId,
+      groupId: slot.groupId,
     };
 
     const boundPath = resolveSlotEntityFieldPath(slot);
@@ -220,7 +221,7 @@ export function buildMappingOverview(
       kind: "string",
       storedInMetadata: true,
     };
-    const boundSlots: Array<{ slotId: string; slotName: string; dataGroupId?: string }> = [];
+    const boundSlots: Array<{ slotId: string; slotName: string; dataGroupId?: string; groupId?: string }> = [];
     template.slots.forEach((slot) => {
       const slotPath = resolveSlotEntityFieldPath(slot);
       if (slotPath !== bindingPath) return;
@@ -229,6 +230,7 @@ export function buildMappingOverview(
         slotId: slot.slotId,
         slotName: slotDisplayName(slot, fallbackName),
         dataGroupId: slot.dataGroupId,
+        groupId: slot.groupId,
       });
     });
     rows.push({

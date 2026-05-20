@@ -164,4 +164,33 @@ describe("buildMappingOverview", () => {
     expect(row?.hasDataInSheet).toBe(true);
     expect(row?.boundSlots.map((slot) => slot.slotId)).toEqual(["s1"]);
   });
+
+  it("does not warn when repeated fields are in separate visual groups", () => {
+    const template = makeTemplate([
+      makeSlot({ slotId: "name-1", groupId: "visual-card-1", bindingPath: "entity.name" }),
+      makeSlot({ slotId: "name-2", groupId: "visual-card-2", bindingPath: "entity.name" }),
+    ]);
+    const result = buildMappingOverview(template, [
+      makeEntity({ name: "Cafe A" }),
+      makeEntity({ name: "Cafe B" }),
+    ]);
+    const nameRow = result.rows.find((row) => row.field.id === "name");
+
+    expect(nameRow?.boundSlots.map((slot) => slot.slotId)).toEqual(["name-1", "name-2"]);
+    expect(nameRow?.duplicateUnGrouped).toBe(false);
+  });
+
+  it("still warns when repeated fields are not grouped by data or visual group", () => {
+    const template = makeTemplate([
+      makeSlot({ slotId: "name-1", bindingPath: "entity.name" }),
+      makeSlot({ slotId: "name-2", bindingPath: "entity.name" }),
+    ]);
+    const result = buildMappingOverview(template, [
+      makeEntity({ name: "Cafe A" }),
+      makeEntity({ name: "Cafe B" }),
+    ]);
+    const nameRow = result.rows.find((row) => row.field.id === "name");
+
+    expect(nameRow?.duplicateUnGrouped).toBe(true);
+  });
 });
