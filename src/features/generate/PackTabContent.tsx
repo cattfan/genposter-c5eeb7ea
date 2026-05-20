@@ -78,6 +78,10 @@ import { TextRewritePanel } from "@/features/generate/TextRewritePanel";
 import { GeneratePageEditor } from "@/features/generate/GeneratePageEditor";
 import { isLikelyGeneratePageBackgroundSlot } from "@/features/generate/backgroundGuards";
 import { autoBindPlaceholdersForDrafts } from "@/features/generate/autoBindPlaceholders";
+import {
+  buildTextSlotDisplayLabel,
+  normalizeSlotDisplayLabel,
+} from "@/features/generate/slotDisplayLabel";
 import { entityFieldOptionsForUi } from "@/engines/normalize/fieldRegistry";
 import { PackGenerateActions } from "@/features/generate/PackGenerateActions";
 import {
@@ -499,6 +503,10 @@ export function PackTabContent({
           )
         : undefined,
     [activePage, packOv, previewPageDrafts],
+  );
+  const activeBaseSlotById = useMemo(
+    () => new Map((activePage?.slots ?? []).map((slot) => [slot.slotId, slot])),
+    [activePage],
   );
 
   const globalGenerateConfig: ResolvedGeneratePageConfig = useMemo(
@@ -996,14 +1004,6 @@ export function PackTabContent({
       return true;
     });
   };
-  const normalizeSlotLabel = (label: string | undefined, fallback: string) => {
-    const value = label?.trim();
-    if (!value) return fallback;
-    if (/^text$/i.test(value)) return fallback;
-    if (/^\d+\s*,\s*\d+$/.test(value)) return fallback;
-    if (/^image$/i.test(value)) return "Ảnh";
-    return value;
-  };
   const sharedSourceSlots = useMemo(() => {
     if (selectedBindableSlots.length <= 1) return [];
     if (selectedDataGroupIds.length === 1) {
@@ -1039,18 +1039,16 @@ export function PackTabContent({
       return textBindingValue !== "_static" || slot.bindingPath === "asset.random";
     });
   const textSlotLabel = (slot: Slot, index: number) =>
-    normalizeSlotLabel(
-      slot.name?.trim() ||
-        slot.staticText?.trim() ||
-        (slot.bindingPath
-          ? TEXT_BINDING_OPTIONS.find(
-              (option) => (option.value || "_static") === textSlotBindingValue(slot),
-            )?.label
-          : undefined),
-      `Chữ ${index + 1}`,
-    );
+    buildTextSlotDisplayLabel(slot, index, {
+      baseSlot: activeBaseSlotById.get(slot.slotId),
+      bindingLabel: slot.bindingPath
+        ? TEXT_BINDING_OPTIONS.find(
+            (option) => (option.value || "_static") === textSlotBindingValue(slot),
+          )?.label
+        : undefined,
+    });
   const imageSlotLabel = (slot: Slot, index: number) =>
-    normalizeSlotLabel(
+    normalizeSlotDisplayLabel(
       slot.name?.trim() ||
         IMAGE_BINDING_OPTIONS.find((option) => option.value === imageSlotBindingValue(slot))?.label,
       `Ảnh ${index + 1}`,
@@ -1059,7 +1057,7 @@ export function PackTabContent({
     const mode = getSlotBindMode(slot);
     if (mode === "text") return textSlotLabel(slot, index);
     if (mode === "image") return imageSlotLabel(slot, index);
-    return normalizeSlotLabel(slot.name?.trim(), `Khối ${index + 1}`);
+    return normalizeSlotDisplayLabel(slot.name?.trim(), `Khối ${index + 1}`);
   };
   const slotFormatBindingKey = (slot: Slot) => {
     const mode = getSlotBindMode(slot);
