@@ -81,6 +81,7 @@ import { isLikelyGeneratePageBackgroundSlot } from "@/features/generate/backgrou
 import { autoBindPlaceholdersForDrafts, previewAutoBindForDrafts } from "@/features/generate/autoBindPlaceholders";
 import { entityFieldOptionsForUi } from "@/engines/normalize/fieldRegistry";
 import { MappingOverview } from "@/features/generate/MappingOverview";
+import { PackGenerateActions } from "@/features/generate/PackGenerateActions";
 import {
   clonePreviewPageDrafts,
   cloneTemplateDraftsWithSource,
@@ -361,7 +362,6 @@ export function PackTabContent({
     setBinding,
     clearBinding,
     resetPage,
-    resetAll,
     replaceAll,
   } = usePackBindOverrides();
   const [previewPageDrafts, setPreviewPageDrafts] = useState<PreviewPageDrafts>({});
@@ -458,11 +458,6 @@ export function PackTabContent({
     }
 
     setPreviewDraftsNoHistory(next);
-  };
-
-  const resetPreviewPageDrafts = (options: { history?: boolean } = {}) => {
-    commitPreviewPageDrafts(() => ({}), options);
-    if (options.history === false) clearPreviewDraftHistory();
   };
 
   const replacePreviewPageDrafts = (
@@ -3120,42 +3115,12 @@ export function PackTabContent({
                   </div>
                 </div>
 
-                <div className="border-t pt-3 space-y-2">
-                  <Button
-                    onClick={onGenerate}
-                    disabled={!generateReadiness.canGenerate}
-                    className="w-full"
-                    title={generateReadiness.reason}
-                  >
-                    <Sparkles className="size-4 mr-2" /> Tạo bộ ảnh
-                  </Button>
-                  <p
-                    className={
-                      "text-xs " +
-                      (generateReadiness.canGenerate ? "text-muted-foreground" : "text-destructive")
-                    }
-                  >
-                    {generateReadiness.reason}
-                  </p>
-                  {generationBaseEntities.length === 0 && (
-                    <Button asChild variant="outline" size="sm" className="w-full">
-                      <a href="/data">Nhập dữ liệu từ Google Sheet</a>
-                    </Button>
-                  )}
-                  {Object.keys(packOv).length > 0 && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        resetAll();
-                        resetPreviewPageDrafts({ history: false });
-                      }}
-                      className="w-full text-xs"
-                    >
-                      <Link2Off className="size-3 mr-1" /> Xoá toàn bộ liên kết
-                    </Button>
-                  )}
-                </div>
+                <PackGenerateActions
+                  canGenerate={generateReadiness.canGenerate}
+                  reason={generateReadiness.reason}
+                  hasEntities={generationBaseEntities.length > 0}
+                  onGenerate={onGenerate}
+                />
               </CardContent>
             </Card>
 
